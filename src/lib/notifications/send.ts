@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/service'
 import { sendEmail } from '@/lib/email/resend'
-import { sendLineNotify } from '@/lib/line/notify'
+// TODO: Implement Line Messaging API in Phase 6
+// import { sendLineNotify } from '@/lib/line/messaging'
 
 interface NotificationPayload {
   userId: string
@@ -90,21 +91,31 @@ export async function sendNotification(payload: NotificationPayload) {
     }
   }
 
-  // Line channel
-  if (settings?.line_notify_enabled && settings?.line_notify_token) {
-    promises.push(
-      sendLineNotify(settings.line_notify_token, payload.lineMessage).then((ok) => {
-        supabase.from('notification_log').insert({
-          user_id: payload.userId,
-          organization_id: payload.organizationId,
-          branch_id: payload.branchId || null,
-          notification_type: payload.type,
-          channel: 'line',
-          metric_date: payload.metricDate || null,
-          status: ok ? 'sent' : 'failed',
+  // Line Messaging API channel
+  if (settings?.line_notify_enabled) {
+    // Get user's line_user_id from profiles
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('line_user_id')
+      .eq('user_id', payload.userId)
+      .maybeSingle()
+
+    if (profile?.line_user_id) {
+      const { sendLineMessage } = await import('@/lib/line/messaging')
+      promises.push(
+        sendLineMessage(profile.line_user_id, payload.lineMessage).then((ok) => {
+          supabase.from('notification_log').insert({
+            user_id: payload.userId,
+            organization_id: payload.organizationId,
+            branch_id: payload.branchId || null,
+            notification_type: payload.type,
+            channel: 'line',
+            metric_date: payload.metricDate || null,
+            status: ok ? 'sent' : 'failed',
+          })
         })
-      })
-    )
+      )
+    }
   }
 
   await Promise.allSettled(promises)

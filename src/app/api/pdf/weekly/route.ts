@@ -30,8 +30,8 @@ export async function GET(req: NextRequest) {
   // Build CSV as simple downloadable report (PDF via @react-pdf needs server-side rendering)
   const isHotel = branch.business_type === 'accommodation'
   const headers = isHotel
-    ? ['Date', 'ADR', 'Occupancy%', 'RevPAR', 'Revenue']
-    : ['Date', 'Margin%', 'Covers', 'Avg Spend', 'Revenue']
+    ? ['วันที่', 'ADR', 'Occupancy%', 'RevPAR', 'รายได้']
+    : ['วันที่', 'Margin%', 'Covers', 'Avg Spend', 'รายได้']
 
   const rows = metrics.map((m: Record<string, unknown>) =>
     isHotel

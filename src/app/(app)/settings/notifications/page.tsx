@@ -16,7 +16,7 @@ export default function NotificationsPage() {
   const supabase = createClient()
 
   const [emailNotif, setEmailNotif] = useState(true)
-  const [lineNotify, setLineNotify] = useState(false)
+  // Line Notify removed — Messaging API in Phase 6
   const [entryReminder, setEntryReminder] = useState(true)
   const [entryReminderTime, setEntryReminderTime] = useState('22:00')
   const [morningFlashTime, setMorningFlashTime] = useState('09:00')
@@ -39,7 +39,7 @@ export default function NotificationsPage() {
       .then(({ data }: { data: any }) => {
         if (data) {
           setEmailNotif(data.email_notifications ?? true)
-          setLineNotify(data.line_notify_enabled ?? false)
+          // line_notify_enabled — removed, Messaging API in Phase 6
           setEntryReminder(data.entry_reminder_enabled ?? true)
           setEntryReminderTime(data.entry_reminder_time || '22:00')
           setMorningFlashTime(data.morning_flash_time || '09:00')
@@ -59,7 +59,7 @@ export default function NotificationsPage() {
       user_id: user.id,
       organization_id: organization.id,
       email_notifications: emailNotif,
-      line_notify_enabled: lineNotify,
+      // line_notify_enabled removed — Phase 6
       entry_reminder_enabled: entryReminder,
       entry_reminder_time: entryReminderTime,
       morning_flash_time: morningFlashTime,
@@ -84,7 +84,29 @@ export default function NotificationsPage() {
 
       <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-4">
         <Toggle label={t('emailNotifications')} checked={emailNotif} onChange={setEmailNotif} />
-        <Toggle label={t('lineNotify')} checked={lineNotify} onChange={setLineNotify} />
+
+        {/* Line Messaging API */}
+        <div style={{ padding: '4px 0' }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}>Line Notifications</span>
+              <span style={{ fontSize: 10, fontWeight: 500, padding: '1px 6px', borderRadius: 'var(--radius-pill)', background: 'var(--color-green-light)', color: 'var(--color-green-text)' }}>
+                ✓ พร้อมใช้งาน
+              </span>
+            </div>
+          </div>
+          <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-tertiary)', marginTop: 4 }}>
+            เพิ่มเพื่อน Line OA &quot;Aurasea&quot; แล้วส่งข้อความเพื่อเชื่อมต่อบัญชี
+          </p>
+          <a
+            href="https://line.me/R/ti/p/@aurasea"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ display: 'inline-block', marginTop: 8, fontSize: 12, fontWeight: 500, color: 'var(--color-accent)', textDecoration: 'none' }}
+          >
+            เพิ่มเพื่อน Line OA →
+          </a>
+        </div>
         <Toggle label={t('entryReminder')} checked={entryReminder} onChange={setEntryReminder} />
         {entryReminder && (
           <div className="ml-6">

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { sendNotification } from '@/lib/notifications/send'
 import MorningFlash from '@/lib/email/templates/morningFlash'
-import { buildMorningFlashLine } from '@/lib/line/notify'
+import { buildMorningFlashLine } from '@/lib/line/messaging'
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
