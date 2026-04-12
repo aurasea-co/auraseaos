@@ -99,7 +99,7 @@ export default function NotificationsPage() {
             เพิ่มเพื่อน Line OA &quot;Aurasea&quot; แล้วส่งข้อความเพื่อเชื่อมต่อบัญชี
           </p>
           <a
-            href="https://line.me/R/ti/p/@aurasea"
+            href="https://line.me/R/ti/p/@270cokmy"
             target="_blank"
             rel="noopener noreferrer"
             style={{ display: 'inline-block', marginTop: 8, fontSize: 12, fontWeight: 500, color: 'var(--color-accent)', textDecoration: 'none' }}

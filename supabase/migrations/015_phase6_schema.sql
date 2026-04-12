@@ -11,7 +11,5 @@ UPDATE organizations
 SET onboarding_completed_at = now()
 WHERE id = 'd45b5faa-d44e-4d3d-bc46-9b444ada147c';
 
--- 3. Ensure bovorn has superadmin access
-INSERT INTO platform_admins (user_id)
-VALUES ('2fc42b21-769a-4d3c-9403-22332f885a64')
-ON CONFLICT (user_id) DO NOTHING;
+-- 3. bovorn already exists in platform_admins with role='super_admin'
+-- No insert needed
