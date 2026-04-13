@@ -79,13 +79,12 @@ export default function EntryPage() {
 
     const table = getEntryTable(activeBranch.business_type)
     const entry = { branch_id: activeBranch.id, metric_date: date, ...data }
-    const existingId = isHotel ? existingAccom?.id : existingFnb?.id
 
-    // Use API route to bypass RLS triggers on branch_status_current
+    // Use API route with UPSERT to bypass RLS triggers
     const res = await fetch('/api/entry', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ table, entry, existingId }),
+      body: JSON.stringify({ table, entry }),
     })
     const result = await res.json()
 
@@ -101,7 +100,7 @@ export default function EntryPage() {
       await (supabase as any).from('audit_log').insert({
         actor_user_id: user.id,
         organization_id: organization.id,
-        action: existingId ? 'update_entry' : 'create_entry',
+        action: (existingAccom || existingFnb) ? 'update_entry' : 'create_entry',
         target_entity: table,
         payload: { branch_id: activeBranch.id, date, ...data },
       })

@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json()
-  const { table, entry, existingId } = body
+  const { table, entry } = body
 
   // Validate table name
   if (table !== 'accommodation_daily_metrics' && table !== 'fnb_daily_metrics') {
@@ -53,20 +53,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Access denied' }, { status: 403 })
   }
 
-  // Use service client to bypass RLS triggers on branch_status_current
+  // Use service client with UPSERT to bypass RLS triggers
   try {
-    if (existingId) {
-      const { error } = await serviceClient.from(table).update(entry).eq('id', existingId)
-      if (error) {
-        console.error('Entry update error:', error)
-        return NextResponse.json({ error: error.message }, { status: 500 })
-      }
-    } else {
-      const { error } = await serviceClient.from(table).insert(entry)
-      if (error) {
-        console.error('Entry insert error:', error)
-        return NextResponse.json({ error: error.message }, { status: 500 })
-      }
+    const { error } = await serviceClient
+      .from(table)
+      .upsert(entry, { onConflict: 'branch_id,metric_date' })
+
+    if (error) {
+      console.error('Entry upsert error:', error)
+      return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
     return NextResponse.json({ success: true })

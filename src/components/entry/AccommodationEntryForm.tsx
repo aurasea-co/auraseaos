@@ -54,13 +54,9 @@ export function AccommodationEntryForm({ existing, target, totalRooms, onSubmit,
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     await onSubmit({
-      revenue: calcs.rev,
       rooms_sold: calcs.rooms || 0,
       rooms_available: totalRooms,
-      rooms_on_books_7: 0,
-      rooms_on_books_14: 0,
-      variable_cost_per_room: 0,
-      additional_cost_today: 0,
+      revenue: calcs.rev,
       channel_direct: channelDirect ? parseInt(channelDirect) : null,
       channel_ota: channelOta ? parseInt(channelOta) : null,
       notes: notes || null,

@@ -55,13 +55,12 @@ export function FnbEntryForm({ existing, target, onSubmit, saving }: Props) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     await onSubmit({
-      revenue: calcs.salesNum,
       total_customers: calcs.coversNum || 0,
+      revenue: calcs.salesNum,
       avg_ticket: calcs.coversNum > 0 ? calcs.avgSpend : 0,
       additional_cost_today: calcs.totalCost > 0 ? calcs.totalCost : 0,
       cost_food: splitCost && calcs.food > 0 ? calcs.food : null,
       cost_nonfood: splitCost && calcs.nonfood > 0 ? calcs.nonfood : null,
-      other_cost_today: 0,
       notes: notes || null,
     })
   }
