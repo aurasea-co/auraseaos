@@ -1,4 +1,5 @@
 import { Resend } from 'resend'
+import { render } from '@react-email/render'
 import { createServiceClient } from '@/lib/supabase/service'
 
 export const EMAIL_SENDERS = {
@@ -38,11 +39,14 @@ export async function sendEmail({
   const supabase = createServiceClient()
 
   try {
+    // Render React Email to HTML first to avoid internal render issues
+    const html = await render(react)
+
     const { error } = await getResend().emails.send({
       from: from || EMAIL_SENDERS.notifications,
       to,
       subject,
-      react,
+      html,
     })
 
     if (error) throw new Error(error.message)
@@ -60,6 +64,7 @@ export async function sendEmail({
     return { success: true }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
+    const stack = err instanceof Error ? err.stack : undefined
 
     await supabase.from('notification_log').insert({
       organization_id: organizationId,
@@ -72,7 +77,7 @@ export async function sendEmail({
       error_text: message,
     })
 
-    console.error('Email send failed:', message)
+    console.error('Email send failed - full error:', { message, stack, name: (err as Error)?.name })
     return { success: false, error: message }
   }
 }
