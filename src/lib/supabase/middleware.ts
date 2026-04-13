@@ -48,8 +48,14 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // Superadmin route guard — silent redirect if not superadmin
-  if (request.nextUrl.pathname.startsWith('/superadmin') && user) {
+  // Superadmin route guard — silent redirect to /login if not super_admin
+  if (request.nextUrl.pathname.startsWith('/superadmin')) {
+    if (!user) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/login'
+      return NextResponse.redirect(url)
+    }
+
     const { createClient } = await import('@supabase/supabase-js')
     const serviceClient = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -57,15 +63,17 @@ export async function updateSession(request: NextRequest) {
     )
     const { data } = await serviceClient
       .from('platform_admins')
-      .select('user_id')
+      .select('role')
       .eq('user_id', user.id)
-      .maybeSingle()
+      .single()
 
-    if (!data) {
+    if (!data || data.role !== 'super_admin') {
       const url = request.nextUrl.clone()
       url.pathname = '/login'
       return NextResponse.redirect(url)
     }
+
+    return supabaseResponse
   }
 
   return supabaseResponse
