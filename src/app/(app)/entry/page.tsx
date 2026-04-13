@@ -79,31 +79,26 @@ export default function EntryPage() {
 
     const table = getEntryTable(activeBranch.business_type)
     const entry = { branch_id: activeBranch.id, metric_date: date, ...data }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const db = supabase as any
     const existingId = isHotel ? existingAccom?.id : existingFnb?.id
 
-    if (existingId) {
-      const { error: updateErr } = await db.from(table).update(entry).eq('id', existingId)
-      if (updateErr) {
-        console.error('Entry update failed:', updateErr.message, updateErr.details)
-        alert(`บันทึกไม่สำเร็จ: ${updateErr.message}`)
-        setSaving(false)
-        return
-      }
-    } else {
-      const { error: insertErr } = await db.from(table).insert(entry)
-      if (insertErr) {
-        console.error('Entry insert failed:', insertErr.message, insertErr.details)
-        alert(`บันทึกไม่สำเร็จ: ${insertErr.message}`)
-        setSaving(false)
-        return
-      }
+    // Use API route to bypass RLS triggers on branch_status_current
+    const res = await fetch('/api/entry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ table, entry, existingId }),
+    })
+    const result = await res.json()
+
+    if (!res.ok || result.error) {
+      console.error('Entry save failed:', result.error)
+      alert(`บันทึกไม่สำเร็จ: ${result.error}`)
+      setSaving(false)
+      return
     }
 
     if (organization) {
-      await db.from('audit_log').insert({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (supabase as any).from('audit_log').insert({
         actor_user_id: user.id,
         organization_id: organization.id,
         action: existingId ? 'update_entry' : 'create_entry',
