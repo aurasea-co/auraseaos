@@ -30,16 +30,16 @@ export async function POST(req: NextRequest) {
       branchId,
       type: 'labour_alert',
       emailSubject: `⚠ Labour cost ${labourPct.toFixed(1)}% เกินเกณฑ์ — ${branch.name}`,
-      emailReact: LabourAlert({
-        branchName: branch.name,
-        lang: 'th',
-        labourPct,
-        threshold,
-        branchType: branch.business_type,
-        occupancy,
-        covers,
-        coversTarget,
-      }),
+      emailReact: <LabourAlert
+        branchName={branch.name}
+        lang="th"
+        labourPct={labourPct}
+        threshold={threshold}
+        branchType={branch.business_type}
+        occupancy={occupancy}
+        covers={covers}
+        coversTarget={coversTarget}
+      />,
       lineMessage: `⚠ ${branch.name}: Labour cost ${labourPct.toFixed(1)}% สูงกว่าเกณฑ์ ${threshold}%`,
       metricDate: today,
     })

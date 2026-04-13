@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
         branchId: branch.id,
         type: 'missed_entry_reminder',
         emailSubject: `⚠ ยังไม่ได้กรอกข้อมูลวันนี้ — ${branch.name}`,
-        emailReact: MissedEntryReminder({ branchName: branch.name, lang: 'th', streakDays, entryUrl: 'https://auraseaos.com/entry' }),
+        emailReact: <MissedEntryReminder branchName={branch.name} lang="th" streakDays={streakDays} entryUrl="https://auraseaos.com/entry" />,
         lineMessage: `⚠ ${branch.name} ยังไม่มีการกรอกข้อมูลวันนี้\nกรอกได้ที่ https://auraseaos.com/entry`,
         metricDate: today,
       })

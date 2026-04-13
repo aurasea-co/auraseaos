@@ -33,18 +33,18 @@ export async function POST(req: NextRequest) {
       branchId,
       type: 'closing_summary',
       emailSubject: `สรุปปิดร้าน: ${branch.name} — ${dateStr}`,
-      emailReact: MorningFlash({
-        branchName: branch.name,
-        businessDate: dateStr,
-        lang: 'th',
-        branchType: 'fnb',
-        margin: metrics.margin,
-        covers: metrics.covers,
-        sales: metrics.sales,
-        recommendationText: recommendation,
-        plan: org.plan,
-        entryUrl: 'https://auraseaos.com/entry',
-      }),
+      emailReact: <MorningFlash
+        branchName={branch.name}
+        businessDate={dateStr}
+        lang="th"
+        branchType="fnb"
+        margin={metrics.margin}
+        covers={metrics.covers}
+        sales={metrics.sales}
+        recommendationText={recommendation}
+        plan={org.plan}
+        entryUrl="https://auraseaos.com/entry"
+      />,
       lineMessage: buildMorningFlashLine({
         branchName: branch.name,
         branchType: 'fnb',

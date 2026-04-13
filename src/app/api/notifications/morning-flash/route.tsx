@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
         branchId: branch.id,
         type: 'morning_flash',
         emailSubject: `สรุปเช้า: ${branch.name} — ${dateStr}`,
-        emailReact: MorningFlash(emailProps),
+        emailReact: <MorningFlash {...emailProps} />,
         lineMessage: lineMsg,
         metricDate: today,
       })
