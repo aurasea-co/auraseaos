@@ -10,6 +10,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { LocaleSwitcher } from './locale-switcher'
 import { BranchSwitcher } from './branch-switcher'
+import { AuraSeaLogo } from './aurasea-logo'
 
 const navItems = [
   { href: '/home', icon: Home, labelKey: 'home' as const },
@@ -75,8 +76,8 @@ export function MobileDrawer({
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-slate-100">
           <div>
-            <h2 className="font-bold text-slate-900">Aurasea</h2>
-            <p className="text-xs text-slate-400">{organization?.name}</p>
+            <AuraSeaLogo variant="light" size={26} />
+            <p className="text-xs text-slate-400 mt-1">{organization?.name}</p>
           </div>
           <button
             onClick={onClose}
@@ -102,7 +103,7 @@ export function MobileDrawer({
                 href={item.href}
                 className={`flex items-center gap-3 px-4 py-3 mx-2 rounded-lg transition-colors touch-target ${
                   isActive
-                    ? 'bg-blue-50 text-blue-600'
+                    ? 'bg-brand-teal-mist text-brand-teal'
                     : 'text-slate-600 hover:bg-slate-50'
                 }`}
               >

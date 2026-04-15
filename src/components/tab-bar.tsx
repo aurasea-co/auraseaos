@@ -55,10 +55,10 @@ export function TabBar() {
               style={{ gap: 2, cursor: 'pointer', textDecoration: 'none' }}
             >
               {isActive && (
-                <span style={{ position: 'absolute', top: 0, width: 20, height: 2, background: 'var(--color-accent)', borderRadius: '0 0 2px 2px' }} />
+                <span style={{ position: 'absolute', top: 0, width: 20, height: 2, background: 'var(--color-brand-teal)', borderRadius: '0 0 2px 2px' }} />
               )}
-              <Icon size={20} strokeWidth={1.5} style={{ color: isActive ? 'var(--color-accent)' : 'var(--color-text-tertiary)' }} />
-              <span style={{ fontSize: 10, fontWeight: isActive ? 500 : 400, color: isActive ? 'var(--color-accent)' : 'var(--color-text-tertiary)' }}>
+              <Icon size={20} strokeWidth={1.5} style={{ color: isActive ? 'var(--color-brand-teal)' : 'var(--color-text-tertiary)' }} />
+              <span style={{ fontSize: 10, fontWeight: isActive ? 500 : 400, color: isActive ? 'var(--color-brand-teal)' : 'var(--color-text-tertiary)' }}>
                 {t(tab.labelKey)}
               </span>
             </Link>

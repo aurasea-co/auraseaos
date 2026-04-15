@@ -2,15 +2,14 @@
 
 import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { useUser } from '@/providers/user-context'
 import { createClient } from '@/lib/supabase/client'
 import { BranchSwitcher } from './branch-switcher'
 import { MobileDrawer } from './mobile-drawer'
 import { LocaleSwitcher } from './locale-switcher'
+import { AuraSeaLogo } from './aurasea-logo'
 import { LogOut } from 'lucide-react'
 
 export function ResponsiveHeader() {
-  const { organization } = useUser()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const closeDrawer = useCallback(() => setDrawerOpen(false), [])
   const router = useRouter()
@@ -25,7 +24,7 @@ export function ResponsiveHeader() {
   return (
     <>
       <header
-        className="sticky top-0 z-50 flex items-center gap-3"
+        className="sticky top-0 z-50 flex items-center gap-3 header-bar"
         style={{
           height: 'var(--topbar-height)',
           background: 'var(--color-bg)',
@@ -33,6 +32,17 @@ export function ResponsiveHeader() {
           padding: '0 var(--page-padding-mobile)',
         }}
       >
+        <style>{`
+          @media (min-width: 768px) {
+            .header-bar {
+              background: linear-gradient(135deg, var(--color-brand-navy), var(--color-brand-deep)) !important;
+              border-bottom: none !important;
+            }
+            .header-bar .header-logo-area { display: none !important; }
+            .header-bar .header-logout { color: rgba(255,255,255,0.7) !important; }
+            .header-bar .header-logout:hover { color: #fff !important; }
+          }
+        `}</style>
         {/* Hamburger — mobile only */}
         <button
           onClick={() => setDrawerOpen(true)}
@@ -53,16 +63,9 @@ export function ResponsiveHeader() {
           ))}
         </button>
 
-        {/* Logo */}
-        <span
-          style={{
-            fontSize: 'var(--font-size-md)',
-            fontWeight: 'var(--font-weight-medium)',
-            color: 'var(--color-accent)',
-            letterSpacing: '-0.02em',
-          }}
-        >
-          {organization?.name || 'aurasea'}
+        {/* Logo — visible on mobile only, sidebar has it on desktop */}
+        <span className="header-logo-area">
+          <AuraSeaLogo variant="light" size={28} />
         </span>
 
         <div className="flex-1" />
@@ -80,7 +83,7 @@ export function ResponsiveHeader() {
         {/* Logout button — always visible */}
         <button
           onClick={handleLogout}
-          className="touch-target flex items-center justify-center"
+          className="touch-target flex items-center justify-center header-logout"
           style={{
             background: 'none',
             border: 'none',

@@ -8,6 +8,8 @@ import { useUser } from '@/providers/user-context'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { LocaleSwitcher } from './locale-switcher'
+import { AuraSeaLogo } from './aurasea-logo'
+import { CompassMark } from './compass-mark'
 import type { AppRole } from '@/lib/supabase/types'
 import { PLAN_LEVEL, PRICING, formatPrice } from '@/lib/config/pricing'
 import type { BranchType } from '@/lib/config/pricing'
@@ -62,7 +64,6 @@ export function Sidebar() {
   const pathname = usePathname()
   const { role, organization, user, plan, activeBranch } = useUser()
   const t = useTranslations('nav')
-  const tRoles = useTranslations('roles')
   const router = useRouter()
   const supabase = createClient()
 
@@ -99,21 +100,19 @@ export function Sidebar() {
         }
       `}</style>
 
-      {/* Company section */}
+      {/* Logo section */}
       <div style={{ padding: '14px 14px 10px', borderBottom: '1px solid var(--color-border)' }}>
         <div className="sidebar-expanded-only" style={{ display: 'none' }}>
-          <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-primary)' }}>{organization?.name || 'Aurasea'}</p>
-          <p style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 2 }}>{tRoles(role)}</p>
+          <AuraSeaLogo variant="light" size={28} />
+          <p style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 6 }}>{organization?.name}</p>
         </div>
         <div className="sidebar-collapsed-only items-center justify-center" style={{ display: 'none' }}>
-          <div style={{ width: 28, height: 28, borderRadius: 'var(--radius-md)', background: 'var(--color-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
-          </div>
+          <CompassMark size={28} variant="light" />
         </div>
       </div>
 
       {/* Section label */}
-      <div className="sidebar-expanded-only" style={{ display: 'none', fontSize: 10, fontWeight: 500, color: 'var(--color-text-tertiary)', letterSpacing: '0.06em', textTransform: 'uppercase' as const, padding: '14px 14px 4px' }}>Menu</div>
+      <div className="sidebar-expanded-only overline" style={{ display: 'none', padding: '14px 14px 4px' }}>Menu</div>
 
       {/* Navigation */}
       <nav className="flex-1 py-1">
@@ -143,7 +142,7 @@ export function Sidebar() {
               onMouseLeave={(e) => { if (!isActive && !item.isLocked) e.currentTarget.style.background = 'transparent' }}
             >
               {isActive && !item.isLocked && (
-                <span style={{ position: 'absolute', left: 0, top: 4, bottom: 4, width: 2.5, background: 'var(--color-accent)', borderRadius: '0 2px 2px 0' }} />
+                <span style={{ position: 'absolute', left: 0, top: 4, bottom: 4, width: 2.5, background: 'var(--color-brand-teal)', borderRadius: '0 2px 2px 0' }} />
               )}
               <Icon size={20} style={{ opacity: isActive ? 1 : 0.55, flexShrink: 0 }} />
               <span className="sidebar-expanded-only" style={{ display: 'none', flex: 1 }}>{t(item.labelKey)}</span>

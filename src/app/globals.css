@@ -5,7 +5,8 @@
 @layer base {
   :root {
     /* Typography */
-    --font-sans: 'Sarabun', 'Inter', system-ui, -apple-system, sans-serif;
+    --font-sans: 'Inter', 'Sarabun', system-ui, -apple-system, sans-serif;
+    --font-heading: 'Plus Jakarta Sans', 'Sarabun', system-ui, sans-serif;
     --font-size-xs: 11px;
     --font-size-sm: 12px;
     --font-size-base: 14px;
@@ -18,6 +19,19 @@
     --line-height-base: 1.6;
     --line-height-relaxed: 1.75;
 
+    /* Brand tokens */
+    --color-brand-teal: #1D9E75;
+    --color-brand-teal-light: #5DCAA5;
+    --color-brand-teal-mist: #E1F5EE;
+    --color-brand-ocean: #185FA5;
+    --color-brand-sky: #378ADD;
+    --color-brand-sky-light: #E6F1FB;
+    --color-brand-navy: #042C53;
+    --color-brand-deep: #04342C;
+    --color-brand-purple: #534AB7;
+    --color-brand-purple-light: #AFA9EC;
+    --color-brand-purple-mist: #EEEDFE;
+
     /* Colours — light mode */
     --color-bg: #ffffff;
     --color-bg-surface: #f7f7f5;
@@ -29,11 +43,11 @@
     --color-text-placeholder: #b0b0b0;
     --color-border: rgba(0, 0, 0, 0.08);
     --color-border-strong: rgba(0, 0, 0, 0.14);
-    --color-accent: #534AB7;
-    --color-accent-light: #EEEDFE;
+    --color-accent: var(--color-brand-purple);
+    --color-accent-light: var(--color-brand-purple-mist);
     --color-accent-text: #3C3489;
     --color-green: #0F6E56;
-    --color-green-light: #E1F5EE;
+    --color-green-light: var(--color-brand-teal-mist);
     --color-green-text: #085041;
     --color-amber: #BA7517;
     --color-amber-light: #FAEEDA;
@@ -41,8 +55,12 @@
     --color-red: #A32D2D;
     --color-red-light: #FCEBEB;
     --color-red-text: #791F1F;
-    --color-positive: #1D9E75;
+    --color-positive: var(--color-brand-teal);
     --color-negative: #A32D2D;
+    --color-primary-action: var(--color-brand-teal);
+    --color-primary-action-hover: #0F6E56;
+    --color-interactive: var(--color-brand-sky);
+    --color-ai-accent: var(--color-brand-purple);
 
     /* Spacing — 8px base grid */
     --space-1: 4px;
@@ -96,8 +114,12 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
+  h1, h2, h3, h4 {
+    font-family: var(--font-heading);
+  }
+
   *:focus-visible {
-    outline: 2px solid var(--color-accent);
+    outline: 2px solid var(--color-brand-teal-light);
     outline-offset: 2px;
     border-radius: var(--radius-sm);
   }
@@ -115,6 +137,17 @@
 /* Touch target */
 @layer utilities {
   .touch-target { min-width: 44px; min-height: 44px; }
+}
+
+/* Overline style */
+@layer utilities {
+  .overline {
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--color-brand-teal);
+  }
 }
 
 /* Time inputs */

@@ -86,7 +86,7 @@ export function HomeDashboard() {
           <Link
             href="/entry"
             className="touch-target"
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--color-accent)', color: 'white', borderRadius: 'var(--radius-lg)', padding: '16px 20px', textDecoration: 'none' }}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--color-primary-action)', color: 'white', borderRadius: 'var(--radius-lg)', padding: '16px 20px', textDecoration: 'none' }}
           >
             <div>
               <p style={{ fontSize: 'var(--font-size-md)', fontWeight: 500 }}>{t('enterData')}</p>
@@ -109,7 +109,7 @@ export function HomeDashboard() {
           <Link
             href="/entry"
             className="touch-target"
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--color-accent)', color: 'white', borderRadius: 'var(--radius-lg)', padding: '14px 20px', textDecoration: 'none' }}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--color-primary-action)', color: 'white', borderRadius: 'var(--radius-lg)', padding: '14px 20px', textDecoration: 'none' }}
           >
             <div>
               <p style={{ fontSize: 'var(--font-size-md)', fontWeight: 500 }}>{t('enterData')}</p>
@@ -203,7 +203,7 @@ export function HomeDashboard() {
           className="flex items-center justify-center gap-2 touch-target"
           style={{
             padding: '8px 16px',
-            background: 'var(--color-accent)',
+            background: 'var(--color-primary-action)',
             color: 'white',
             fontSize: 13,
             fontWeight: 500,

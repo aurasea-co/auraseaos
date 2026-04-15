@@ -19,7 +19,7 @@ const paddings = {
 
 const variantStyles: Record<string, React.CSSProperties> = {
   primary: {
-    background: 'var(--color-accent)',
+    background: 'var(--color-primary-action)',
     color: 'white',
     border: 'none',
   },
@@ -52,8 +52,8 @@ export function Button({
 }: ButtonProps) {
   const style: React.CSSProperties = {
     ...variantStyles[variant],
-    borderRadius: 'var(--radius-md)',
-    fontSize: 13,
+    borderRadius: 'var(--radius-lg)',
+    fontSize: 14,
     fontWeight: 500,
     fontFamily: 'inherit',
     padding: paddings[size],
