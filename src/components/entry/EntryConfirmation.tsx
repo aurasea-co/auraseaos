@@ -49,7 +49,7 @@ export function EntryConfirmation({ businessDateLabel, businessDateStr, isHotel,
       .in('metric_date', days)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .then(({ data }: { data: any[] | null }) => {
-        const dates = (data || []).map((d: { metric_date: string }) => d.metric_date)
+        const dates = (data || []).map((d: { metric_date: string }) => d.metric_date?.substring(0, 10))
         setStreakDays(days.map((d) => dates.includes(d)))
       })
   }, [activeBranch, supabase])

@@ -77,7 +77,7 @@ export function HomeDashboard() {
 
   // Staff view — minimal, calm
   if (role === 'staff') {
-    const todayEntered = metrics.some((m) => m.metric_date === getTodayBangkok())
+    const todayEntered = metrics.some((m) => m.metric_date?.substring(0, 10) === getTodayBangkok())
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
         {todayEntered ? (

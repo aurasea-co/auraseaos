@@ -30,7 +30,7 @@ export function EntryStatusPanel({ metrics }: EntryStatusPanelProps) {
     days.push({
       date: dateStr,
       label: formatWeekday(dateStr),
-      hasEntry: metrics.some((m) => m.metric_date === dateStr),
+      hasEntry: metrics.some((m) => m.metric_date?.substring(0, 10) === dateStr),
     })
   }
 

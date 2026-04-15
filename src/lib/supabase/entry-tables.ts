@@ -91,10 +91,15 @@ export interface UnifiedMetric {
   cost: number | null // total cost (additional_cost_today for both)
 }
 
+/** Normalize metric_date to YYYY-MM-DD (Supabase may return timestamp format) */
+function normalizeDate(d: string): string {
+  return d ? d.substring(0, 10) : d
+}
+
 export function accommodationToUnified(m: AccommodationDailyMetric): UnifiedMetric {
   const adr = m.rooms_sold && m.rooms_sold > 0 ? m.revenue / m.rooms_sold : null
   return {
-    metric_date: m.metric_date,
+    metric_date: normalizeDate(m.metric_date),
     revenue: m.revenue,
     rooms_sold: m.rooms_sold,
     adr,
@@ -107,7 +112,7 @@ export function accommodationToUnified(m: AccommodationDailyMetric): UnifiedMetr
 export function fnbToUnified(m: FnbDailyMetric): UnifiedMetric {
   const totalCost = (m.additional_cost_today || 0) + (m.other_cost_today || 0)
   return {
-    metric_date: m.metric_date,
+    metric_date: normalizeDate(m.metric_date),
     revenue: m.revenue,
     rooms_sold: null,
     adr: null,
