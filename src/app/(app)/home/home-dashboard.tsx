@@ -17,6 +17,7 @@ import {
   fnbToUnified,
   type UnifiedMetric,
 } from '@/lib/supabase/entry-tables'
+import { getTodayBangkok } from '@/lib/businessDate'
 import Link from 'next/link'
 import { ArrowRight } from 'lucide-react'
 
@@ -35,13 +36,15 @@ export function HomeDashboard() {
   const loadMetrics = useCallback(async () => {
     if (!activeBranch) return
     setLoading(true)
-    const sevenDaysAgo = new Date()
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+    const todayStr = getTodayBangkok()
+    const todayDate = new Date(todayStr + 'T00:00:00')
+    todayDate.setDate(todayDate.getDate() - 7)
+    const sevenDaysAgoStr = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`
     const table = getEntryTable(activeBranch.business_type)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db = supabase as any
     const [metricsResult, targetResult] = await Promise.all([
-      db.from(table).select('*').eq('branch_id', activeBranch.id).gte('metric_date', sevenDaysAgo.toISOString().split('T')[0]).order('metric_date', { ascending: true }),
+      db.from(table).select('*').eq('branch_id', activeBranch.id).gte('metric_date', sevenDaysAgoStr).order('metric_date', { ascending: true }),
       db.from('targets').select('adr_target, cogs_target').eq('branch_id', activeBranch.id).maybeSingle(),
     ])
     if (targetResult.data) setBranchTarget(targetResult.data)
@@ -74,7 +77,7 @@ export function HomeDashboard() {
 
   // Staff view — minimal, calm
   if (role === 'staff') {
-    const todayEntered = metrics.some((m) => m.metric_date === new Date().toISOString().split('T')[0])
+    const todayEntered = metrics.some((m) => m.metric_date === getTodayBangkok())
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
         {todayEntered ? (

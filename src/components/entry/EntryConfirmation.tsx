@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { formatCurrency, formatPercent } from '@/lib/format'
 import { getEntryTable } from '@/lib/supabase/entry-tables'
 import { Check } from 'lucide-react'
+import { getTodayBangkok } from '@/lib/businessDate'
 import Link from 'next/link'
 
 interface Props {
@@ -27,11 +28,16 @@ export function EntryConfirmation({ businessDateLabel, businessDateStr, isHotel,
 
   useEffect(() => {
     if (!activeBranch) return
+    const todayStr = getTodayBangkok()
+    const todayDate = new Date(todayStr + 'T00:00:00')
     const days: string[] = []
     for (let i = 6; i >= 0; i--) {
-      const d = new Date()
+      const d = new Date(todayDate)
       d.setDate(d.getDate() - i)
-      days.push(d.toISOString().split('T')[0])
+      const y = d.getFullYear()
+      const m = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      days.push(`${y}-${m}-${day}`)
     }
 
     const table = getEntryTable(activeBranch.business_type)

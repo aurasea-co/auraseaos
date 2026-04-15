@@ -2,20 +2,31 @@
 
 import { useTranslations } from 'next-intl'
 import { formatWeekday } from '@/lib/format'
+import { getTodayBangkok } from '@/lib/businessDate'
 
 interface EntryStatusPanelProps {
   metrics: { metric_date: string }[]
+}
+
+function toDateStr(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
 export function EntryStatusPanel({ metrics }: EntryStatusPanelProps) {
   const t = useTranslations('home')
   const tCommon = useTranslations('common')
 
+  const todayStr = getTodayBangkok()
+  const todayDate = new Date(todayStr + 'T00:00:00')
+
   const days: { date: string; label: string; hasEntry: boolean }[] = []
   for (let i = 6; i >= 0; i--) {
-    const d = new Date()
+    const d = new Date(todayDate)
     d.setDate(d.getDate() - i)
-    const dateStr = d.toISOString().split('T')[0]
+    const dateStr = toDateStr(d)
     days.push({
       date: dateStr,
       label: formatWeekday(dateStr),
