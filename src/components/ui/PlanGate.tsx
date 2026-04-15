@@ -1,6 +1,5 @@
 'use client'
 
-import { useTranslations } from 'next-intl'
 import { Lock } from 'lucide-react'
 import { useUser } from '@/providers/user-context'
 import Link from 'next/link'
@@ -16,7 +15,6 @@ interface PlanGateProps {
 
 export function PlanGate({ requiredPlan, featureName, children, branchType }: PlanGateProps) {
   const { plan, activeBranch } = useUser()
-  const t = useTranslations('planGate')
 
   if (PLAN_LEVEL[plan] >= PLAN_LEVEL[requiredPlan]) {
     return <>{children}</>
