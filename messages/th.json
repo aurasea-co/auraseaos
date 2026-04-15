@@ -151,6 +151,10 @@
     "title": "การแจ้งเตือน",
     "emailNotifications": "แจ้งเตือนทางอีเมล",
     "lineNotify": "Line Notify",
+    "lineNotifications": "Line Notifications",
+    "lineReady": "✓ พร้อมใช้งาน",
+    "lineInstructions": "เพิ่มเพื่อน Line OA \"Aurasea\" แล้วส่งข้อความเพื่อเชื่อมต่อบัญชี",
+    "lineAddFriend": "เพิ่มเพื่อน Line OA →",
     "entryReminder": "เตือนกรอกข้อมูล",
     "reminderTime": "เวลาเตือน",
     "morningFlashTime": "เวลา Morning Flash",
@@ -163,6 +167,7 @@
     "companyName": "ชื่อบริษัท",
     "type": "ประเภท",
     "plan": "แพ็กเกจ",
+    "planFormat": "{plan}",
     "branchCount": "จำนวนสาขา",
     "created": "สร้างเมื่อ",
     "typeAccommodation": "ที่พัก",
@@ -178,7 +183,10 @@
     "used": "ใช้แล้ว",
     "addBranch": "เพิ่มสาขา",
     "limitReached": "ครบจำนวนสาขาแล้ว —",
-    "upgrade": "อัปเกรดแพ็กเกจ"
+    "upgrade": "อัปเกรดแพ็กเกจ",
+    "cutoffTime": "เวลาตัดรอบธุรกิจ",
+    "cutoffHint": "ถ้ากรอกข้อมูลก่อนเวลานี้ ระบบจะนับเป็นวันก่อนหน้า",
+    "notSet": "ยังไม่ได้ตั้งค่า"
   },
   "settingsTargets": {
     "title": "เป้าหมาย",
@@ -213,7 +221,7 @@
     "confirmRemove": "ยืนยันการลบสมาชิกออกจากทีม?"
   },
   "settingsBilling": {
-    "title": "แพ็กเกจ",
+    "title": "แพ็กเกจและการชำระเงิน",
     "price": "ราคา",
     "month": "เดือน",
     "branches": "สาขา",
@@ -222,7 +230,32 @@
     "trialRemaining": "ทดลองใช้งานอีก {days} วัน",
     "upgradeTitle": "อัปเกรดแพ็กเกจ",
     "upgradeDescription": "ปลดล็อกฟีเจอร์เพิ่มเติมเพื่อธุรกิจของคุณ",
-    "contactTeam": "ติดต่อทีม Aurasea"
+    "contactTeam": "ติดต่อทีม Aurasea",
+    "contactDetail": "ชำระผ่าน PromptPay · ยืนยันภายใน 24 ชม.",
+    "contactEmailSubjectGrowth": "อัปเกรดแพลน Growth",
+    "contactEmailSubjectPro": "อัปเกรดแพลน Pro",
+    "statusActive": "ใช้งานอยู่",
+    "statusTrial": "ทดลองใช้",
+    "statusExpired": "หมดอายุ",
+    "perMonth": "/เดือน",
+    "perYear": "/ปี",
+    "annualSavingLine": "ชำระรายปี ประหยัด 2 เดือน · {annualPrice}/ปี",
+    "mostPopular": "ยอดนิยม",
+    "currentPlan": "แพลนปัจจุบัน",
+    "planDisplayFormat": "{plan}",
+    "mixedHeadline": "มีทั้งโรงแรมและร้านอาหาร?",
+    "mixedLabel": "Pro Mixed",
+    "mixedPriceNote": "{price}/เดือน · รวมทุกฟีเจอร์สำหรับทั้งสองประเภท",
+    "featuresAccommodation": {
+      "starter": ["1 สาขา", "1 manager · 2 staff", "1 คำแนะนำ/วัน", "Dashboard หลัก", "Morning flash email"],
+      "growth": ["2 สาขา", "2 managers · 5 staff", "3 คำแนะนำ/วัน", "Trends tab", "Pricing scenarios", "Channel breakdown", "Labour alert"],
+      "pro": ["3 สาขา", "ทีมไม่จำกัด", "คำแนะนำไม่จำกัด", "Labour cost tab", "Channel mix & OTA commission", "Demand calendar", "Portfolio tab", "Weekly PDF report"]
+    },
+    "featuresFnb": {
+      "starter": ["1 สาขา", "1 manager · 2 staff", "1 คำแนะนำ/วัน", "Dashboard หลัก", "Closing summary email"],
+      "growth": ["2 สาขา", "2 managers · 5 staff", "3 คำแนะนำ/วัน", "Trends tab", "Cost tab", "Food/non-food split", "COGS & Labour alert"],
+      "pro": ["3 สาขา", "ทีมไม่จำกัด", "คำแนะนำไม่จำกัด", "Labour cost tab", "Monthly P&L", "Portfolio tab", "Weekly PDF report"]
+    }
   },
   "settingsExport": {
     "title": "ส่งออกข้อมูล",

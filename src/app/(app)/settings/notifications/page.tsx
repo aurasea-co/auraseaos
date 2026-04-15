@@ -89,14 +89,14 @@ export default function NotificationsPage() {
         <div style={{ padding: '4px 0' }}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}>Line Notifications</span>
+              <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}>{t('lineNotifications')}</span>
               <span style={{ fontSize: 10, fontWeight: 500, padding: '1px 6px', borderRadius: 'var(--radius-pill)', background: 'var(--color-green-light)', color: 'var(--color-green-text)' }}>
-                ✓ พร้อมใช้งาน
+                {t('lineReady')}
               </span>
             </div>
           </div>
           <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-tertiary)', marginTop: 4 }}>
-            เพิ่มเพื่อน Line OA &quot;Aurasea&quot; แล้วส่งข้อความเพื่อเชื่อมต่อบัญชี
+            {t('lineInstructions')}
           </p>
           <a
             href="https://line.me/R/ti/p/@270cokmy"
@@ -104,7 +104,7 @@ export default function NotificationsPage() {
             rel="noopener noreferrer"
             style={{ display: 'inline-block', marginTop: 8, fontSize: 12, fontWeight: 500, color: 'var(--color-accent)', textDecoration: 'none' }}
           >
-            เพิ่มเพื่อน Line OA →
+            {t('lineAddFriend')}
           </a>
         </div>
         <Toggle label={t('entryReminder')} checked={entryReminder} onChange={setEntryReminder} />

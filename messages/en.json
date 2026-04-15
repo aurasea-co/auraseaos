@@ -151,6 +151,10 @@
     "title": "Notifications",
     "emailNotifications": "Email notifications",
     "lineNotify": "Line Notify",
+    "lineNotifications": "Line Notifications",
+    "lineReady": "✓ Ready",
+    "lineInstructions": "Add Line OA \"Aurasea\" as a friend and send a message to connect your account",
+    "lineAddFriend": "Add Line OA as friend →",
     "entryReminder": "Entry reminder",
     "reminderTime": "Reminder time",
     "morningFlashTime": "Morning flash time",
@@ -163,6 +167,7 @@
     "companyName": "Company name",
     "type": "Type",
     "plan": "Plan",
+    "planFormat": "{plan} Plan",
     "branchCount": "Branches",
     "created": "Created",
     "typeAccommodation": "Accommodation",
@@ -178,7 +183,10 @@
     "used": "used",
     "addBranch": "Add branch",
     "limitReached": "Branch limit reached —",
-    "upgrade": "Upgrade plan"
+    "upgrade": "Upgrade plan",
+    "cutoffTime": "Business day cutoff time",
+    "cutoffHint": "Entries submitted before this time count as the previous day",
+    "notSet": "Not set"
   },
   "settingsTargets": {
     "title": "Targets",
@@ -213,7 +221,7 @@
     "confirmRemove": "Confirm removing this member from the team?"
   },
   "settingsBilling": {
-    "title": "Billing",
+    "title": "Plan & Billing",
     "price": "Price",
     "month": "month",
     "branches": "Branches",
@@ -222,7 +230,32 @@
     "trialRemaining": "Trial: {days} days remaining",
     "upgradeTitle": "Upgrade your plan",
     "upgradeDescription": "Unlock more features for your business",
-    "contactTeam": "Contact Aurasea team"
+    "contactTeam": "Contact Aurasea team",
+    "contactDetail": "Pay via PromptPay · Confirmed within 24hrs",
+    "contactEmailSubjectGrowth": "Upgrade to Growth plan",
+    "contactEmailSubjectPro": "Upgrade to Pro plan",
+    "statusActive": "Active",
+    "statusTrial": "Trial",
+    "statusExpired": "Expired",
+    "perMonth": "/month",
+    "perYear": "/year",
+    "annualSavingLine": "Save 2 months with annual billing · {annualPrice}/year",
+    "mostPopular": "Most popular",
+    "currentPlan": "Current plan",
+    "planDisplayFormat": "{plan} Plan",
+    "mixedHeadline": "Running both accommodation and F&B?",
+    "mixedLabel": "Pro Mixed",
+    "mixedPriceNote": "{price}/month · All features for both business types",
+    "featuresAccommodation": {
+      "starter": ["1 branch", "1 manager · 2 staff", "1 recommendation/day", "Main dashboard", "Morning flash email"],
+      "growth": ["2 branches", "2 managers · 5 staff", "3 recommendations/day", "Trends tab", "Pricing scenarios", "Channel breakdown", "Labour alert"],
+      "pro": ["3 branches", "Unlimited team", "Unlimited recommendations", "Labour cost tab", "Channel mix & OTA commission", "Demand calendar", "Portfolio tab", "Weekly PDF report"]
+    },
+    "featuresFnb": {
+      "starter": ["1 branch", "1 manager · 2 staff", "1 recommendation/day", "Main dashboard", "Closing summary email"],
+      "growth": ["2 branches", "2 managers · 5 staff", "3 recommendations/day", "Trends tab", "Cost tab", "Food/non-food split", "COGS & Labour alert"],
+      "pro": ["3 branches", "Unlimited team", "Unlimited recommendations", "Labour cost tab", "Monthly P&L", "Portfolio tab", "Weekly PDF report"]
+    }
   },
   "settingsExport": {
     "title": "Export data",

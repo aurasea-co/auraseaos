@@ -104,7 +104,7 @@ export default function BranchesPage() {
                 </div>
                 <div>
                   <label style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-tertiary)', display: 'block', marginBottom: 4 }}>
-                    เวลาตัดรอบธุรกิจ
+                    {t('cutoffTime')}
                   </label>
                   <input
                     type="time"
@@ -113,7 +113,7 @@ export default function BranchesPage() {
                     className="touch-target"
                   />
                   <p style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginTop: 4, lineHeight: 1.5 }}>
-                    ถ้ากรอกข้อมูลก่อนเวลานี้ ระบบจะนับเป็นวันก่อนหน้า
+                    {t('cutoffHint')}
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -128,8 +128,8 @@ export default function BranchesPage() {
             ) : (
               <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-tertiary)', marginTop: 4 }}>
                 {isHotel
-                  ? `${branch.total_rooms ?? 'ยังไม่ได้ตั้งค่า'} ${branch.total_rooms ? t('rooms') : ''}`
-                  : `${branch.total_seats || 'ยังไม่ได้ตั้งค่า'} ${(branch.total_seats) ? t('seats') : ''}`
+                  ? `${branch.total_rooms ?? t('notSet')} ${branch.total_rooms ? t('rooms') : ''}`
+                  : `${branch.total_seats || t('notSet')} ${(branch.total_seats) ? t('seats') : ''}`
                 }
               </div>
             )}

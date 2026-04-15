@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useTranslations } from 'next-intl'
+import { useTranslations, useLocale } from 'next-intl'
 import { useUser } from '@/providers/user-context'
 import { createClient } from '@/lib/supabase/client'
 import { formatDate } from '@/lib/format'
@@ -13,6 +13,7 @@ export default function CompanyPage() {
   const { organization, branches, role } = useUser()
   const t = useTranslations('settingsCompany')
   const tCommon = useTranslations('common')
+  const locale = useLocale()
   const supabase = createClient()
 
   const [editing, setEditing] = useState(false)
@@ -80,9 +81,9 @@ export default function CompanyPage() {
         )}
 
         <InfoRow label={t('type')} value={typeLabel} />
-        <InfoRow label={t('plan')} value={`${organization.plan.charAt(0).toUpperCase() + organization.plan.slice(1)} Plan`} />
+        <InfoRow label={t('plan')} value={t('planFormat', { plan: organization.plan.charAt(0).toUpperCase() + organization.plan.slice(1) })} />
         <InfoRow label={t('branchCount')} value={`${branches.length}`} />
-        <InfoRow label={t('created')} value={formatDate(organization.created_at)} />
+        <InfoRow label={t('created')} value={formatDate(organization.created_at, locale)} />
       </div>
     </div>
   )
