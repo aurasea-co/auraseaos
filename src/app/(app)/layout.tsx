@@ -5,7 +5,6 @@ import { UserProvider } from '@/providers/user-context'
 import { TabBar } from '@/components/tab-bar'
 import { Sidebar } from '@/components/sidebar'
 import { ResponsiveHeader } from '@/components/responsive-header'
-import { getTranslations } from 'next-intl/server'
 
 export default async function AppLayout({
   children,
@@ -27,22 +26,10 @@ export default async function AppLayout({
     user.email || ''
   )
 
-  const t = await getTranslations('noOrg')
-
-  // If user has no organization, show a message
+  // Authenticated but not connected to any org or branch — send to account-setup
+  // (prevents redirect loop / stuck "no org" screen)
   if (!userContext.organization && !userContext.isSuperAdmin) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ padding: 'var(--page-padding-mobile)' }}>
-        <div className="text-center">
-          <h2 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 500, color: 'var(--color-text-primary)', marginBottom: 8 }}>
-            {t('title')}
-          </h2>
-          <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}>
-            {t('message')}
-          </p>
-        </div>
-      </div>
-    )
+    redirect('/account-setup')
   }
 
   return (

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { createClient } from '@/lib/supabase/client'
@@ -15,6 +16,15 @@ export default function LoginPage() {
   const supabase = createClient()
   const t = useTranslations('login')
 
+  function mapAuthError(raw: string): string {
+    const m = raw.toLowerCase()
+    if (m.includes('invalid login credentials') || m.includes('invalid credentials')) return t('errorInvalidCredentials')
+    if (m.includes('email not confirmed')) return t('errorEmailNotConfirmed')
+    if (m.includes('too many requests') || m.includes('rate limit')) return t('errorTooManyRequests')
+    if (m.includes('user not found')) return t('errorUserNotFound')
+    return t('errorGeneric')
+  }
+
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
@@ -26,7 +36,7 @@ export default function LoginPage() {
     })
 
     if (error) {
-      setError(error.message)
+      setError(mapAuthError(error.message))
       setLoading(false)
       return
     }
@@ -104,6 +114,15 @@ export default function LoginPage() {
           >
             {loading ? t('signingIn') : t('signIn')}
           </button>
+
+          <div className="text-center">
+            <Link
+              href="/forgot-password"
+              className="text-sm text-blue-600 hover:text-blue-700"
+            >
+              {t('forgotPassword')}
+            </Link>
+          </div>
         </form>
       </div>
     </div>

@@ -38,7 +38,45 @@
     "signIn": "Sign In",
     "signingIn": "Signing in...",
     "emailPlaceholder": "you@example.com",
-    "passwordPlaceholder": "••••••••"
+    "passwordPlaceholder": "••••••••",
+    "forgotPassword": "Forgot password?",
+    "errorInvalidCredentials": "Incorrect email or password",
+    "errorEmailNotConfirmed": "Please confirm your email before logging in",
+    "errorTooManyRequests": "Too many attempts — please wait 5 minutes",
+    "errorUserNotFound": "Account not found — contact your Owner for an invitation",
+    "errorGeneric": "An error occurred — please try again"
+  },
+  "forgotPassword": {
+    "title": "Reset your password",
+    "subtitle": "Enter your email and we'll send you a reset link",
+    "email": "Email",
+    "emailPlaceholder": "you@example.com",
+    "submit": "Send reset link",
+    "submitting": "Sending...",
+    "successTitle": "Check your email",
+    "successMessage": "We sent a password reset link to {email}",
+    "backToLogin": "Back to login",
+    "errorGeneric": "Something went wrong — please try again"
+  },
+  "resetPassword": {
+    "title": "Set a new password",
+    "subtitle": "Enter a new password for your account",
+    "newPassword": "New password",
+    "confirmPassword": "Confirm password",
+    "submit": "Update password",
+    "submitting": "Updating...",
+    "successTitle": "Password updated",
+    "successMessage": "You can now sign in with your new password",
+    "backToLogin": "Back to login",
+    "errorMismatch": "Passwords don't match",
+    "errorTooShort": "Password must be at least 8 characters",
+    "errorGeneric": "Something went wrong — please try again"
+  },
+  "accountSetup": {
+    "title": "We're setting up your account",
+    "message": "Your account isn't connected to any organization yet. Please ask your Owner to resend the invitation.",
+    "contact": "Or contact hello@auraseaos.com",
+    "signOut": "Sign out"
   },
   "home": {
     "greeting": "Hello {name}",

@@ -38,7 +38,45 @@
     "signIn": "เข้าสู่ระบบ",
     "signingIn": "กำลังเข้าสู่ระบบ...",
     "emailPlaceholder": "you@example.com",
-    "passwordPlaceholder": "••••••••"
+    "passwordPlaceholder": "••••••••",
+    "forgotPassword": "ลืมรหัสผ่าน?",
+    "errorInvalidCredentials": "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
+    "errorEmailNotConfirmed": "กรุณายืนยันอีเมลก่อนเข้าสู่ระบบ — ตรวจสอบ inbox ของคุณ",
+    "errorTooManyRequests": "ลองเข้าสู่ระบบบ่อยเกินไป — รอ 5 นาทีแล้วลองใหม่",
+    "errorUserNotFound": "ไม่พบบัญชีนี้ — ติดต่อ Owner เพื่อรับคำเชิญ",
+    "errorGeneric": "เกิดข้อผิดพลาด — ลองใหม่อีกครั้ง"
+  },
+  "forgotPassword": {
+    "title": "รีเซ็ตรหัสผ่าน",
+    "subtitle": "กรอกอีเมลของคุณ เราจะส่งลิงก์รีเซ็ตให้",
+    "email": "อีเมล",
+    "emailPlaceholder": "you@example.com",
+    "submit": "ส่งลิงก์รีเซ็ต",
+    "submitting": "กำลังส่ง...",
+    "successTitle": "ตรวจสอบอีเมลของคุณ",
+    "successMessage": "เราได้ส่งลิงก์รีเซ็ตรหัสผ่านไปที่ {email} แล้ว",
+    "backToLogin": "กลับไปหน้าเข้าสู่ระบบ",
+    "errorGeneric": "เกิดข้อผิดพลาด — ลองใหม่อีกครั้ง"
+  },
+  "resetPassword": {
+    "title": "ตั้งรหัสผ่านใหม่",
+    "subtitle": "กรอกรหัสผ่านใหม่สำหรับบัญชีของคุณ",
+    "newPassword": "รหัสผ่านใหม่",
+    "confirmPassword": "ยืนยันรหัสผ่าน",
+    "submit": "อัปเดตรหัสผ่าน",
+    "submitting": "กำลังอัปเดต...",
+    "successTitle": "อัปเดตรหัสผ่านแล้ว",
+    "successMessage": "คุณสามารถเข้าสู่ระบบด้วยรหัสผ่านใหม่ได้แล้ว",
+    "backToLogin": "กลับไปหน้าเข้าสู่ระบบ",
+    "errorMismatch": "รหัสผ่านไม่ตรงกัน",
+    "errorTooShort": "รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร",
+    "errorGeneric": "เกิดข้อผิดพลาด — ลองใหม่อีกครั้ง"
+  },
+  "accountSetup": {
+    "title": "กำลังตั้งค่าบัญชีของคุณ",
+    "message": "บัญชีของคุณยังไม่ได้เชื่อมต่อกับองค์กรใด กรุณาติดต่อ Owner เพื่อส่งคำเชิญใหม่",
+    "contact": "หรือติดต่อ hello@auraseaos.com",
+    "signOut": "ออกจากระบบ"
   },
   "home": {
     "greeting": "สวัสดี {name}",
