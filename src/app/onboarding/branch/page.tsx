@@ -33,6 +33,9 @@ export default function OnboardingBranch() {
       module_type: branchType,
       total_rooms: branchType === 'accommodation' ? parseInt(rooms) || null : null,
       total_seats: branchType === 'fnb' ? parseInt(seats) || null : null,
+      // SME-friendly defaults: hotels file morning/afternoon; late-night
+      // F&B venues cash out between 02:00 and 04:30 local.
+      business_day_cutoff_time: branchType === 'accommodation' ? '14:00:00' : '05:00:00',
     })
     router.push('/onboarding/targets')
   }

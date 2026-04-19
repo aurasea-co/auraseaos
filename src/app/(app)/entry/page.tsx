@@ -29,7 +29,7 @@ export default function EntryPage() {
 
   const isHotel = activeBranch?.business_type === 'accommodation'
   const totalRooms = activeBranch?.total_rooms || 0
-  const cutoffTime = activeBranch?.business_day_cutoff_time || (isHotel ? '12:00:00' : '03:00:00')
+  const cutoffTime = activeBranch?.business_day_cutoff_time || (isHotel ? '14:00:00' : '05:00:00')
 
   // Business date — uses cutoff logic
   const [date, setDate] = useState(() => getBusinessDate(cutoffTime))

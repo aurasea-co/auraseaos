@@ -26,12 +26,17 @@ function toDateStr(d: Date): string {
  * If current Bangkok time >= cutoffTime → business date = today (Bangkok)
  * If current Bangkok time < cutoffTime → business date = yesterday (Bangkok)
  *
+ * Default cutoff is 05:00 (late-night F&B closing window). Accommodation
+ * branches use 14:00 via their own stored cutoff so owners can still file
+ * "last night" mid-afternoon.
+ *
  * Examples:
- *   Crystal Café (cutoff 03:00), entry at 17:30 → today ✓
- *   Crystal Resort (cutoff 12:00), entry at 05:00 → yesterday ✓
- *   Crystal Resort (cutoff 12:00), entry at 14:00 → today ✓
+ *   F&B (cutoff 05:00), entry at 02:30 → yesterday ✓ (same-night cash-out)
+ *   F&B (cutoff 05:00), entry at 17:30 → today ✓
+ *   Hotel (cutoff 14:00), entry at 09:00 → yesterday ✓ (morning night-audit)
+ *   Hotel (cutoff 14:00), entry at 15:00 → today ✓
  */
-export function getBusinessDate(cutoffTime: string = '03:00:00'): string {
+export function getBusinessDate(cutoffTime: string = '05:00:00'): string {
   const now = nowBangkok()
 
   const [cutoffHour, cutoffMin] = cutoffTime.split(':').map(Number)

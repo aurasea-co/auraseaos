@@ -224,6 +224,8 @@
     "upgrade": "Upgrade plan",
     "cutoffTime": "Business day cutoff time",
     "cutoffHint": "Entries submitted before this time count as the previous day",
+    "cutoffHintAccommodation": "Entries before 14:00 = last night's data.\nEntries after 14:00 = tonight's data.\nIdeal for hotels that enter data in the morning.",
+    "cutoffHintFnb": "Entries before 05:00 = yesterday's data.\nEntries after 05:00 = today's data.\nIdeal for late-night venues entering data before bed.",
     "notSet": "Not set"
   },
   "settingsTargets": {

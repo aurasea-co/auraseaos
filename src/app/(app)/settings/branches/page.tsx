@@ -22,7 +22,7 @@ export default function BranchesPage() {
   const [editName, setEditName] = useState('')
   const [editRooms, setEditRooms] = useState('')
   const [editSeats, setEditSeats] = useState('')
-  const [editCutoff, setEditCutoff] = useState('03:00')
+  const [editCutoff, setEditCutoff] = useState('05:00')
   const [saving, setSaving] = useState(false)
 
   if (role !== 'owner') return null
@@ -35,7 +35,7 @@ export default function BranchesPage() {
     setEditName(branch.name)
     setEditRooms(branch.total_rooms?.toString() || '')
     setEditSeats((branch.total_seats)?.toString() || '')
-    setEditCutoff(branch.business_day_cutoff_time?.slice(0, 5) || (branch.business_type === 'accommodation' ? '12:00' : '03:00'))
+    setEditCutoff(branch.business_day_cutoff_time?.slice(0, 5) || (branch.business_type === 'accommodation' ? '14:00' : '05:00'))
   }
 
   async function handleSave(branchId: string, isHotel: boolean) {
@@ -112,8 +112,8 @@ export default function BranchesPage() {
                     onChange={(e) => setEditCutoff(e.target.value)}
                     className="touch-target"
                   />
-                  <p style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginTop: 4, lineHeight: 1.5 }}>
-                    {t('cutoffHint')}
+                  <p style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginTop: 4, lineHeight: 1.5, whiteSpace: 'pre-line' }}>
+                    {t(isHotel ? 'cutoffHintAccommodation' : 'cutoffHintFnb')}
                   </p>
                 </div>
                 <div className="flex gap-2">
