@@ -18,6 +18,12 @@ interface RecommendationCardProps {
   isHotel: boolean
   adrTarget: number
   occupancyTarget: number
+  // When provided, the F&B recommendation compares against this
+  // (typically the net margin + net target computed upstream where
+  // salary is known). Falls back to the cost-only gross margin
+  // comparison when omitted.
+  marginPctOverride?: number | null
+  marginTargetOverride?: number
 }
 
 export function RecommendationCard({
@@ -27,6 +33,8 @@ export function RecommendationCard({
   isHotel,
   adrTarget,
   occupancyTarget,
+  marginPctOverride,
+  marginTargetOverride,
 }: RecommendationCardProps) {
   const t = useTranslations('recommendations')
   const tHome = useTranslations('home')
@@ -53,7 +61,16 @@ export function RecommendationCard({
     )
   }
 
-  const rec = generateRecommendation(branch, latest, isHotel, adrTarget, occupancyTarget, t)
+  const rec = generateRecommendation(
+    branch,
+    latest,
+    isHotel,
+    adrTarget,
+    occupancyTarget,
+    t,
+    marginPctOverride,
+    marginTargetOverride,
+  )
 
   return (
     <div
@@ -85,7 +102,9 @@ function generateRecommendation(
   adrTarget: number,
   occupancyTarget: number,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  t: any
+  t: any,
+  marginPctOverride?: number | null,
+  marginTargetOverride?: number,
 ): { text: string; reason?: string } {
   if (!latest) return { text: t('onTrack') }
 
@@ -103,9 +122,17 @@ function generateRecommendation(
     return { text: `${totalRooms - (latest.rooms_sold || 0)} rooms — ${t('adjustPricing')}`, reason: `Occupancy ${formatPercent(occPct)} (target ${formatPercent(occupancyTarget)})` }
   }
 
-  const marginPct = latest.revenue > 0 && latest.cost != null ? ((latest.revenue - latest.cost) / latest.revenue) * 100 : null
-  if (marginPct != null && marginPct < 30) {
-    return { text: t('marginLow'), reason: `Gross Margin ${formatPercent(marginPct)} (target 32%)` }
+  // Prefer net margin (computed upstream where salary is known) over
+  // the local cost-only gross margin. Falling back to gross keeps the
+  // card working for branches that haven't configured salary yet.
+  const marginPct = marginPctOverride != null
+    ? marginPctOverride
+    : latest.revenue > 0 && latest.cost != null
+    ? ((latest.revenue - latest.cost) / latest.revenue) * 100
+    : null
+  const marginTarget = marginTargetOverride ?? 32
+  if (marginPct != null && marginPct < marginTarget - 2) {
+    return { text: t('marginLow'), reason: `Margin ${formatPercent(marginPct)} (target ${formatPercent(marginTarget)})` }
   }
   if (latest.customers != null && latest.customers < (branch.total_seats || 75)) {
     return { text: t('coversLow'), reason: `${latest.customers} covers (target ${branch.total_seats || 75})` }

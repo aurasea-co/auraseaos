@@ -18,6 +18,7 @@ import {
   type UnifiedMetric,
 } from '@/lib/supabase/entry-tables'
 import { getTodayBangkok, toBangkokDateStr } from '@/lib/businessDate'
+import { calculateNetMargin, calculateGrossMarginStrict } from '@/lib/calculations/fnb'
 import Link from 'next/link'
 import { ArrowRight } from 'lucide-react'
 
@@ -33,7 +34,9 @@ export function HomeDashboard() {
     labour_target: number
     covers_target: number
     avg_spend_target: number
-  }>({ adr_target: 0, cogs_target: 32, occupancy_target: 80, labour_target: 0, covers_target: 0, avg_spend_target: 0 })
+    operating_days: number
+  }>({ adr_target: 0, cogs_target: 32, occupancy_target: 80, labour_target: 0, covers_target: 0, avg_spend_target: 0, operating_days: 26 })
+  const [monthlySalary, setMonthlySalary] = useState<number>(0)
   const [loading, setLoading] = useState(true)
   const [lastFetched, setLastFetched] = useState<Date | null>(null)
   const supabase = createClient()
@@ -53,7 +56,7 @@ export function HomeDashboard() {
     const [metricsResult, targetResult] = await Promise.all([
       db.from(table).select('*').eq('branch_id', activeBranch.id).gte('metric_date', sevenDaysAgoStr).order('metric_date', { ascending: true }),
       db.from('targets')
-        .select('adr_target, cogs_target, occupancy_target, labour_target, covers_target, avg_spend_target')
+        .select('adr_target, cogs_target, occupancy_target, labour_target, covers_target, avg_spend_target, operating_days')
         .eq('branch_id', activeBranch.id)
         .maybeSingle(),
     ])
@@ -65,14 +68,24 @@ export function HomeDashboard() {
         labour_target: targetResult.data.labour_target || 0,
         covers_target: targetResult.data.covers_target || 0,
         avg_spend_target: targetResult.data.avg_spend_target || 0,
+        operating_days: targetResult.data.operating_days || 26,
       })
+    }
+    // Salary lives on the owner-only column, so fetch it separately
+    // with the safe wrapper (role === owner gets the value; manager
+    // gets nothing and the UI falls back to gross margin + prompt).
+    if (role === 'owner' || role === 'superadmin') {
+      const salaryResult = await db.from('targets').select('monthly_salary').eq('branch_id', activeBranch.id).maybeSingle()
+      setMonthlySalary(Number(salaryResult.data?.monthly_salary) || 0)
+    } else {
+      setMonthlySalary(0)
     }
     const rows = metricsResult.data || []
     const unified = activeBranch.business_type === 'accommodation' ? rows.map(accommodationToUnified) : rows.map(fnbToUnified)
     setMetrics(unified)
     setLastFetched(new Date())
     setLoading(false)
-  }, [activeBranch, supabase])
+  }, [activeBranch, supabase, role])
 
   useEffect(() => { loadMetrics() }, [loadMetrics])
   const handleRefresh = useCallback(async () => { await loadMetrics() }, [loadMetrics])
@@ -85,7 +98,28 @@ export function HomeDashboard() {
   const totalRooms = activeBranch.total_rooms || 0
   const adrTarget = branchTarget.adr_target || 0
   const occupancyPct = latest && totalRooms > 0 && latest.rooms_sold ? Math.round((latest.rooms_sold / totalRooms) * 100) : null
-  const marginPct = latest && latest.revenue > 0 && latest.cost != null ? Math.round(((latest.revenue - latest.cost) / latest.revenue) * 100) : null
+  // Margin mode for F&B: net (after salary) if we have both salary and
+  // operating days, otherwise gross with a Settings prompt. Net is the
+  // number owners actually care about; gross is a fallback, not equal.
+  const operatingDays = branchTarget.operating_days || 26
+  const netMarginMode: 'net' | 'gross' = !isHotel && monthlySalary > 0 && operatingDays > 0 ? 'net' : 'gross'
+  const marginPct = latest
+    ? netMarginMode === 'net'
+      ? calculateNetMargin(latest.revenue, latest.cost, monthlySalary, operatingDays)
+      : calculateGrossMarginStrict(latest.revenue, latest.cost)
+    : null
+  // Net margin target = gross margin target minus the average payroll
+  // share of revenue. For display only — no need to recompute weekly.
+  const grossMarginTarget = 100 - branchTarget.cogs_target
+  const avgRevenueForSalaryShare = metrics.length > 0
+    ? metrics.reduce((s, m) => s + (m.revenue || 0), 0) / metrics.length
+    : 0
+  const salarySharePct = netMarginMode === 'net' && avgRevenueForSalaryShare > 0
+    ? (monthlySalary / operatingDays / avgRevenueForSalaryShare) * 100
+    : 0
+  const marginTarget = netMarginMode === 'net'
+    ? Math.max(0, grossMarginTarget - salarySharePct)
+    : grossMarginTarget
 
   function getStatus(value: number | null, target: number, threshold = 5): 'green' | 'amber' | 'red' | 'neutral' {
     if (value == null) return 'neutral'
@@ -127,10 +161,12 @@ export function HomeDashboard() {
     const occupancyTarget = branchTarget.occupancy_target || 80
     const coversTarget = branchTarget.covers_target || 0
     const avgSpendTarget = branchTarget.avg_spend_target || 0
-    const marginTarget = 100 - (branchTarget.cogs_target || 32)
+    // Managers don't have salary visibility → use the outer marginTarget
+    // which falls back to gross target when monthlySalary is 0.
+    const managerMarginTarget = marginTarget
     const roomsAvailable = totalRooms && latest?.rooms_sold != null ? totalRooms - latest.rooms_sold : totalRooms
     const adrGapVal = latest?.adr != null ? (latest.adr - adrTarget) : 0
-    const marginGapVal = marginPct != null ? (marginPct - marginTarget) : 0
+    const marginGapVal = marginPct != null ? (marginPct - managerMarginTarget) : 0
     const coversGapVal = latest?.customers != null ? (latest.customers - coversTarget) : 0
     const recommendation = latest
       ? getManagerRecommendation({
@@ -142,7 +178,7 @@ export function HomeDashboard() {
           occupancyPct: occupancyPct || 0,
           occupancyTarget,
           marginPct,
-          marginTarget,
+          marginTarget: managerMarginTarget,
           covers: latest.customers || 0,
           coversTarget,
           avgTicket: latest.avg_ticket || 0,
@@ -215,7 +251,7 @@ export function HomeDashboard() {
             ) : (
               <>
                 <KpiCard
-                  label="Gross Margin"
+                  label={netMarginMode === 'net' ? t('marginAfterSalary') : t('marginExclSalary')}
                   value={marginPct != null ? formatPercent(marginPct) : '-'}
                   target={
                     marginPct != null
@@ -224,8 +260,8 @@ export function HomeDashboard() {
                         : `เหนือเป้า ${Math.round(marginGapVal)}pts`
                       : undefined
                   }
-                  subLabel={`เป้า ${marginTarget}%`}
-                  status={getStatus(marginPct, marginTarget)}
+                  subLabel={`${tCommon('target')} ${Math.round(managerMarginTarget)}%`}
+                  status={getStatus(marginPct, managerMarginTarget)}
                   primary
                 />
                 <KpiCard
@@ -303,6 +339,8 @@ export function HomeDashboard() {
           branch={activeBranch}
           latest={latest ? { revenue: latest.revenue, adr: latest.adr, rooms_sold: latest.rooms_sold, customers: latest.customers, cost: latest.cost } : null}
           plan={plan} isHotel={isHotel} adrTarget={adrTarget} occupancyTarget={80}
+          marginPctOverride={!isHotel ? marginPct : undefined}
+          marginTargetOverride={!isHotel ? marginTarget : undefined}
         />
 
         {/* KPI cards grid */}
@@ -321,7 +359,14 @@ export function HomeDashboard() {
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-            <KpiCard label={t('grossMargin')} value={marginPct != null ? formatPercent(marginPct) : '-'} target={`${tCommon('target')} 32%`} status={getStatus(marginPct, 32)} primary />
+            <KpiCard
+              label={netMarginMode === 'net' ? t('marginAfterSalary') : t('marginExclSalary')}
+              value={marginPct != null ? formatPercent(marginPct) : '-'}
+              target={`${tCommon('target')} ${Math.round(marginTarget)}%`}
+              subLabel={netMarginMode === 'gross' ? t('setSalaryPrompt') : undefined}
+              status={getStatus(marginPct, marginTarget)}
+              primary
+            />
             <KpiCard label={t('covers')} value={latest?.customers?.toLocaleString() || '-'} status="neutral" />
             <KpiCard label={t('sales')} value={latest?.revenue ? formatCurrency(latest.revenue) : '-'} status="neutral" />
             <KpiCard label={t('avgSpend')} value={latest?.avg_ticket ? formatCurrency(latest.avg_ticket) : '-'} status="neutral" />
@@ -332,7 +377,17 @@ export function HomeDashboard() {
         {isHotel ? (
           <SparklineChart label={t('adr7days')} data={metrics.map((m) => ({ date: m.metric_date, value: m.adr || 0 }))} target={adrTarget} formatValue={(v) => formatCurrency(v)} />
         ) : (
-          <SparklineChart label={t('margin7days')} data={metrics.map((m) => ({ date: m.metric_date, value: m.revenue > 0 && m.cost != null ? Math.round(((m.revenue - m.cost) / m.revenue) * 100) : 0 }))} target={32} formatValue={(v) => formatPercent(v)} />
+          <SparklineChart
+            label={t('margin7days')}
+            data={metrics.map((m) => {
+              const net = netMarginMode === 'net'
+                ? calculateNetMargin(m.revenue, m.cost, monthlySalary, operatingDays)
+                : calculateGrossMarginStrict(m.revenue, m.cost)
+              return { date: m.metric_date, value: net ?? 0 }
+            })}
+            target={Math.round(marginTarget)}
+            formatValue={(v) => formatPercent(v)}
+          />
         )}
 
         {/* Entry status */}
