@@ -35,6 +35,18 @@ export async function POST(req: NextRequest) {
   const results: { userId: string; status: string }[] = []
 
   for (const setting of settingsList || []) {
+    // Role filter: morning flash is for owner + manager only.
+    // Staff (branch_members) and any user without an organization_members row
+    // are excluded.
+    const { data: membership } = await supabase
+      .from('organization_members')
+      .select('role')
+      .eq('user_id', setting.user_id)
+      .eq('organization_id', setting.organization_id)
+      .maybeSingle()
+
+    if (membership?.role !== 'owner' && membership?.role !== 'manager') continue
+
     // Check not already sent today
     const { data: alreadySent } = await supabase
       .from('notification_log')

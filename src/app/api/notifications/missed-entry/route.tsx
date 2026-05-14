@@ -3,7 +3,21 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { sendNotification } from '@/lib/notifications/send'
 import MissedEntryReminder from '@/lib/email/templates/missedEntryReminder'
 
+// Entry reminders are turned OFF for all roles (owner, manager, staff) per the
+// May 2026 notification strategy. The route is preserved (not deleted) so any
+// residual cron invocation no-ops with 200 instead of 404. The cron entry has
+// also been removed from vercel.json.
+//
+// To re-enable: set MISSED_ENTRY_REMINDERS_ENABLED=true in the Vercel env AND
+// re-add the cron entry to vercel.json. The original implementation below
+// stays intact and runs when the env var is set.
+const MISSED_ENTRY_ENABLED = process.env.MISSED_ENTRY_REMINDERS_ENABLED === 'true'
+
 export async function POST(req: NextRequest) {
+  if (!MISSED_ENTRY_ENABLED) {
+    return NextResponse.json({ ok: true, disabled: 'entry reminders are off for all roles' })
+  }
+
   console.log('missed-entry route called at', new Date().toISOString())
 
   const authHeader = req.headers.get('authorization')

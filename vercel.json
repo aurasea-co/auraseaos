@@ -2,15 +2,11 @@
   "crons": [
     {
       "path": "/api/notifications/morning-flash",
-      "schedule": "0 2 * * *"
-    },
-    {
-      "path": "/api/notifications/missed-entry",
-      "schedule": "0 15 * * *"
+      "schedule": "0 0 * * *"
     },
     {
       "path": "/api/notifications/weekly-report",
-      "schedule": "0 0 * * 1"
+      "schedule": "0 0 * * 0"
     }
   ]
 }

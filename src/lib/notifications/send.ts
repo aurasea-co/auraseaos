@@ -93,17 +93,17 @@ export async function sendNotification(payload: NotificationPayload) {
 
   // Line Messaging API channel
   if (settings?.line_notify_enabled) {
-    // Get user's line_user_id from profiles
+    // Get user's line_id from profiles
     const { data: profile } = await supabase
       .from('profiles')
-      .select('line_user_id')
+      .select('line_id')
       .eq('user_id', payload.userId)
       .maybeSingle()
 
-    if (profile?.line_user_id) {
+    if (profile?.line_id) {
       const { sendLineMessage } = await import('@/lib/line/messaging')
       promises.push(
-        sendLineMessage(profile.line_user_id, payload.lineMessage).then((ok) => {
+        sendLineMessage(profile.line_id, payload.lineMessage).then((ok) => {
           supabase.from('notification_log').insert({
             user_id: payload.userId,
             organization_id: payload.organizationId,
