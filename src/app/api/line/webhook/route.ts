@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
 }
 
 async function handleFollow(lineUserId: string) {
-  const linkUrl = `https://auraseaos.com/api/line/link?lineUserId=${Buffer.from(lineUserId).toString('base64')}`
+  const linkUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/line/link?lineUserId=${Buffer.from(lineUserId).toString('base64')}`
 
   await sendLineFlexMessage(lineUserId, 'ยินดีต้อนรับสู่ Aurasea', {
     type: 'bubble',
@@ -64,12 +64,12 @@ async function handleFollow(lineUserId: string) {
 async function handleMessage(lineUserId: string, text: string, replyToken: string) {
   // Check if user is already linked
   const supabase = createServiceClient()
-  const { data: profile } = await supabase.from('profiles').select('user_id').eq('line_user_id', lineUserId).maybeSingle()
+  const { data: profile } = await supabase.from('profiles').select('user_id').eq('line_id', lineUserId).maybeSingle()
 
   if (profile) {
     await replyLineMessage(replyToken, 'บัญชี Aurasea ของคุณเชื่อมต่อแล้ว ✓\nคุณจะได้รับสรุปธุรกิจทุกเช้าผ่าน Line')
   } else {
-    const linkUrl = `https://auraseaos.com/api/line/link?lineUserId=${Buffer.from(lineUserId).toString('base64')}`
+    const linkUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/line/link?lineUserId=${Buffer.from(lineUserId).toString('base64')}`
     await replyLineMessage(replyToken, `กรุณาเชื่อมต่อบัญชี Aurasea ก่อน:\n${linkUrl}`)
   }
 }

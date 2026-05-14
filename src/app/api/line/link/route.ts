@@ -20,11 +20,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(new URL(`/login?returnTo=${encodeURIComponent(returnUrl)}`, req.url))
   }
 
-  // Save line_user_id to profiles
+  // Save line_id to profiles
   const serviceClient = createServiceClient()
   await serviceClient
     .from('profiles')
-    .upsert({ user_id: user.id, line_user_id: lineUserId }, { onConflict: 'user_id' })
+    .upsert({ user_id: user.id, line_id: lineUserId }, { onConflict: 'user_id' })
 
   // Also enable Line notifications
   await serviceClient
