@@ -17,6 +17,7 @@ export default function NotificationsPage() {
 
   const [emailNotif, setEmailNotif] = useState(true)
   // Line Notify removed — Messaging API in Phase 6
+  const [lineConnected, setLineConnected] = useState(false)
   const [entryReminder, setEntryReminder] = useState(true)
   const [entryReminderTime, setEntryReminderTime] = useState('22:00')
   const [morningFlashTime, setMorningFlashTime] = useState('09:00')
@@ -47,6 +48,17 @@ export default function NotificationsPage() {
           setCogsAlert(data.cogs_alert_enabled ?? false)
           setWeeklyReport(data.weekly_report_enabled ?? false)
         }
+      })
+
+    // Profile.line_id presence drives the LINE status badge: a non-null
+    // value means the LINE OA has been linked to this account.
+    db.from('profiles')
+      .select('line_id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .then(({ data }: { data: any }) => {
+        setLineConnected(!!data?.line_id)
       })
   }, [user.id, organization, supabase])
 
@@ -91,21 +103,25 @@ export default function NotificationsPage() {
             <div className="flex items-center gap-2">
               <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}>{t('lineNotifications')}</span>
               <span style={{ fontSize: 10, fontWeight: 500, padding: '1px 6px', borderRadius: 'var(--radius-pill)', background: 'var(--color-green-light)', color: 'var(--color-green-text)' }}>
-                {t('lineReady')}
+                {lineConnected ? t('lineConnected') : t('lineReady')}
               </span>
             </div>
           </div>
-          <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-tertiary)', marginTop: 4 }}>
-            {t('lineInstructions')}
-          </p>
-          <a
-            href="https://line.me/R/ti/p/@270cokmy"
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ display: 'inline-block', marginTop: 8, fontSize: 12, fontWeight: 500, color: 'var(--color-accent)', textDecoration: 'none' }}
-          >
-            {t('lineAddFriend')}
-          </a>
+          {!lineConnected && (
+            <>
+              <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-tertiary)', marginTop: 4 }}>
+                {t('lineInstructions')}
+              </p>
+              <a
+                href="https://line.me/R/ti/p/@270cokmy"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: 'inline-block', marginTop: 8, fontSize: 12, fontWeight: 500, color: 'var(--color-accent)', textDecoration: 'none' }}
+              >
+                {t('lineAddFriend')}
+              </a>
+            </>
+          )}
         </div>
         <Toggle label={t('entryReminder')} checked={entryReminder} onChange={setEntryReminder} />
         {entryReminder && (
