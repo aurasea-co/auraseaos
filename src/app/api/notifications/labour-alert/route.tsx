@@ -18,13 +18,29 @@ export async function POST(req: NextRequest) {
   const { data: branch } = await supabase.from('branches').select('name, business_type').eq('id', branchId).single()
   if (!branch) return NextResponse.json({ error: 'Branch not found' }, { status: 404 })
 
+  // Per-org 24h throttle: at most one successful labour alert per organization
+  // every 24 hours, regardless of branch. Prevents alert spam when multiple
+  // branches breach the threshold on the same day or when this endpoint is
+  // re-invoked within the window. `status = 'sent'` so a failed delivery does
+  // not lock out a legitimate retry.
+  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const { data: recentAlert } = await supabase
+    .from('notification_log')
+    .select('id')
+    .eq('organization_id', organizationId)
+    .eq('notification_type', 'labour_alert')
+    .eq('status', 'sent')
+    .gte('sent_at', twentyFourHoursAgo)
+    .limit(1)
+    .maybeSingle()
+
+  if (recentAlert) {
+    return NextResponse.json({ throttled: true, reason: 'labour_alert sent within last 24h for this org' })
+  }
+
   const { data: owners } = await supabase.from('organization_members').select('user_id').eq('organization_id', organizationId).eq('role', 'owner')
 
   for (const owner of owners || []) {
-    // Check not already sent today
-    const { data: alreadySent } = await supabase.from('notification_log').select('id').eq('user_id', owner.user_id).eq('notification_type', 'labour_alert').eq('metric_date', today).eq('branch_id', branchId).maybeSingle()
-    if (alreadySent) continue
-
     await sendNotification({
       userId: owner.user_id,
       organizationId,

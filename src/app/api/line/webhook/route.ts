@@ -67,7 +67,8 @@ async function handleMessage(lineUserId: string, text: string, replyToken: strin
   const { data: profile } = await supabase.from('profiles').select('user_id').eq('line_id', lineUserId).maybeSingle()
 
   if (profile) {
-    await replyLineMessage(replyToken, 'บัญชี Aurasea ของคุณเชื่อมต่อแล้ว ✓\nคุณจะได้รับสรุปธุรกิจทุกเช้าผ่าน Line')
+    // Already connected — do not send the link again, just confirm status.
+    await replyLineMessage(replyToken, 'บัญชี Aurasea ของคุณเชื่อมต่อแล้ว ✅\nรับสรุปธุรกิจทุกเช้า 7:00 น.')
   } else {
     const linkUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/line/link?lineUserId=${Buffer.from(lineUserId).toString('base64')}`
     await replyLineMessage(replyToken, `กรุณาเชื่อมต่อบัญชี Aurasea ก่อน:\n${linkUrl}`)

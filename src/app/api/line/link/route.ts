@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
+import { sendLineMessage } from '@/lib/line/messaging'
 
 export async function GET(req: NextRequest) {
   const lineUserIdB64 = req.nextUrl.searchParams.get('lineUserId')
@@ -33,6 +34,14 @@ export async function GET(req: NextRequest) {
       { user_id: user.id, organization_id: (await serviceClient.from('organization_members').select('organization_id').eq('user_id', user.id).limit(1).single()).data?.organization_id, line_notify_enabled: true },
       { onConflict: 'user_id,organization_id' }
     )
+
+  // Confirm connection back to the user's LINE chat. Best-effort: link is
+  // already persisted at this point, so a delivery failure here must not
+  // block the redirect.
+  await sendLineMessage(
+    lineUserId,
+    'เชื่อมต่อสำเร็จ ✅\nคุณจะได้รับสรุปธุรกิจทุกเช้า 7:00 น.\nหากต้องการยกเลิก ไปที่ Settings > Notifications'
+  )
 
   return NextResponse.redirect(new URL('/settings/notifications?line=connected', req.url))
 }
