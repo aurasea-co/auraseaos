@@ -90,27 +90,36 @@ async function handleMorningFlash(req: NextRequest) {
     // Per-channel dedup. A successful row on a channel blocks that channel
     // only — LINE and email are tracked independently so a partial failure
     // (e.g. LINE succeeded, email Resend was down) can be retried for the
-    // failed half on the next cron tick.
-    const [lineDedup, emailDedup] = await Promise.all([
-      supabase
-        .from('notification_log')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', setting.user_id)
-        .eq('notification_type', 'morning_flash')
-        .eq('channel', 'line')
-        .eq('status', 'sent')
-        .eq('metric_date', today),
-      supabase
-        .from('notification_log')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', setting.user_id)
-        .eq('notification_type', 'morning_flash')
-        .eq('channel', 'email')
-        .eq('status', 'sent')
-        .eq('metric_date', today),
-    ])
-    const lineAlreadySent = (lineDedup.count ?? 0) > 0
-    const emailAlreadySent = (emailDedup.count ?? 0) > 0
+    // failed half on the next cron tick. `?force=true` (or x-force-resend
+    // header) bypasses dedup entirely — useful for testing delivery from
+    // the Vercel UI without having to wipe notification_log rows first.
+    const forceParam = req.nextUrl.searchParams.get('force') === 'true' || req.headers.get('x-force-resend') === 'true'
+    let lineAlreadySent = false
+    let emailAlreadySent = false
+    if (!forceParam) {
+      const [lineDedup, emailDedup] = await Promise.all([
+        supabase
+          .from('notification_log')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', setting.user_id)
+          .eq('notification_type', 'morning_flash')
+          .eq('channel', 'line')
+          .eq('status', 'sent')
+          .eq('metric_date', today),
+        supabase
+          .from('notification_log')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', setting.user_id)
+          .eq('notification_type', 'morning_flash')
+          .eq('channel', 'email')
+          .eq('status', 'sent')
+          .eq('metric_date', today),
+      ])
+      lineAlreadySent = (lineDedup.count ?? 0) > 0
+      emailAlreadySent = (emailDedup.count ?? 0) > 0
+    } else {
+      console.log(`[morning-flash] force=true — bypassing dedup for user=${setting.user_id}`)
+    }
 
     if (lineAlreadySent && emailAlreadySent) {
       console.log(`[morning-flash] skip user=${setting.user_id} — both channels delivered today`)
