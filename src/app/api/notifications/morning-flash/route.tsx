@@ -71,7 +71,7 @@ async function handleMorningFlash(req: NextRequest) {
       settingsByKey.set(key, { user_id, organization_id, email_notifications: true, line_notify_enabled: false })
     }
   })
-  const settingsList = [...settingsByKey.values()]
+  const settingsList = Array.from(settingsByKey.values())
   console.log(`[morning-flash] recipients: ${settingsList.length} (line=${lineSettings?.length ?? 0}, email-only=${settingsList.length - (lineSettings?.length ?? 0)})`)
 
   const results: { userId: string; status: string }[] = []
