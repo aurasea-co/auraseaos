@@ -65,12 +65,12 @@ async function handleMorningFlash(req: NextRequest) {
   for (const s of lineSettings || []) {
     settingsByKey.set(`${s.user_id}:${s.organization_id}`, s)
   }
-  for (const key of emailOptIn) {
+  emailOptIn.forEach((key) => {
     if (!settingsByKey.has(key)) {
       const [user_id, organization_id] = key.split(':')
       settingsByKey.set(key, { user_id, organization_id, email_notifications: true, line_notify_enabled: false })
     }
-  }
+  })
   const settingsList = [...settingsByKey.values()]
   console.log(`[morning-flash] recipients: ${settingsList.length} (line=${lineSettings?.length ?? 0}, email-only=${settingsList.length - (lineSettings?.length ?? 0)})`)
 
