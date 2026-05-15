@@ -92,18 +92,24 @@ async function handleMorningFlash(req: NextRequest) {
       continue
     }
 
-    // Check not already sent today. Count-based so existing logs with
-    // multiple rows for the same user-date (e.g. from earlier multi-branch
-    // runs) don't crash maybeSingle().
+    // Dedup the LINE delivery only — a successful channel='line' row for
+    // today proves the user already received the push, so a second cron
+    // run must skip. Email log rows (per branch) do NOT block re-runs;
+    // they have their own per-(user, branch, day) shape and the email
+    // path handles retries through its own daily cap. Failed LINE rows
+    // (status='failed') also do not block, so a flaky LINE API call can
+    // be retried on the next cron tick.
     const { count: alreadySentCount } = await supabase
       .from('notification_log')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', setting.user_id)
       .eq('notification_type', 'morning_flash')
+      .eq('channel', 'line')
+      .eq('status', 'sent')
       .eq('metric_date', today)
 
     if ((alreadySentCount ?? 0) > 0) {
-      console.log(`[morning-flash] skip user=${setting.user_id} — already sent today (${alreadySentCount} log row(s) for ${today}). Delete those rows to re-send.`)
+      console.log(`[morning-flash] skip user=${setting.user_id} — LINE already delivered today (${alreadySentCount} sent row(s) for ${today}). To force re-send, delete those rows.`)
       continue
     }
 
