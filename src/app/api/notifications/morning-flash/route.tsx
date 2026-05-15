@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
-import { sendNotification } from '@/lib/notifications/send'
-import MorningFlash from '@/lib/email/templates/morningFlash'
+import { Resend } from 'resend'
+import { EMAIL_SENDERS } from '@/lib/email/resend'
+import MorningFlash, { type MorningFlashBranchData } from '@/lib/email/templates/morningFlash'
 import { buildMorningFlashLine, sendLineMessage } from '@/lib/line/messaging'
 import { getTodayBangkok } from '@/lib/businessDate'
 
@@ -24,14 +25,10 @@ async function handleMorningFlash(req: NextRequest) {
   let body: { branchId?: string; organizationId?: string } = {}
   try { body = await req.json() } catch { /* cron call — no body */ }
 
-  // Recipients are built from two pools:
+  // Recipients are built from two pools (queried independently so the route
+  // stays working even before migration 019 adds morning_flash_email_enabled):
   //   1. LINE opt-ins  (notification_settings.line_notify_enabled = true)
   //   2. Email opt-ins (notification_settings.morning_flash_email_enabled = true)
-  //
-  // The two pools are queried independently so the route stays working even
-  // before migration 019 has added the morning_flash_email_enabled column.
-  // If that column doesn't exist yet, the email-opt-in query errors out and
-  // we degrade to LINE-only delivery (which matches the new default anyway).
   const lineQuery = supabase
     .from('notification_settings')
     .select('user_id, organization_id, email_notifications, line_notify_enabled')
@@ -59,8 +56,7 @@ async function handleMorningFlash(req: NextRequest) {
     console.warn('[morning-flash] morning_flash_email_enabled query threw:', err)
   }
 
-  // Merge LINE pool + any email-only opt-ins (users who set email-opt-in
-  // without enabling LINE — they'd otherwise be missed).
+  // Merge LINE pool + any email-only opt-ins.
   const settingsByKey = new Map<string, { user_id: string; organization_id: string; email_notifications: boolean | null; line_notify_enabled: boolean | null }>()
   for (const s of lineSettings || []) {
     settingsByKey.set(`${s.user_id}:${s.organization_id}`, s)
@@ -74,12 +70,11 @@ async function handleMorningFlash(req: NextRequest) {
   const settingsList = Array.from(settingsByKey.values())
   console.log(`[morning-flash] recipients: ${settingsList.length} (line=${lineSettings?.length ?? 0}, email-only=${settingsList.length - (lineSettings?.length ?? 0)})`)
 
-  const results: { userId: string; status: string }[] = []
+  const resend = new Resend(process.env.RESEND_API_KEY)
+  const results: { userId: string; line: string; email: string }[] = []
 
-  for (const setting of settingsList || []) {
+  for (const setting of settingsList) {
     // Role filter: morning flash is for owner + manager only.
-    // Staff (branch_members) and any user without an organization_members row
-    // are excluded.
     const { data: membership } = await supabase
       .from('organization_members')
       .select('role')
@@ -92,24 +87,33 @@ async function handleMorningFlash(req: NextRequest) {
       continue
     }
 
-    // Dedup the LINE delivery only — a successful channel='line' row for
-    // today proves the user already received the push, so a second cron
-    // run must skip. Email log rows (per branch) do NOT block re-runs;
-    // they have their own per-(user, branch, day) shape and the email
-    // path handles retries through its own daily cap. Failed LINE rows
-    // (status='failed') also do not block, so a flaky LINE API call can
-    // be retried on the next cron tick.
-    const { count: alreadySentCount } = await supabase
-      .from('notification_log')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', setting.user_id)
-      .eq('notification_type', 'morning_flash')
-      .eq('channel', 'line')
-      .eq('status', 'sent')
-      .eq('metric_date', today)
+    // Per-channel dedup. A successful row on a channel blocks that channel
+    // only — LINE and email are tracked independently so a partial failure
+    // (e.g. LINE succeeded, email Resend was down) can be retried for the
+    // failed half on the next cron tick.
+    const [lineDedup, emailDedup] = await Promise.all([
+      supabase
+        .from('notification_log')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', setting.user_id)
+        .eq('notification_type', 'morning_flash')
+        .eq('channel', 'line')
+        .eq('status', 'sent')
+        .eq('metric_date', today),
+      supabase
+        .from('notification_log')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', setting.user_id)
+        .eq('notification_type', 'morning_flash')
+        .eq('channel', 'email')
+        .eq('status', 'sent')
+        .eq('metric_date', today),
+    ])
+    const lineAlreadySent = (lineDedup.count ?? 0) > 0
+    const emailAlreadySent = (emailDedup.count ?? 0) > 0
 
-    if ((alreadySentCount ?? 0) > 0) {
-      console.log(`[morning-flash] skip user=${setting.user_id} — LINE already delivered today (${alreadySentCount} sent row(s) for ${today}). To force re-send, delete those rows.`)
+    if (lineAlreadySent && emailAlreadySent) {
+      console.log(`[morning-flash] skip user=${setting.user_id} — both channels delivered today`)
       continue
     }
 
@@ -120,14 +124,16 @@ async function handleMorningFlash(req: NextRequest) {
     // Get branches for this org
     const { data: branches } = await supabase.from('branches').select('*').eq('organization_id', setting.organization_id)
 
-    // LINE message is delivered once per user with all branches concatenated
-    // (one push call instead of one per branch). The per-branch email still
-    // goes through sendNotification.
+    // Collect per-branch data once; the same data feeds both the combined
+    // LINE message (one push) and the combined email (one render).
+    const branchDataList: MorningFlashBranchData[] = []
     const lineSnippets: string[] = []
+    let totalRevenue = 0
+    let latestMetricDate = today
 
     for (const branch of branches || []) {
-      // Fetch the last 30 daily rows so we can compute a 30-day rolling avg
-      // margin alongside the latest-day values.
+      // Fetch the last 30 daily rows so we can compute a 30-day rolling
+      // avg margin alongside the latest-day values.
       const { data: metrics } = await supabase
         .from('branch_daily_metrics')
         .select('*')
@@ -138,7 +144,6 @@ async function handleMorningFlash(req: NextRequest) {
       const latest = metrics?.[0]
       if (!latest) continue
 
-      // 30-day average of the daily margin column, ignoring null/zero days.
       const marginValues = (metrics || [])
         .map((m: Record<string, unknown>) => Number(m.margin))
         .filter((v) => Number.isFinite(v) && v > 0)
@@ -146,8 +151,6 @@ async function handleMorningFlash(req: NextRequest) {
         ? marginValues.reduce((s, v) => s + v, 0) / marginValues.length
         : undefined
 
-      // Avg per-cover spend: prefer the view's `avg_ticket` column. If null
-      // (legacy rows) fall back to revenue/customers when both are present.
       const avgTicket = Number(latest.avg_ticket) || 0
       const revenueNum = Number(latest.revenue) || 0
       const coversNum = Number(latest.customers) || 0
@@ -155,7 +158,6 @@ async function handleMorningFlash(req: NextRequest) {
         ? avgTicket
         : (coversNum > 0 ? revenueNum / coversNum : undefined)
 
-      // Get targets
       const { data: targets } = await supabase.from('targets').select('*').eq('branch_id', branch.id).maybeSingle()
 
       const isHotel = branch.business_type === 'accommodation'
@@ -165,10 +167,9 @@ async function handleMorningFlash(req: NextRequest) {
 
       const dateStr = new Date(latest.metric_date + 'T00:00:00').toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })
 
-      const emailProps = {
+      branchDataList.push({
         branchName: branch.name,
         businessDate: dateStr,
-        lang: 'th' as const,
         branchType: branch.business_type as 'accommodation' | 'fnb',
         adr: latest.adr || undefined,
         adrTarget: Number(targets?.adr_target) || undefined,
@@ -183,66 +184,48 @@ async function handleMorningFlash(req: NextRequest) {
         sales: latest.revenue,
         avgSpend,
         recommendationText: recommendation,
-        plan: org.plan as 'starter' | 'growth' | 'pro',
-        entryUrl: `https://auraseaos.com/entry`,
+      })
+
+      totalRevenue += revenueNum
+      if (String(latest.metric_date) > latestMetricDate) {
+        latestMetricDate = String(latest.metric_date)
       }
 
       // Shorten Buddhist year (2569 → 69) only for the F&B LINE message,
-      // keeping the accommodation LINE message and all email templates on
-      // the original 4-digit form.
+      // keeping the accommodation LINE message and email body on the
+      // original 4-digit form.
       const lineDateStr = isHotel ? dateStr : dateStr.replace(/25(\d{2})/, '$1')
 
-      const lineMsg = buildMorningFlashLine({
-        branchName: branch.name,
-        branchType: branch.business_type as 'accommodation' | 'fnb',
-        date: lineDateStr,
-        adr: latest.adr || undefined,
-        adrTarget: Number(targets?.adr_target) || undefined,
-        occupancy: latest.occupancy_rate || undefined,
-        roomsAvailable: latest.rooms_available ? latest.rooms_available - (latest.rooms_sold || 0) : undefined,
-        revenue: latest.revenue,
-        margin: latest.margin || undefined,
-        marginAvg,
-        covers: latest.customers || undefined,
-        sales: latest.revenue,
-        avgSpend,
-        recommendation,
-      })
-
-      lineSnippets.push(lineMsg)
-
-      try {
-        await sendNotification({
-          userId: setting.user_id,
-          organizationId: setting.organization_id,
-          branchId: branch.id,
-          type: 'morning_flash',
-          emailSubject: `สรุปเช้า: ${branch.name} — ${dateStr}`,
-          emailReact: <MorningFlash {...emailProps} />,
-          lineMessage: lineMsg,
-          metricDate: today,
-          // Email is opt-in: send only when the user appears in the
-          // emailOptIn set (derived from a separate query against the
-          // morning_flash_email_enabled column). If that column doesn't
-          // exist yet, the set is empty → email is skipped for everyone.
-          skipEmail: !emailOptIn.has(`${setting.user_id}:${setting.organization_id}`),
-          // LINE is sent once per user after the branch loop with a
-          // combined message; suppress the per-branch LINE dispatch here.
-          skipLine: true,
-        })
-        results.push({ userId: setting.user_id, status: 'sent' })
-      } catch (err) {
-        console.error('sendNotification failed:', err)
-        results.push({ userId: setting.user_id, status: 'error', error: (err as Error).message } as typeof results[0])
-      }
+      lineSnippets.push(
+        buildMorningFlashLine({
+          branchName: branch.name,
+          branchType: branch.business_type as 'accommodation' | 'fnb',
+          date: lineDateStr,
+          adr: latest.adr || undefined,
+          adrTarget: Number(targets?.adr_target) || undefined,
+          occupancy: latest.occupancy_rate || undefined,
+          roomsAvailable: latest.rooms_available ? latest.rooms_available - (latest.rooms_sold || 0) : undefined,
+          revenue: latest.revenue,
+          margin: latest.margin || undefined,
+          marginAvg,
+          covers: latest.customers || undefined,
+          sales: latest.revenue,
+          avgSpend,
+          recommendation,
+        }),
+      )
     }
 
-    // Combined LINE delivery — one message per user containing every branch,
-    // followed by one notification_log row for the day.
-    if (!setting.line_notify_enabled) {
+    let lineStatus = 'skipped'
+    let emailStatus = 'skipped'
+
+    // ---- LINE channel ----
+    if (lineAlreadySent) {
+      console.log(`[morning-flash] skip LINE for user=${setting.user_id} — already delivered today`)
+    } else if (!setting.line_notify_enabled) {
       console.log(`[morning-flash] user=${setting.user_id} has line_notify_enabled=false — skipping LINE`)
     } else if (lineSnippets.length === 0) {
-      console.log(`[morning-flash] user=${setting.user_id} produced 0 branch snippets (no metrics?) — skipping LINE`)
+      console.log(`[morning-flash] user=${setting.user_id} produced 0 branch snippets — skipping LINE`)
     } else {
       const { data: profile } = await supabase
         .from('profiles')
@@ -255,7 +238,8 @@ async function handleMorningFlash(req: NextRequest) {
       } else {
         const combined = lineSnippets.join('\n\n')
         const ok = await sendLineMessage(profile.line_id as string, combined)
-        console.log(`[morning-flash] LINE push to user=${setting.user_id} branches=${lineSnippets.length} → ${ok ? 'sent' : 'failed'}`)
+        lineStatus = ok ? 'sent' : 'failed'
+        console.log(`[morning-flash] LINE push to user=${setting.user_id} branches=${lineSnippets.length} → ${lineStatus}`)
         await supabase.from('notification_log').insert({
           user_id: setting.user_id,
           organization_id: setting.organization_id,
@@ -263,13 +247,65 @@ async function handleMorningFlash(req: NextRequest) {
           notification_type: 'morning_flash',
           channel: 'line',
           metric_date: today,
-          status: ok ? 'sent' : 'failed',
+          status: lineStatus,
         })
       }
     }
+
+    // ---- Email channel (one combined email per user) ----
+    const isEmailOptIn = emailOptIn.has(`${setting.user_id}:${setting.organization_id}`)
+    if (emailAlreadySent) {
+      console.log(`[morning-flash] skip email for user=${setting.user_id} — already delivered today`)
+    } else if (!isEmailOptIn) {
+      console.log(`[morning-flash] user=${setting.user_id} not opted in to email — skipping email`)
+    } else if (branchDataList.length === 0) {
+      console.log(`[morning-flash] user=${setting.user_id} produced 0 branches — skipping email`)
+    } else {
+      const { data: { user: authUser } } = await supabase.auth.admin.getUserById(setting.user_id)
+      if (!authUser?.email) {
+        console.log(`[morning-flash] user=${setting.user_id} has no auth email — cannot send`)
+      } else {
+        const emailDateStr = new Date(latestMetricDate + 'T00:00:00').toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })
+        const subject = `สรุปเช้า: ภาพรวมทุกสาขา — ${emailDateStr}`
+        try {
+          const result = await resend.emails.send({
+            from: EMAIL_SENDERS.notifications,
+            to: authUser.email,
+            subject,
+            react: (
+              <MorningFlash
+                date={emailDateStr}
+                lang="th"
+                branches={branchDataList}
+                totalRevenue={totalRevenue}
+                entryUrl="https://auraseaos.com/entry"
+                plan={org.plan as 'starter' | 'growth' | 'pro'}
+              />
+            ),
+          })
+          emailStatus = result.error ? 'failed' : 'sent'
+          if (result.error) console.error('[morning-flash] email send error:', result.error)
+          console.log(`[morning-flash] email to ${authUser.email} branches=${branchDataList.length} → ${emailStatus}`)
+        } catch (err) {
+          emailStatus = 'failed'
+          console.error('[morning-flash] email send threw:', err)
+        }
+        await supabase.from('notification_log').insert({
+          user_id: setting.user_id,
+          organization_id: setting.organization_id,
+          branch_id: null,
+          notification_type: 'morning_flash',
+          channel: 'email',
+          metric_date: today,
+          status: emailStatus,
+        })
+      }
+    }
+
+    results.push({ userId: setting.user_id, line: lineStatus, email: emailStatus })
   }
 
-  return NextResponse.json({ sent: results.length, results })
+  return NextResponse.json({ count: results.length, results })
 }
 
 // Vercel cron calls GET; the entry-form trigger calls POST. Both run the

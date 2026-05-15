@@ -1,9 +1,8 @@
-import { Html, Head, Body, Container, Section, Row, Column, Text, Button } from '@react-email/components'
+import { Html, Head, Body, Container, Section, Row, Column, Text, Button, Hr } from '@react-email/components'
 
-interface MorningFlashProps {
+export interface MorningFlashBranchData {
   branchName: string
   businessDate: string
-  lang: 'th' | 'en'
   branchType: 'accommodation' | 'fnb'
   adr?: number
   adrTarget?: number
@@ -18,14 +17,32 @@ interface MorningFlashProps {
   sales?: number
   avgSpend?: number
   recommendationText: string
-  plan: 'starter' | 'growth' | 'pro'
+}
+
+interface MorningFlashProps {
+  /** Email-level date (used in the header subtitle and when only one branch
+   *  is rendered). Branch-level `businessDate` still shows on each section. */
+  date: string
+  lang: 'th' | 'en'
+  /** Branches in any order; the template sorts accommodation first, F&B second. */
+  branches: MorningFlashBranchData[]
+  /** Sum of branch revenues. Rendered as a portfolio summary line when
+   *  more than one branch is present. */
+  totalRevenue: number
+  /** Optional override for the header label. Defaults to a portfolio
+   *  summary string (Thai/English depending on `lang`). Used by other
+   *  callers (e.g. closing-summary) to reuse this template with a
+   *  different subtitle. */
+  headerLabel?: string
   entryUrl: string
+  plan?: 'starter' | 'growth' | 'pro'
 }
 
 const COLORS = {
   text: '#1a1a1a',
   muted: '#9b9b9b',
   border: '#e5e5e5',
+  divider: '#ececec',
   cardBg: '#ffffff',
   rowBg: '#f7f7f5',
   accent: '#534AB7',
@@ -38,29 +55,18 @@ const FONT_STACK =
   '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "IBM Plex Sans Thai", sans-serif'
 
 export default function MorningFlash(props: MorningFlashProps) {
-  const { branchName, businessDate, lang, branchType, recommendationText, entryUrl } = props
-  const isHotel = branchType === 'accommodation'
+  const { date, lang, totalRevenue, entryUrl } = props
 
-  const cards: MetricCardData[] = isHotel
-    ? [
-        currencyCard('ADR', props.adr, props.adrTarget, '฿'),
-        percentCard('Occupancy', props.occupancy, props.occupancyTarget),
-        currencyCard(lang === 'th' ? 'รายได้' : 'Revenue', props.revenue, undefined, '฿'),
-        plainCard(
-          lang === 'th' ? 'ห้องว่าง' : 'Available Rooms',
-          `${props.roomsAvailable ?? 0}`,
-          lang === 'th' ? 'ห้อง' : 'rooms',
-        ),
-      ]
-    : [
-        percentCard('Margin', props.margin, props.marginTarget),
-        countCard('Covers', props.covers, props.coversTarget),
-        currencyCard(lang === 'th' ? 'ยอดขาย' : 'Sales', props.sales, undefined, '฿'),
-        currencyCard('Avg Spend', props.avgSpend, undefined, '฿', lang === 'th' ? '/คน' : '/cover'),
-      ]
+  const sorted = [
+    ...props.branches.filter((b) => b.branchType === 'accommodation'),
+    ...props.branches.filter((b) => b.branchType === 'fnb'),
+  ]
 
+  const headerLabel =
+    props.headerLabel ?? (lang === 'th' ? 'ภาพรวมทุกสาขา' : 'All branches')
   const ctaLabel = lang === 'th' ? 'กรอกข้อมูลวันนี้' : "Enter today's data"
   const footerLabel = lang === 'th' ? 'Aurasea OS · ยกเลิกการแจ้งเตือน' : 'Aurasea OS · Unsubscribe'
+  const totalRevenueLabel = lang === 'th' ? 'รายได้รวม' : 'Total revenue'
 
   return (
     <Html>
@@ -70,42 +76,35 @@ export default function MorningFlash(props: MorningFlashProps) {
           {/* Logo */}
           <Text style={{ fontSize: 14, fontWeight: 600, color: COLORS.text, letterSpacing: '-0.01em', margin: '0 0 28px' }}>aurasea</Text>
 
-          {/* Branch + date */}
-          <Text style={{ fontSize: 26, fontWeight: 700, color: COLORS.text, letterSpacing: '-0.02em', lineHeight: 1.2, margin: '0 0 4px' }}>{branchName}</Text>
-          <Text style={{ fontSize: 14, color: COLORS.muted, margin: '0 0 24px' }}>{businessDate}</Text>
+          {/* Header */}
+          <Text style={{ fontSize: 26, fontWeight: 700, color: COLORS.text, letterSpacing: '-0.02em', lineHeight: 1.2, margin: '0 0 4px' }}>{headerLabel}</Text>
+          <Text style={{ fontSize: 14, color: COLORS.muted, margin: '0 0 16px' }}>{date}</Text>
 
-          {/* Metric grid (2 × 2) */}
-          <Row style={{ marginBottom: 8 }}>
-            <Column style={{ width: '50%', paddingRight: 4, verticalAlign: 'top' as const }}>
-              <MetricCard data={cards[0]} />
-            </Column>
-            <Column style={{ width: '50%', paddingLeft: 4, verticalAlign: 'top' as const }}>
-              <MetricCard data={cards[1]} />
-            </Column>
-          </Row>
-          <Row style={{ marginBottom: 24 }}>
-            <Column style={{ width: '50%', paddingRight: 4, verticalAlign: 'top' as const }}>
-              <MetricCard data={cards[2]} />
-            </Column>
-            <Column style={{ width: '50%', paddingLeft: 4, verticalAlign: 'top' as const }}>
-              <MetricCard data={cards[3]} />
-            </Column>
-          </Row>
+          {/* Portfolio summary — only when multiple branches */}
+          {sorted.length > 1 && (
+            <Section style={{ backgroundColor: COLORS.rowBg, padding: '12px 16px', borderRadius: 6, marginBottom: 24 }}>
+              <Row>
+                <Column style={{ verticalAlign: 'middle' as const }}>
+                  <Text style={{ fontSize: 11, fontWeight: 500, color: COLORS.muted, textTransform: 'uppercase' as const, letterSpacing: '0.06em', margin: 0 }}>
+                    {totalRevenueLabel}
+                  </Text>
+                </Column>
+                <Column style={{ textAlign: 'right' as const, verticalAlign: 'middle' as const }}>
+                  <Text style={{ fontSize: 18, fontWeight: 700, color: COLORS.text, margin: 0 }}>
+                    ฿{Math.round(totalRevenue).toLocaleString()}
+                  </Text>
+                </Column>
+              </Row>
+            </Section>
+          )}
 
-          {/* Recommendation */}
-          <Section
-            style={{
-              borderLeft: `3px solid ${COLORS.accent}`,
-              backgroundColor: COLORS.rowBg,
-              padding: '14px 16px',
-              borderRadius: '0 6px 6px 0',
-              marginBottom: 28,
-            }}
-          >
-            <Text style={{ fontSize: 14, lineHeight: 1.6, color: COLORS.text, fontStyle: 'italic', margin: 0 }}>
-              {recommendationText}
-            </Text>
-          </Section>
+          {/* Branch sections */}
+          {sorted.map((branch, idx) => (
+            <Section key={`${branch.branchName}-${idx}`} style={{ marginBottom: idx === sorted.length - 1 ? 24 : 16 }}>
+              {idx > 0 && <Hr style={{ borderTop: `1px solid ${COLORS.divider}`, margin: '0 0 20px' }} />}
+              <BranchBlock branch={branch} lang={lang} />
+            </Section>
+          ))}
 
           {/* CTA */}
           <Section style={{ textAlign: 'center' as const, marginBottom: 32 }}>
@@ -133,6 +132,67 @@ export default function MorningFlash(props: MorningFlashProps) {
         </Container>
       </Body>
     </Html>
+  )
+}
+
+function BranchBlock({ branch, lang }: { branch: MorningFlashBranchData; lang: 'th' | 'en' }) {
+  const isHotel = branch.branchType === 'accommodation'
+
+  const cards: MetricCardData[] = isHotel
+    ? [
+        currencyCard('ADR', branch.adr, branch.adrTarget, '฿'),
+        percentCard('Occupancy', branch.occupancy, branch.occupancyTarget),
+        currencyCard(lang === 'th' ? 'รายได้' : 'Revenue', branch.revenue, undefined, '฿'),
+        plainCard(
+          lang === 'th' ? 'ห้องว่าง' : 'Available Rooms',
+          `${branch.roomsAvailable ?? 0}`,
+          lang === 'th' ? 'ห้อง' : 'rooms',
+        ),
+      ]
+    : [
+        percentCard('Margin', branch.margin, branch.marginTarget),
+        countCard('Covers', branch.covers, branch.coversTarget),
+        currencyCard(lang === 'th' ? 'ยอดขาย' : 'Sales', branch.sales, undefined, '฿'),
+        currencyCard('Avg Spend', branch.avgSpend, undefined, '฿', lang === 'th' ? '/คน' : '/cover'),
+      ]
+
+  return (
+    <>
+      <Text style={{ fontSize: 18, fontWeight: 700, color: COLORS.text, letterSpacing: '-0.01em', margin: '0 0 2px' }}>
+        {branch.branchName}
+      </Text>
+      <Text style={{ fontSize: 12, color: COLORS.muted, margin: '0 0 16px' }}>{branch.businessDate}</Text>
+
+      <Row style={{ marginBottom: 8 }}>
+        <Column style={{ width: '50%', paddingRight: 4, verticalAlign: 'top' as const }}>
+          <MetricCard data={cards[0]} />
+        </Column>
+        <Column style={{ width: '50%', paddingLeft: 4, verticalAlign: 'top' as const }}>
+          <MetricCard data={cards[1]} />
+        </Column>
+      </Row>
+      <Row style={{ marginBottom: 16 }}>
+        <Column style={{ width: '50%', paddingRight: 4, verticalAlign: 'top' as const }}>
+          <MetricCard data={cards[2]} />
+        </Column>
+        <Column style={{ width: '50%', paddingLeft: 4, verticalAlign: 'top' as const }}>
+          <MetricCard data={cards[3]} />
+        </Column>
+      </Row>
+
+      <Section
+        style={{
+          borderLeft: `3px solid ${COLORS.accent}`,
+          backgroundColor: COLORS.rowBg,
+          padding: '12px 14px',
+          borderRadius: '0 6px 6px 0',
+        }}
+      >
+        <Text style={{ fontSize: 13, lineHeight: 1.55, color: COLORS.text, fontStyle: 'italic', margin: 0 }}>
+          {branch.recommendationText}
+        </Text>
+      </Section>
+    </>
   )
 }
 

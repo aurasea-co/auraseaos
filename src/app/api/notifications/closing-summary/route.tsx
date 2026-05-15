@@ -34,14 +34,19 @@ export async function POST(req: NextRequest) {
       type: 'closing_summary',
       emailSubject: `สรุปปิดร้าน: ${branch.name} — ${dateStr}`,
       emailReact: <MorningFlash
-        branchName={branch.name}
-        businessDate={dateStr}
+        date={dateStr}
         lang="th"
-        branchType="fnb"
-        margin={metrics.margin}
-        covers={metrics.covers}
-        sales={metrics.sales}
-        recommendationText={recommendation}
+        headerLabel={`สรุปปิดร้าน: ${branch.name}`}
+        branches={[{
+          branchName: branch.name,
+          businessDate: dateStr,
+          branchType: 'fnb',
+          margin: metrics.margin,
+          covers: metrics.covers,
+          sales: metrics.sales,
+          recommendationText: recommendation,
+        }]}
+        totalRevenue={Number(metrics.sales) || 0}
         plan={org.plan}
         entryUrl="https://auraseaos.com/entry"
       />,
