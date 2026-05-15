@@ -1,0 +1,89 @@
+// Line Messaging API integration — Phase 6
+// Replaces Line Notify (discontinued March 31, 2025)
+// Uses Line OA: Aurasea via Messaging API
+
+const LINE_API = 'https://api.line.me/v2/bot'
+
+export async function sendLineMessage(userId: string, message: string): Promise<boolean> {
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN
+  if (!token) {
+    console.log('[LINE] Not configured — LINE_CHANNEL_ACCESS_TOKEN not set')
+    return false
+  }
+
+  const res = await fetch(`${LINE_API}/message/push`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      to: userId,
+      messages: [{ type: 'text', text: message }],
+    }),
+  })
+  return res.ok
+}
+
+export async function sendLineFlexMessage(
+  userId: string,
+  altText: string,
+  flexContent: object
+): Promise<boolean> {
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN
+  if (!token) return false
+
+  const res = await fetch(`${LINE_API}/message/push`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      to: userId,
+      messages: [{ type: 'flex', altText, contents: flexContent }],
+    }),
+  })
+  return res.ok
+}
+
+export async function replyLineMessage(replyToken: string, message: string): Promise<boolean> {
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN
+  if (!token) return false
+
+  const res = await fetch(`${LINE_API}/message/reply`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      replyToken,
+      messages: [{ type: 'text', text: message }],
+    }),
+  })
+  return res.ok
+}
+
+export function buildMorningFlashLine(params: {
+  branchName: string
+  branchType: 'accommodation' | 'fnb'
+  date: string
+  adr?: number
+  adrTarget?: number
+  occupancy?: number
+  roomsAvailable?: number
+  revenue?: number
+  margin?: number
+  covers?: number
+  sales?: number
+  recommendation: string
+}): string {
+  const { branchName, branchType, date } = params
+  if (branchType === 'accommodation') {
+    const gap = params.adr && params.adrTarget ? params.adr - params.adrTarget : 0
+    const sign = gap >= 0 ? '+' : ''
+    return `🏨 ${branchName} — ${date}\nADR ฿${Math.round(params.adr || 0)} (${sign}฿${Math.round(Math.abs(gap))})\nOcc ${Math.round(params.occupancy || 0)}% · ${params.roomsAvailable || 0} ห้องว่าง\nรายได้ ฿${(params.revenue || 0).toLocaleString()}\n\n💡 ${params.recommendation}`
+  }
+  return `☕ ${branchName} — ${date}\nMargin ${(params.margin || 0).toFixed(1)}%\nCovers ${params.covers || 0} · ฿${(params.sales || 0).toLocaleString()}\n\n💡 ${params.recommendation}`
+}

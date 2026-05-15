@@ -5,12 +5,12 @@ import MorningFlash from '@/lib/email/templates/morningFlash'
 import { buildMorningFlashLine } from '@/lib/line/messaging'
 import { getTodayBangkok } from '@/lib/businessDate'
 
-export async function GET(req: NextRequest) {
+export async function POST(req: NextRequest) {
   // Verify cron secret or entry form trigger
   const authHeader = req.headers.get('authorization')
   const isFromEntryForm = req.headers.get('x-from-entry-form') === 'true'
 
-  if (!isFromEntryForm && authHeader !== `Bearer ${process.env.CRON_SECRET}` && req.headers.get('x-vercel-cron') !== '1') {
+  if (!isFromEntryForm && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -35,18 +35,6 @@ export async function GET(req: NextRequest) {
   const results: { userId: string; status: string }[] = []
 
   for (const setting of settingsList || []) {
-    // Role filter: morning flash is for owner + manager only.
-    // Staff (branch_members) and any user without an organization_members row
-    // are excluded.
-    const { data: membership } = await supabase
-      .from('organization_members')
-      .select('role')
-      .eq('user_id', setting.user_id)
-      .eq('organization_id', setting.organization_id)
-      .maybeSingle()
-
-    if (membership?.role !== 'owner' && membership?.role !== 'manager') continue
-
     // Check not already sent today
     const { data: alreadySent } = await supabase
       .from('notification_log')
