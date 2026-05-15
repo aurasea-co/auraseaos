@@ -147,9 +147,17 @@ async function handleMorningFlash(req: NextRequest) {
       const marginValues = (metrics || [])
         .map((m: Record<string, unknown>) => Number(m.margin))
         .filter((v) => Number.isFinite(v) && v > 0)
-      const marginAvg = marginValues.length > 0
+      const manualMarginAvg = marginValues.length > 0
         ? marginValues.reduce((s, v) => s + v, 0) / marginValues.length
         : undefined
+
+      // Prefer the view's pre-aggregated 30-day avg column when present,
+      // otherwise fall back to the value we just computed from the last
+      // 30 daily rows.
+      const margin30dAvg = latest.margin_30d_avg != null
+        ? Number(latest.margin_30d_avg)
+        : manualMarginAvg
+      const marginAvg = Number.isFinite(margin30dAvg) ? margin30dAvg : undefined
 
       const avgTicket = Number(latest.avg_ticket) || 0
       const revenueNum = Number(latest.revenue) || 0
@@ -178,6 +186,7 @@ async function handleMorningFlash(req: NextRequest) {
         revenue: latest.revenue,
         roomsAvailable: latest.rooms_available ? latest.rooms_available - (latest.rooms_sold || 0) : undefined,
         margin: latest.margin || undefined,
+        marginAvg,
         marginTarget: targets?.cogs_target ? 100 - Number(targets.cogs_target) : undefined,
         covers: latest.customers || undefined,
         coversTarget: Number(targets?.covers_target) || undefined,

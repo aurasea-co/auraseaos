@@ -1,4 +1,4 @@
-import { Html, Head, Body, Container, Section, Row, Column, Text, Button, Hr } from '@react-email/components'
+import { Html, Head, Body, Container, Section, Row, Column, Text, Button, Hr, Link } from '@react-email/components'
 
 export interface MorningFlashBranchData {
   branchName: string
@@ -11,6 +11,8 @@ export interface MorningFlashBranchData {
   revenue?: number
   roomsAvailable?: number
   margin?: number
+  /** 30-day rolling avg margin (F&B). Preferred over `margin` for display. */
+  marginAvg?: number
   marginTarget?: number
   covers?: number
   coversTarget?: number
@@ -18,6 +20,8 @@ export interface MorningFlashBranchData {
   avgSpend?: number
   recommendationText: string
 }
+
+const UNSUBSCRIBE_URL = 'https://auraseaos.com/settings/notifications?unsubscribe=morning_flash'
 
 interface MorningFlashProps {
   /** Email-level date (used in the header subtitle and when only one branch
@@ -65,7 +69,7 @@ export default function MorningFlash(props: MorningFlashProps) {
   const headerLabel =
     props.headerLabel ?? (lang === 'th' ? 'ภาพรวมทุกสาขา' : 'All branches')
   const ctaLabel = lang === 'th' ? 'กรอกข้อมูลวันนี้' : "Enter today's data"
-  const footerLabel = lang === 'th' ? 'Aurasea OS · ยกเลิกการแจ้งเตือน' : 'Aurasea OS · Unsubscribe'
+  const unsubscribeLabel = lang === 'th' ? 'ยกเลิกการแจ้งเตือน' : 'Unsubscribe'
   const totalRevenueLabel = lang === 'th' ? 'รายได้รวม' : 'Total revenue'
 
   return (
@@ -125,9 +129,15 @@ export default function MorningFlash(props: MorningFlashProps) {
             </Button>
           </Section>
 
-          {/* Footer */}
+          {/* Footer — unsubscribe link is the only interactive bit here. */}
           <Text style={{ fontSize: 11, color: COLORS.muted, textAlign: 'center' as const, margin: 0 }}>
-            {footerLabel}
+            {'Aurasea OS · '}
+            <Link
+              href={UNSUBSCRIBE_URL}
+              style={{ color: '#999999', fontSize: 11, textDecoration: 'underline' }}
+            >
+              {unsubscribeLabel}
+            </Link>
           </Text>
         </Container>
       </Body>
@@ -138,10 +148,14 @@ export default function MorningFlash(props: MorningFlashProps) {
 function BranchBlock({ branch, lang }: { branch: MorningFlashBranchData; lang: 'th' | 'en' }) {
   const isHotel = branch.branchType === 'accommodation'
 
+  // F&B Margin card prefers the 30-day rolling average when supplied,
+  // rendered as an integer percent (matches the LINE message format).
+  const marginValue = branch.marginAvg && branch.marginAvg > 0 ? branch.marginAvg : branch.margin
+
   const cards: MetricCardData[] = isHotel
     ? [
-        currencyCard('ADR', branch.adr, branch.adrTarget, '฿'),
-        percentCard('Occupancy', branch.occupancy, branch.occupancyTarget),
+        currencyCardThai('ADR', branch.adr, branch.adrTarget, '฿'),
+        percentCardThai('Occupancy', branch.occupancy, branch.occupancyTarget, 1),
         currencyCard(lang === 'th' ? 'รายได้' : 'Revenue', branch.revenue, undefined, '฿'),
         plainCard(
           lang === 'th' ? 'ห้องว่าง' : 'Available Rooms',
@@ -150,7 +164,7 @@ function BranchBlock({ branch, lang }: { branch: MorningFlashBranchData; lang: '
         ),
       ]
     : [
-        percentCard('Margin', branch.margin, branch.marginTarget),
+        percentCard('Margin', marginValue, branch.marginTarget, 0),
         countCard('Covers', branch.covers, branch.coversTarget),
         currencyCard(lang === 'th' ? 'ยอดขาย' : 'Sales', branch.sales, undefined, '฿'),
         currencyCard('Avg Spend', branch.avgSpend, undefined, '฿', lang === 'th' ? '/คน' : '/cover'),
@@ -258,8 +272,9 @@ function currencyCard(label: string, value: number | undefined, target: number |
   }
 }
 
-function percentCard(label: string, value: number | undefined, target: number | undefined): MetricCardData {
-  const display = `${(value ?? 0).toFixed(1)}%`
+function percentCard(label: string, value: number | undefined, target: number | undefined, decimals = 1): MetricCardData {
+  const fmt = (n: number) => (decimals > 0 ? n.toFixed(decimals) : `${Math.round(n)}`)
+  const display = `${fmt(value ?? 0)}%`
   if (target == null || target === 0 || value == null) return { label, value: display }
   const gap = value - target
   if (gap === 0) return { label, value: display }
@@ -267,7 +282,45 @@ function percentCard(label: string, value: number | undefined, target: number | 
   return {
     label,
     value: display,
-    compare: { text: `${isAbove ? '+' : '-'}${Math.abs(gap).toFixed(1)}%`, isAbove },
+    compare: { text: `${isAbove ? '+' : '-'}${fmt(Math.abs(gap))}%`, isAbove },
+  }
+}
+
+/**
+ * Hotel-style currency card: comparison line reads "เกินเป้า ฿X" /
+ * "ต่ำกว่าเป้า ฿X" rather than "+฿X" / "-฿X", matching the LINE message
+ * phrasing. Used for ADR.
+ */
+function currencyCardThai(label: string, value: number | undefined, target: number | undefined, prefix: string): MetricCardData {
+  const display = `${prefix}${fmtNumber(value ?? 0)}`
+  if (target == null || target === 0 || value == null) return { label, value: display }
+  const gap = value - target
+  if (gap === 0) return { label, value: display }
+  const isAbove = gap > 0
+  const wording = isAbove ? 'เกินเป้า' : 'ต่ำกว่าเป้า'
+  return {
+    label,
+    value: display,
+    compare: { text: `${wording} ${prefix}${fmtNumber(Math.abs(gap))}`, isAbove },
+  }
+}
+
+/**
+ * Hotel-style percent card: comparison line reads "เกินเป้า X%" /
+ * "ต่ำกว่าเป้า X%". Used for Occupancy.
+ */
+function percentCardThai(label: string, value: number | undefined, target: number | undefined, decimals = 1): MetricCardData {
+  const fmt = (n: number) => (decimals > 0 ? n.toFixed(decimals) : `${Math.round(n)}`)
+  const display = `${fmt(value ?? 0)}%`
+  if (target == null || target === 0 || value == null) return { label, value: display }
+  const gap = value - target
+  if (gap === 0) return { label, value: display }
+  const isAbove = gap > 0
+  const wording = isAbove ? 'เกินเป้า' : 'ต่ำกว่าเป้า'
+  return {
+    label,
+    value: display,
+    compare: { text: `${wording} ${fmt(Math.abs(gap))}%`, isAbove },
   }
 }
 

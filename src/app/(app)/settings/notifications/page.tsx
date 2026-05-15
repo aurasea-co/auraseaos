@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { useUser } from '@/providers/user-context'
 import { createClient } from '@/lib/supabase/client'
@@ -14,11 +15,14 @@ export default function NotificationsPage() {
   const t = useTranslations('settingsNotifications')
   const tCommon = useTranslations('common')
   const supabase = createClient()
+  const searchParams = useSearchParams()
+  const unsubscribeTarget = searchParams.get('unsubscribe')
 
   const [emailNotif, setEmailNotif] = useState(true)
   // Line Notify removed — Messaging API in Phase 6
   const [lineConnected, setLineConnected] = useState(false)
   const [morningFlashEmail, setMorningFlashEmail] = useState(false)
+  const [unsubscribeNotice, setUnsubscribeNotice] = useState(false)
   const [entryReminder, setEntryReminder] = useState(true)
   const [entryReminderTime, setEntryReminderTime] = useState('22:00')
   const [morningFlashTime, setMorningFlashTime] = useState('09:00')
@@ -64,6 +68,28 @@ export default function NotificationsPage() {
       })
   }, [user.id, organization, supabase])
 
+  // Self-service unsubscribe via the email footer link
+  // (`?unsubscribe=morning_flash`). Persists the change immediately so the
+  // user doesn't have to find the toggle and hit Save.
+  useEffect(() => {
+    if (unsubscribeTarget !== 'morning_flash') return
+    if (!organization) return
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = supabase as any
+    db.from('notification_settings')
+      .upsert(
+        { user_id: user.id, organization_id: organization.id, morning_flash_email_enabled: false },
+        { onConflict: 'user_id,organization_id' },
+      )
+      .then(() => {
+        setMorningFlashEmail(false)
+        setUnsubscribeNotice(true)
+        // Notice auto-dismisses after 6s so the page returns to its normal
+        // state for any subsequent edits in the same session.
+        setTimeout(() => setUnsubscribeNotice(false), 6000)
+      })
+  }, [unsubscribeTarget, organization, user.id, supabase])
+
   async function handleSave() {
     if (!organization) return
     setSaving(true)
@@ -96,6 +122,24 @@ export default function NotificationsPage() {
         <h2 className="text-lg font-medium text-slate-900 leading-heading">{t('title')}</h2>
       </div>
       <h2 className="text-lg font-medium text-slate-900 leading-heading hidden lg:block">{t('title')}</h2>
+
+      {unsubscribeNotice && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            background: 'var(--color-green-light)',
+            color: 'var(--color-green-text)',
+            border: '1px solid rgba(29,158,117,0.25)',
+            borderRadius: 8,
+            padding: '10px 14px',
+            fontSize: 13,
+            fontWeight: 500,
+          }}
+        >
+          {t('unsubscribeMorningFlashNotice')}
+        </div>
+      )}
 
       <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-4">
         <Toggle label={t('emailNotifications')} checked={emailNotif} onChange={setEmailNotif} />
