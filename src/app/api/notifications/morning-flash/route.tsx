@@ -87,7 +87,10 @@ async function handleMorningFlash(req: NextRequest) {
       .eq('organization_id', setting.organization_id)
       .maybeSingle()
 
-    if (membership?.role !== 'owner' && membership?.role !== 'manager') continue
+    if (membership?.role !== 'owner' && membership?.role !== 'manager') {
+      console.log(`[morning-flash] skip user=${setting.user_id} role=${membership?.role ?? 'none'}`)
+      continue
+    }
 
     // Check not already sent today. Count-based so existing logs with
     // multiple rows for the same user-date (e.g. from earlier multi-branch
@@ -99,7 +102,10 @@ async function handleMorningFlash(req: NextRequest) {
       .eq('notification_type', 'morning_flash')
       .eq('metric_date', today)
 
-    if ((alreadySentCount ?? 0) > 0) continue
+    if ((alreadySentCount ?? 0) > 0) {
+      console.log(`[morning-flash] skip user=${setting.user_id} — already sent today (${alreadySentCount} log row(s) for ${today}). Delete those rows to re-send.`)
+      continue
+    }
 
     // Get org info
     const { data: org } = await supabase.from('organizations').select('*').eq('id', setting.organization_id).single()
@@ -227,16 +233,23 @@ async function handleMorningFlash(req: NextRequest) {
 
     // Combined LINE delivery — one message per user containing every branch,
     // followed by one notification_log row for the day.
-    if (setting.line_notify_enabled && lineSnippets.length > 0) {
+    if (!setting.line_notify_enabled) {
+      console.log(`[morning-flash] user=${setting.user_id} has line_notify_enabled=false — skipping LINE`)
+    } else if (lineSnippets.length === 0) {
+      console.log(`[morning-flash] user=${setting.user_id} produced 0 branch snippets (no metrics?) — skipping LINE`)
+    } else {
       const { data: profile } = await supabase
         .from('profiles')
         .select('line_id')
         .eq('user_id', setting.user_id)
         .maybeSingle()
 
-      if (profile?.line_id) {
+      if (!profile?.line_id) {
+        console.log(`[morning-flash] user=${setting.user_id} has no profiles.line_id — cannot push LINE`)
+      } else {
         const combined = lineSnippets.join('\n\n')
         const ok = await sendLineMessage(profile.line_id as string, combined)
+        console.log(`[morning-flash] LINE push to user=${setting.user_id} branches=${lineSnippets.length} → ${ok ? 'sent' : 'failed'}`)
         await supabase.from('notification_log').insert({
           user_id: setting.user_id,
           organization_id: setting.organization_id,
