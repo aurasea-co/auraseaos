@@ -18,6 +18,7 @@ export default function NotificationsPage() {
   const [emailNotif, setEmailNotif] = useState(true)
   // Line Notify removed — Messaging API in Phase 6
   const [lineConnected, setLineConnected] = useState(false)
+  const [morningFlashEmail, setMorningFlashEmail] = useState(false)
   const [entryReminder, setEntryReminder] = useState(true)
   const [entryReminderTime, setEntryReminderTime] = useState('22:00')
   const [morningFlashTime, setMorningFlashTime] = useState('09:00')
@@ -41,6 +42,7 @@ export default function NotificationsPage() {
         if (data) {
           setEmailNotif(data.email_notifications ?? true)
           // line_notify_enabled — removed, Messaging API in Phase 6
+          setMorningFlashEmail(data.morning_flash_email_enabled ?? false)
           setEntryReminder(data.entry_reminder_enabled ?? true)
           setEntryReminderTime(data.entry_reminder_time || '22:00')
           setMorningFlashTime(data.morning_flash_time || '09:00')
@@ -72,6 +74,7 @@ export default function NotificationsPage() {
       organization_id: organization.id,
       email_notifications: emailNotif,
       // line_notify_enabled removed — Phase 6
+      morning_flash_email_enabled: morningFlashEmail,
       entry_reminder_enabled: entryReminder,
       entry_reminder_time: entryReminderTime,
       morning_flash_time: morningFlashTime,
@@ -123,6 +126,15 @@ export default function NotificationsPage() {
             </>
           )}
         </div>
+
+        {/* Morning-flash email opt-in. LINE is the default channel; the
+            email goes out only when this toggle is on for the user/org.
+            Gated to owner+manager because staff don't receive morning
+            flash on any channel (filtered server-side). */}
+        {(role === 'owner' || role === 'manager') && (
+          <Toggle label={t('morningFlashEmail')} checked={morningFlashEmail} onChange={setMorningFlashEmail} />
+        )}
+
         <Toggle label={t('entryReminder')} checked={entryReminder} onChange={setEntryReminder} />
         {entryReminder && (
           <div className="ml-6">
