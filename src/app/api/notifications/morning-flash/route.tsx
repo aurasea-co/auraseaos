@@ -5,8 +5,11 @@ import MorningFlash from '@/lib/email/templates/morningFlash'
 import { buildMorningFlashLine } from '@/lib/line/messaging'
 import { getTodayBangkok } from '@/lib/businessDate'
 
-export async function GET(req: NextRequest) {
-  // Verify cron secret or entry form trigger
+async function handleMorningFlash(req: NextRequest) {
+  // Allowed callers:
+  //   - Vercel cron (sends GET with header `x-vercel-cron: 1`)
+  //   - Manual cron / scripts (Authorization: Bearer $CRON_SECRET)
+  //   - Entry-form trigger (POST with header `x-from-entry-form: true`)
   const authHeader = req.headers.get('authorization')
   const isFromEntryForm = req.headers.get('x-from-entry-form') === 'true'
 
@@ -143,4 +146,15 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json({ sent: results.length, results })
+}
+
+// Vercel cron calls GET; the entry-form trigger calls POST. Both run the
+// same handler — the auth check distinguishes legitimate callers and the
+// body parse inside is tolerant of empty/missing JSON bodies.
+export async function GET(req: NextRequest) {
+  return handleMorningFlash(req)
+}
+
+export async function POST(req: NextRequest) {
+  return handleMorningFlash(req)
 }
