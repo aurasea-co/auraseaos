@@ -84,19 +84,25 @@ export function buildMorningFlashLine(params: {
   recommendation: string
 }): string {
   const { branchName, branchType, date } = params
+
+  // Buddhist year compressed to 2 digits (e.g. 2569 → 69). Applied to both
+  // accommodation and F&B headers. Idempotent so callers may pre-shorten.
+  const shortDate = date.replace(/25(\d{2})/, '$1')
+
   if (branchType === 'accommodation') {
     const gap = params.adr && params.adrTarget ? params.adr - params.adrTarget : 0
-    const sign = gap >= 0 ? '+' : ''
-    return `🏨 ${branchName} — ${date}\nADR ฿${Math.round(params.adr || 0)} (${sign}฿${Math.round(Math.abs(gap))})\nOcc ${Math.round(params.occupancy || 0)}% · ${params.roomsAvailable || 0} ห้องว่าง\nรายได้ ฿${(params.revenue || 0).toLocaleString()}\n\n💡 ${params.recommendation}`
+    const adrGapText = gap < 0
+      ? ` ต่ำกว่าเป้า ฿${Math.round(Math.abs(gap))}`
+      : gap > 0
+        ? ` เกินเป้า ฿${Math.round(Math.abs(gap))}`
+        : ''
+    return `🏨 ${branchName} — ${shortDate}\nADR ฿${Math.round(params.adr || 0)}${adrGapText}\nOcc ${Math.round(params.occupancy || 0)}% · ${params.roomsAvailable || 0} ห้องว่าง\nรายได้ ฿${(params.revenue || 0).toLocaleString()}\n\n💡 ${params.recommendation}`
   }
 
   // F&B formatting:
-  //   - Buddhist year shortened to 2 digits (e.g. 2569 → 69). Idempotent if the
-  //     caller already shortened the date.
   //   - Margin shown as a 30-day average if `marginAvg` is supplied, otherwise
   //     falls back to the latest day's margin. Rendered as an integer percent.
   //   - Covers line gains a per-cover spend suffix when avgSpend > 0.
-  const shortDate = date.replace(/25(\d{2})/, '$1')
   const marginPct = Math.round(params.marginAvg || params.margin || 0)
   const avgSpend = params.avgSpend
   const coversLine = avgSpend && avgSpend > 0
