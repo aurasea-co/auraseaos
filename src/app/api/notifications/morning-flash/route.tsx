@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { sendNotification } from '@/lib/notifications/send'
 import MorningFlash from '@/lib/email/templates/morningFlash'
-import { buildMorningFlashLine } from '@/lib/line/messaging'
+import { buildMorningFlashLine, sendLineMessage } from '@/lib/line/messaging'
 import { getTodayBangkok } from '@/lib/businessDate'
 
 async function handleMorningFlash(req: NextRequest) {
@@ -89,16 +89,17 @@ async function handleMorningFlash(req: NextRequest) {
 
     if (membership?.role !== 'owner' && membership?.role !== 'manager') continue
 
-    // Check not already sent today
-    const { data: alreadySent } = await supabase
+    // Check not already sent today. Count-based so existing logs with
+    // multiple rows for the same user-date (e.g. from earlier multi-branch
+    // runs) don't crash maybeSingle().
+    const { count: alreadySentCount } = await supabase
       .from('notification_log')
-      .select('id')
+      .select('id', { count: 'exact', head: true })
       .eq('user_id', setting.user_id)
       .eq('notification_type', 'morning_flash')
       .eq('metric_date', today)
-      .maybeSingle()
 
-    if (alreadySent) continue
+    if ((alreadySentCount ?? 0) > 0) continue
 
     // Get org info
     const { data: org } = await supabase.from('organizations').select('*').eq('id', setting.organization_id).single()
@@ -106,6 +107,11 @@ async function handleMorningFlash(req: NextRequest) {
 
     // Get branches for this org
     const { data: branches } = await supabase.from('branches').select('*').eq('organization_id', setting.organization_id)
+
+    // LINE message is delivered once per user with all branches concatenated
+    // (one push call instead of one per branch). The per-branch email still
+    // goes through sendNotification.
+    const lineSnippets: string[] = []
 
     for (const branch of branches || []) {
       // Fetch the last 30 daily rows so we can compute a 30-day rolling avg
@@ -191,6 +197,8 @@ async function handleMorningFlash(req: NextRequest) {
         recommendation,
       })
 
+      lineSnippets.push(lineMsg)
+
       try {
         await sendNotification({
           userId: setting.user_id,
@@ -206,11 +214,38 @@ async function handleMorningFlash(req: NextRequest) {
           // morning_flash_email_enabled column). If that column doesn't
           // exist yet, the set is empty → email is skipped for everyone.
           skipEmail: !emailOptIn.has(`${setting.user_id}:${setting.organization_id}`),
+          // LINE is sent once per user after the branch loop with a
+          // combined message; suppress the per-branch LINE dispatch here.
+          skipLine: true,
         })
         results.push({ userId: setting.user_id, status: 'sent' })
       } catch (err) {
         console.error('sendNotification failed:', err)
         results.push({ userId: setting.user_id, status: 'error', error: (err as Error).message } as typeof results[0])
+      }
+    }
+
+    // Combined LINE delivery — one message per user containing every branch,
+    // followed by one notification_log row for the day.
+    if (setting.line_notify_enabled && lineSnippets.length > 0) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('line_id')
+        .eq('user_id', setting.user_id)
+        .maybeSingle()
+
+      if (profile?.line_id) {
+        const combined = lineSnippets.join('\n\n')
+        const ok = await sendLineMessage(profile.line_id as string, combined)
+        await supabase.from('notification_log').insert({
+          user_id: setting.user_id,
+          organization_id: setting.organization_id,
+          branch_id: null,
+          notification_type: 'morning_flash',
+          channel: 'line',
+          metric_date: today,
+          status: ok ? 'sent' : 'failed',
+        })
       }
     }
   }

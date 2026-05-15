@@ -19,6 +19,13 @@ interface NotificationPayload {
    * .morning_flash_email_enabled. LINE delivery is unaffected.
    */
   skipEmail?: boolean
+  /**
+   * When true, suppress the LINE channel for this dispatch regardless of
+   * line_notify_enabled. Used by morning-flash to dispatch the per-branch
+   * email through sendNotification while delivering a single combined LINE
+   * message for all branches once per user, outside this helper.
+   */
+  skipLine?: boolean
 }
 
 // Daily email caps per role
@@ -100,8 +107,10 @@ export async function sendNotification(payload: NotificationPayload) {
     }
   }
 
-  // Line Messaging API channel
-  if (settings?.line_notify_enabled) {
+  // Line Messaging API channel. Callers can also veto LINE entirely via
+  // payload.skipLine (used by morning-flash, which sends one combined LINE
+  // message per user covering all branches outside of this helper).
+  if (!payload.skipLine && settings?.line_notify_enabled) {
     // Get user's line_id from profiles
     const { data: profile } = await supabase
       .from('profiles')

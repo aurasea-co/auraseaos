@@ -67,8 +67,26 @@ async function handleMessage(lineUserId: string, text: string, replyToken: strin
   const { data: profile } = await supabase.from('profiles').select('user_id').eq('line_id', lineUserId).maybeSingle()
 
   if (profile) {
-    // Already connected — do not send the link again, just confirm status.
-    await replyLineMessage(replyToken, 'บัญชี Aurasea ของคุณเชื่อมต่อแล้ว ✅\nรับสรุปธุรกิจทุกเช้า 7:00 น.')
+    // Already connected. The confirmation reply is sent once ever, right
+    // after the account is linked — subsequent messages from the user are
+    // ignored to keep the chat from spamming the same line every time they
+    // say hi. Dedup state lives in notification_log under the type
+    // `line_connected_reply`.
+    const { count } = await supabase
+      .from('notification_log')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', profile.user_id)
+      .eq('notification_type', 'line_connected_reply')
+
+    if ((count ?? 0) > 0) return // already replied — silent
+
+    const ok = await replyLineMessage(replyToken, 'บัญชี Aurasea ของคุณเชื่อมต่อแล้ว ✅\nรับสรุปธุรกิจทุกเช้า 7:00 น.')
+    await supabase.from('notification_log').insert({
+      user_id: profile.user_id,
+      notification_type: 'line_connected_reply',
+      channel: 'line',
+      status: ok ? 'sent' : 'failed',
+    })
   } else {
     const linkUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/line/link?lineUserId=${Buffer.from(lineUserId).toString('base64')}`
     await replyLineMessage(replyToken, `กรุณาเชื่อมต่อบัญชี Aurasea ก่อน:\n${linkUrl}`)
