@@ -148,10 +148,6 @@ export default function MorningFlash(props: MorningFlashProps) {
 function BranchBlock({ branch, lang }: { branch: MorningFlashBranchData; lang: 'th' | 'en' }) {
   const isHotel = branch.branchType === 'accommodation'
 
-  // F&B Margin card prefers the 30-day rolling average when supplied,
-  // rendered as an integer percent (matches the LINE message format).
-  const marginValue = branch.marginAvg && branch.marginAvg > 0 ? branch.marginAvg : branch.margin
-
   const cards: MetricCardData[] = isHotel
     ? [
         currencyCardThai('ADR', branch.adr, branch.adrTarget, '฿'),
@@ -164,7 +160,11 @@ function BranchBlock({ branch, lang }: { branch: MorningFlashBranchData; lang: '
         ),
       ]
     : [
-        percentCard('Margin', marginValue, branch.marginTarget, 0),
+        // F&B Margin card:
+        //   - primary value = 30-day net margin avg (periodAvgMargin), int %
+        //   - target compare uses the same 30-day value vs marginTarget
+        //   - subtext shows the latest day's net margin as muted text
+        fnbMarginCard(branch.marginAvg, branch.margin, branch.marginTarget),
         countCard('Covers', branch.covers, branch.coversTarget),
         currencyCard(lang === 'th' ? 'ยอดขาย' : 'Sales', branch.sales, undefined, '฿'),
         currencyCard('Avg Spend', branch.avgSpend, undefined, '฿', lang === 'th' ? '/คน' : '/cover'),
@@ -214,6 +214,9 @@ interface MetricCardData {
   label: string
   value: string
   compare?: { text: string; isAbove: boolean }
+  /** Small muted line shown below the compare line. Used by the F&B Margin
+   *  card to surface the latest day's value alongside the 30-day average. */
+  subtext?: string
 }
 
 function MetricCard({ data }: { data: MetricCardData }) {
@@ -249,6 +252,11 @@ function MetricCard({ data }: { data: MetricCardData }) {
       ) : (
         <Text style={{ fontSize: 11, color: COLORS.muted, margin: '4px 0 0' }}>{' '}</Text>
       )}
+      {data.subtext && (
+        <Text style={{ fontSize: 11, color: COLORS.muted, margin: '2px 0 0' }}>
+          {data.subtext}
+        </Text>
+      )}
     </div>
   )
 }
@@ -269,20 +277,6 @@ function currencyCard(label: string, value: number | undefined, target: number |
     label,
     value: display,
     compare: { text: `${isAbove ? '+' : '-'}${prefix}${fmtNumber(Math.abs(gap))}`, isAbove },
-  }
-}
-
-function percentCard(label: string, value: number | undefined, target: number | undefined, decimals = 1): MetricCardData {
-  const fmt = (n: number) => (decimals > 0 ? n.toFixed(decimals) : `${Math.round(n)}`)
-  const display = `${fmt(value ?? 0)}%`
-  if (target == null || target === 0 || value == null) return { label, value: display }
-  const gap = value - target
-  if (gap === 0) return { label, value: display }
-  const isAbove = gap > 0
-  return {
-    label,
-    value: display,
-    compare: { text: `${isAbove ? '+' : '-'}${fmt(Math.abs(gap))}%`, isAbove },
   }
 }
 
@@ -339,4 +333,35 @@ function countCard(label: string, value: number | undefined, target: number | un
 
 function plainCard(label: string, value: string, suffix: string): MetricCardData {
   return { label, value: `${value} ${suffix}`.trim() }
+}
+
+/**
+ * F&B Margin card. Primary value is the 30-day rolling avg net margin
+ * (`marginAvg` — periodAvgMargin from marginAggregates), rendered as an
+ * integer percent to match the LINE message and dashboard. vs-target
+ * comparison is computed against the same 30-day value. The latest day's
+ * margin appears as a muted subtext line ("วันล่าสุด X%") so the reader
+ * can spot a one-day swing without losing the rolling-avg headline.
+ */
+function fnbMarginCard(marginAvg: number | undefined, latest: number | undefined, target: number | undefined): MetricCardData {
+  const primary = marginAvg ?? latest
+  const value = `${Math.round(primary ?? 0)}%`
+
+  let compare: MetricCardData['compare']
+  if (marginAvg != null && target != null && target !== 0) {
+    const gap = marginAvg - target
+    if (gap !== 0) {
+      const isAbove = gap > 0
+      compare = { text: `${isAbove ? '+' : '-'}${Math.round(Math.abs(gap))}%`, isAbove }
+    }
+  }
+
+  // Only show the latest-day subtext when it differs from the rolling avg
+  // (otherwise the line is just noise).
+  const subtext =
+    marginAvg != null && latest != null && Math.round(latest) !== Math.round(marginAvg)
+      ? `วันล่าสุด ${Math.round(latest)}%`
+      : undefined
+
+  return { label: 'Margin', value, compare, subtext }
 }

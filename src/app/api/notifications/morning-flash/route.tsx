@@ -5,6 +5,8 @@ import { EMAIL_SENDERS } from '@/lib/email/resend'
 import MorningFlash, { type MorningFlashBranchData } from '@/lib/email/templates/morningFlash'
 import { buildMorningFlashLine, sendLineMessage } from '@/lib/line/messaging'
 import { getTodayBangkok } from '@/lib/businessDate'
+import { calculateNetMargin } from '@/lib/calculations/fnb'
+import { periodAvgMargin, type MarginInputRow } from '@/lib/calculations/marginAggregates'
 
 async function handleMorningFlash(req: NextRequest) {
   // Allowed callers:
@@ -153,21 +155,6 @@ async function handleMorningFlash(req: NextRequest) {
       const latest = metrics?.[0]
       if (!latest) continue
 
-      const marginValues = (metrics || [])
-        .map((m: Record<string, unknown>) => Number(m.margin))
-        .filter((v) => Number.isFinite(v) && v > 0)
-      const manualMarginAvg = marginValues.length > 0
-        ? marginValues.reduce((s, v) => s + v, 0) / marginValues.length
-        : undefined
-
-      // Prefer the view's pre-aggregated 30-day avg column when present,
-      // otherwise fall back to the value we just computed from the last
-      // 30 daily rows.
-      const margin30dAvg = latest.margin_30d_avg != null
-        ? Number(latest.margin_30d_avg)
-        : manualMarginAvg
-      const marginAvg = Number.isFinite(margin30dAvg) ? margin30dAvg : undefined
-
       const avgTicket = Number(latest.avg_ticket) || 0
       const revenueNum = Number(latest.revenue) || 0
       const coversNum = Number(latest.customers) || 0
@@ -178,11 +165,47 @@ async function handleMorningFlash(req: NextRequest) {
       const { data: targets } = await supabase.from('targets').select('*').eq('branch_id', branch.id).maybeSingle()
 
       const isHotel = branch.business_type === 'accommodation'
+
+      // F&B margin: identical math to the dashboard (Home + Trends).
+      //   - latestMargin = calculateNetMargin(revenue, variableCost,
+      //                                       monthlySalary, operatingDays)
+      //   - marginAvg30d = periodAvgMargin(last 30 rows, monthlySalary,
+      //                                    operatingDays).value
+      // The spec mentioned `branch.monthly_fixed_cost` but the salary value
+      // actually lives in `targets.monthly_salary` (per 001_create_targets).
+      // operatingDays = count of last-30 rows with revenue > 0, matching the
+      // dashboard's "days the branch was actually open" denominator.
+      let latestMargin: number | undefined
+      let marginAvg: number | undefined
+      if (!isHotel) {
+        const monthlySalary = Number(targets?.monthly_salary) || 0
+        const fnbRows: MarginInputRow[] = (metrics || []).map((m: Record<string, unknown>) => ({
+          metric_date: String(m.metric_date),
+          revenue: Number(m.revenue) || null,
+          variableCost: Number(m.additional_cost_today) || null,
+        }))
+        const operatingDays = fnbRows.filter((r) => (r.revenue ?? 0) > 0).length
+
+        latestMargin = calculateNetMargin(
+          Number(latest.revenue) || 0,
+          latest.additional_cost_today != null ? Number(latest.additional_cost_today) : null,
+          monthlySalary,
+          operatingDays,
+        ) ?? undefined
+
+        marginAvg = periodAvgMargin(fnbRows, monthlySalary, operatingDays)?.value
+      }
+
       const recommendation = isHotel
         ? (latest.adr || 0) >= (Number(targets?.adr_target) || 0) ? 'ADR ตามเป้า — รักษาระดับ' : 'ADR ต่ำกว่าเป้า — ลองเพิ่ม direct booking'
-        : (latest.margin || 0) >= (100 - Number(targets?.cogs_target || 32)) ? 'Margin ตามเป้า' : 'Margin ต่ำกว่าเป้า — ตรวจสอบ COGS'
+        : (marginAvg ?? latestMargin ?? 0) >= (100 - Number(targets?.cogs_target || 32)) ? 'Margin ตามเป้า' : 'Margin ต่ำกว่าเป้า — ตรวจสอบ COGS'
 
       const dateStr = new Date(latest.metric_date + 'T00:00:00').toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })
+
+      // For F&B, prefer the freshly-computed latestMargin (calculateNetMargin
+      // — same math as the dashboard). For accommodation, keep the existing
+      // latest.margin value untouched per spec ("do not touch hotel logic").
+      const branchMargin = isHotel ? (latest.margin || undefined) : latestMargin
 
       branchDataList.push({
         branchName: branch.name,
@@ -194,7 +217,7 @@ async function handleMorningFlash(req: NextRequest) {
         occupancyTarget: Number(targets?.occupancy_target) || undefined,
         revenue: latest.revenue,
         roomsAvailable: latest.rooms_available ? latest.rooms_available - (latest.rooms_sold || 0) : undefined,
-        margin: latest.margin || undefined,
+        margin: branchMargin,
         marginAvg,
         marginTarget: targets?.cogs_target ? 100 - Number(targets.cogs_target) : undefined,
         covers: latest.customers || undefined,
@@ -224,7 +247,7 @@ async function handleMorningFlash(req: NextRequest) {
           occupancy: latest.occupancy_rate || undefined,
           roomsAvailable: latest.rooms_available ? latest.rooms_available - (latest.rooms_sold || 0) : undefined,
           revenue: latest.revenue,
-          margin: latest.margin || undefined,
+          margin: branchMargin,
           marginAvg,
           covers: latest.customers || undefined,
           sales: latest.revenue,
