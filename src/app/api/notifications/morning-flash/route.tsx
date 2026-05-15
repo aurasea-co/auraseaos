@@ -24,20 +24,56 @@ async function handleMorningFlash(req: NextRequest) {
   let body: { branchId?: string; organizationId?: string } = {}
   try { body = await req.json() } catch { /* cron call — no body */ }
 
-  // Recipients = anyone opted in to LINE for this org, OR explicitly opted
-  // in to the morning-flash email. Email is opt-in only — defaulting to
-  // false means existing users get LINE-only morning flashes after the
-  // migration adds `morning_flash_email_enabled` with DEFAULT false.
-  const query = supabase
+  // Recipients are built from two pools:
+  //   1. LINE opt-ins  (notification_settings.line_notify_enabled = true)
+  //   2. Email opt-ins (notification_settings.morning_flash_email_enabled = true)
+  //
+  // The two pools are queried independently so the route stays working even
+  // before migration 019 has added the morning_flash_email_enabled column.
+  // If that column doesn't exist yet, the email-opt-in query errors out and
+  // we degrade to LINE-only delivery (which matches the new default anyway).
+  const lineQuery = supabase
     .from('notification_settings')
-    .select('user_id, organization_id, email_notifications, line_notify_enabled, morning_flash_email_enabled')
-    .or('line_notify_enabled.eq.true,morning_flash_email_enabled.eq.true')
+    .select('user_id, organization_id, email_notifications, line_notify_enabled')
+    .eq('line_notify_enabled', true)
+  if (body.organizationId) lineQuery.eq('organization_id', body.organizationId)
+  const { data: lineSettings, error: lineErr } = await lineQuery
+  if (lineErr) console.error('[morning-flash] line opt-in query failed:', lineErr.message)
 
-  if (body.organizationId) {
-    query.eq('organization_id', body.organizationId)
+  const emailOptIn = new Set<string>() // keyed `${user_id}:${organization_id}`
+  try {
+    const emailQuery = supabase
+      .from('notification_settings')
+      .select('user_id, organization_id')
+      .eq('morning_flash_email_enabled', true)
+    if (body.organizationId) emailQuery.eq('organization_id', body.organizationId)
+    const { data: emailRows, error: emailErr } = await emailQuery
+    if (emailErr) {
+      console.warn('[morning-flash] morning_flash_email_enabled not queryable — falling back to LINE-only delivery. Run migration 019 to enable email opt-in.')
+    } else {
+      for (const r of emailRows || []) {
+        emailOptIn.add(`${r.user_id}:${r.organization_id}`)
+      }
+    }
+  } catch (err) {
+    console.warn('[morning-flash] morning_flash_email_enabled query threw:', err)
   }
 
-  const { data: settingsList } = await query
+  // Merge LINE pool + any email-only opt-ins (users who set email-opt-in
+  // without enabling LINE — they'd otherwise be missed).
+  const settingsByKey = new Map<string, { user_id: string; organization_id: string; email_notifications: boolean | null; line_notify_enabled: boolean | null }>()
+  for (const s of lineSettings || []) {
+    settingsByKey.set(`${s.user_id}:${s.organization_id}`, s)
+  }
+  for (const key of emailOptIn) {
+    if (!settingsByKey.has(key)) {
+      const [user_id, organization_id] = key.split(':')
+      settingsByKey.set(key, { user_id, organization_id, email_notifications: true, line_notify_enabled: false })
+    }
+  }
+  const settingsList = [...settingsByKey.values()]
+  console.log(`[morning-flash] recipients: ${settingsList.length} (line=${lineSettings?.length ?? 0}, email-only=${settingsList.length - (lineSettings?.length ?? 0)})`)
+
   const results: { userId: string; status: string }[] = []
 
   for (const setting of settingsList || []) {
@@ -165,10 +201,11 @@ async function handleMorningFlash(req: NextRequest) {
           emailReact: <MorningFlash {...emailProps} />,
           lineMessage: lineMsg,
           metricDate: today,
-          // Email is opt-in: only send when the user has explicitly
-          // enabled the morning-flash email for this org. Treats null /
-          // undefined / false / missing column as opt-out (LINE only).
-          skipEmail: setting.morning_flash_email_enabled !== true,
+          // Email is opt-in: send only when the user appears in the
+          // emailOptIn set (derived from a separate query against the
+          // morning_flash_email_enabled column). If that column doesn't
+          // exist yet, the set is empty → email is skipped for everyone.
+          skipEmail: !emailOptIn.has(`${setting.user_id}:${setting.organization_id}`),
         })
         results.push({ userId: setting.user_id, status: 'sent' })
       } catch (err) {
