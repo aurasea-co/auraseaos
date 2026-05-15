@@ -1,85 +1,128 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { Resend } from 'resend'
+import { render } from '@react-email/render'
 import { EMAIL_SENDERS } from '@/lib/email/resend'
+import WeeklyReport from '@/lib/email/templates/weeklyReport'
 import { getTodayBangkok, toBangkokDateStr } from '@/lib/businessDate'
+
+interface Aggregates {
+  daysWithData: number
+  totalRevenue: number
+  avgAdr: number | undefined
+  avgOccupancy: number | undefined
+  avgMargin: number | undefined
+  avgCovers: number | undefined
+  avgSpend: number | undefined
+}
 
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}` && req.headers.get('x-vercel-cron') !== '1') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  return handleWeeklyReport()
+}
+
+export async function GET(req: NextRequest) {
+  const authHeader = req.headers.get('authorization')
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}` && req.headers.get('x-vercel-cron') !== '1') {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  return handleWeeklyReport()
+}
+
+async function handleWeeklyReport() {
   const supabase = createServiceClient()
   const resend = new Resend(process.env.RESEND_API_KEY)
 
-  // Get all Pro organizations
+  // Pro organizations only
   const { data: orgs } = await supabase.from('organizations').select('id, name, plan').eq('plan', 'pro')
   const results: string[] = []
 
   for (const org of orgs || []) {
-    // Get owner
-    const { data: owners } = await supabase.from('organization_members').select('user_id').eq('organization_id', org.id).eq('role', 'owner')
+    // Owner role only (spec: weekly report is owner-only).
+    const { data: owners } = await supabase
+      .from('organization_members')
+      .select('user_id')
+      .eq('organization_id', org.id)
+      .eq('role', 'owner')
     if (!owners?.length) continue
 
-    // Get owner email
     const { data: { users } } = await supabase.auth.admin.listUsers()
     const ownerUser = users?.find((u) => u.id === owners[0].user_id)
     if (!ownerUser?.email) continue
 
-    // Get branches
-    const { data: branches } = await supabase.from('branches').select('id, name, business_type').eq('organization_id', org.id)
+    const { data: branches } = await supabase
+      .from('branches')
+      .select('id, name, business_type')
+      .eq('organization_id', org.id)
 
     for (const branch of branches || []) {
-      // Get last 7 days metrics
-      const startDate = new Date()
-      startDate.setDate(startDate.getDate() - 7)
-      const { data: metrics } = await supabase
+      const now = new Date()
+      const currentStart = new Date(now)
+      currentStart.setDate(currentStart.getDate() - 7)
+      const previousStart = new Date(now)
+      previousStart.setDate(previousStart.getDate() - 14)
+
+      const currentStartStr = toBangkokDateStr(currentStart.toISOString())
+      const previousStartStr = toBangkokDateStr(previousStart.toISOString())
+
+      // Pull 14 days in one round-trip and split client-side.
+      const { data: rows } = await supabase
         .from('branch_daily_metrics')
         .select('*')
         .eq('branch_id', branch.id)
-        .gte('metric_date', toBangkokDateStr(startDate.toISOString()))
+        .gte('metric_date', previousStartStr)
         .order('metric_date', { ascending: true })
 
-      if (!metrics?.length) continue
+      const currentRows = (rows || []).filter((r) => String(r.metric_date) >= currentStartStr)
+      if (!currentRows.length) continue
 
-      // Build simple text report (PDF generation requires @react-pdf at runtime)
-      // For now, send as rich HTML email with metrics table
-      const isHotel = branch.business_type === 'accommodation'
-      const weekStart = startDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
-      const weekEnd = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+      const previousRows = (rows || []).filter((r) => String(r.metric_date) < currentStartStr)
 
-      const avgAdr = metrics.filter((m) => m.adr).reduce((s, m) => s + (m.adr || 0), 0) / (metrics.filter((m) => m.adr).length || 1)
-      const avgOcc = metrics.filter((m) => m.occupancy_rate != null).reduce((s, m) => s + (m.occupancy_rate || 0), 0) / (metrics.filter((m) => m.occupancy_rate != null).length || 1)
-      const totalRevenue = metrics.reduce((s, m) => s + m.revenue, 0)
-      const avgMargin = metrics.filter((m) => m.margin != null).reduce((s, m) => s + (m.margin || 0), 0) / (metrics.filter((m) => m.margin != null).length || 1)
+      const current = aggregate(currentRows)
+      const previous = previousRows.length > 0 ? aggregate(previousRows) : undefined
 
-      const subject = `Aurasea Weekly Report — ${branch.name} — ${weekStart}–${weekEnd}`
+      const weekStart = currentStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+      const weekEnd = now.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+      const weekRange = `${weekStart} – ${weekEnd}`
+      const subject = `Aurasea Weekly Report — ${branch.name} — ${weekRange}`
+
+      const html = await render(
+        WeeklyReport({
+          branchName: branch.name,
+          weekRange,
+          lang: 'th',
+          branchType: branch.business_type as 'accommodation' | 'fnb',
+          daysWithData: current.daysWithData,
+          totalRevenue: current.totalRevenue,
+          avgAdr: current.avgAdr,
+          avgOccupancy: current.avgOccupancy,
+          avgMargin: current.avgMargin,
+          avgCovers: current.avgCovers,
+          avgSpend: current.avgSpend,
+          prev: previous
+            ? {
+                totalRevenue: previous.totalRevenue,
+                avgAdr: previous.avgAdr,
+                avgOccupancy: previous.avgOccupancy,
+                avgMargin: previous.avgMargin,
+                avgCovers: previous.avgCovers,
+                avgSpend: previous.avgSpend,
+              }
+            : undefined,
+          dashboardUrl: 'https://app.auraseaos.com/home',
+        }),
+      )
 
       await resend.emails.send({
         from: EMAIL_SENDERS.reports,
         to: ownerUser.email,
         subject,
-        html: `
-          <div style="max-width:600px;margin:0 auto;font-family:-apple-system,Arial,sans-serif;background:#fff;padding:32px;border-radius:8px">
-            <div style="background:#534AB7;margin:-32px -32px 24px;padding:24px 32px;border-radius:8px 8px 0 0">
-              <div style="color:#fff;font-size:16px">aurasea</div>
-              <div style="color:#fff;font-size:20px;font-weight:bold;margin-top:8px">${branch.name}</div>
-              <div style="color:rgba(255,255,255,0.8);font-size:13px;margin-top:4px">Weekly Report · ${weekStart} – ${weekEnd}</div>
-            </div>
-            <table style="width:100%;border-collapse:collapse;font-size:14px">
-              ${isHotel ? `
-                <tr><td style="padding:8px 0;color:#9b9b9b">ADR avg</td><td style="text-align:right;font-weight:bold">฿${Math.round(avgAdr).toLocaleString()}</td></tr>
-                <tr><td style="padding:8px 0;color:#9b9b9b">Occupancy avg</td><td style="text-align:right;font-weight:bold">${avgOcc.toFixed(1)}%</td></tr>
-              ` : `
-                <tr><td style="padding:8px 0;color:#9b9b9b">Margin avg</td><td style="text-align:right;font-weight:bold">${avgMargin.toFixed(1)}%</td></tr>
-              `}
-              <tr><td style="padding:8px 0;color:#9b9b9b">Revenue total</td><td style="text-align:right;font-weight:bold">฿${totalRevenue.toLocaleString()}</td></tr>
-              <tr><td style="padding:8px 0;color:#9b9b9b">Days with data</td><td style="text-align:right;font-weight:bold">${metrics.length}/7</td></tr>
-            </table>
-            <div style="margin-top:16px;font-size:11px;color:#9b9b9b;text-align:center">PDF report with charts coming soon</div>
-          </div>
-        `,
+        html,
       })
 
       await supabase.from('notification_log').insert({
@@ -97,4 +140,33 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ sent: results.length, branches: results })
+}
+
+function aggregate(rows: Array<Record<string, unknown>>): Aggregates {
+  const num = (v: unknown): number | null => {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : null
+  }
+  const meanOfDefined = (vals: Array<number | null>): number | undefined => {
+    const present = vals.filter((v): v is number => v != null)
+    if (present.length === 0) return undefined
+    return present.reduce((s, v) => s + v, 0) / present.length
+  }
+
+  const revenues = rows.map((r) => num(r.revenue)).filter((v): v is number => v != null && v > 0)
+  const adrs = rows.map((r) => num(r.adr)).filter((v): v is number => v != null && v > 0)
+  const occs = rows.map((r) => num(r.occupancy_rate))
+  const margins = rows.map((r) => num(r.margin)).filter((v): v is number => v != null && v > 0)
+  const covers = rows.map((r) => num(r.customers))
+  const avgTickets = rows.map((r) => num(r.avg_ticket)).filter((v): v is number => v != null && v > 0)
+
+  return {
+    daysWithData: rows.length,
+    totalRevenue: revenues.reduce((s, v) => s + v, 0),
+    avgAdr: adrs.length ? adrs.reduce((s, v) => s + v, 0) / adrs.length : undefined,
+    avgOccupancy: meanOfDefined(occs),
+    avgMargin: margins.length ? margins.reduce((s, v) => s + v, 0) / margins.length : undefined,
+    avgCovers: meanOfDefined(covers),
+    avgSpend: avgTickets.length ? avgTickets.reduce((s, v) => s + v, 0) / avgTickets.length : undefined,
+  }
 }

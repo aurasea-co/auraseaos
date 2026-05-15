@@ -24,11 +24,14 @@ async function handleMorningFlash(req: NextRequest) {
   let body: { branchId?: string; organizationId?: string } = {}
   try { body = await req.json() } catch { /* cron call — no body */ }
 
-  // Get all owners with email notifications enabled
+  // Recipients = anyone opted in to LINE for this org, OR explicitly opted
+  // in to the morning-flash email. Email is opt-in only — defaulting to
+  // false means existing users get LINE-only morning flashes after the
+  // migration adds `morning_flash_email_enabled` with DEFAULT false.
   const query = supabase
     .from('notification_settings')
-    .select('user_id, organization_id, email_notifications, line_notify_enabled')
-    .eq('email_notifications', true)
+    .select('user_id, organization_id, email_notifications, line_notify_enabled, morning_flash_email_enabled')
+    .or('line_notify_enabled.eq.true,morning_flash_email_enabled.eq.true')
 
   if (body.organizationId) {
     query.eq('organization_id', body.organizationId)
@@ -124,6 +127,7 @@ async function handleMorningFlash(req: NextRequest) {
         covers: latest.customers || undefined,
         coversTarget: Number(targets?.covers_target) || undefined,
         sales: latest.revenue,
+        avgSpend,
         recommendationText: recommendation,
         plan: org.plan as 'starter' | 'growth' | 'pro',
         entryUrl: `https://auraseaos.com/entry`,
@@ -161,6 +165,10 @@ async function handleMorningFlash(req: NextRequest) {
           emailReact: <MorningFlash {...emailProps} />,
           lineMessage: lineMsg,
           metricDate: today,
+          // Email is opt-in: only send when the user has explicitly
+          // enabled the morning-flash email for this org. Treats null /
+          // undefined / false / missing column as opt-out (LINE only).
+          skipEmail: setting.morning_flash_email_enabled !== true,
         })
         results.push({ userId: setting.user_id, status: 'sent' })
       } catch (err) {

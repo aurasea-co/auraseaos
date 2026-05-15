@@ -12,6 +12,13 @@ interface NotificationPayload {
   emailReact: React.ReactElement
   lineMessage: string
   metricDate?: string
+  /**
+   * When true, suppress the email channel for this dispatch regardless of
+   * the user's email_notifications setting. Used by morning-flash, where
+   * email is opt-in per organization via notification_settings
+   * .morning_flash_email_enabled. LINE delivery is unaffected.
+   */
+  skipEmail?: boolean
 }
 
 // Daily email caps per role
@@ -50,8 +57,10 @@ export async function sendNotification(payload: NotificationPayload) {
 
   const promises: Promise<unknown>[] = []
 
-  // Email channel — check daily cap before sending
-  if ((settings?.email_notifications ?? true) && userEmail) {
+  // Email channel — check daily cap before sending. Callers can also veto
+  // email entirely via payload.skipEmail (used by morning-flash, where the
+  // email channel is opt-in per org).
+  if (!payload.skipEmail && (settings?.email_notifications ?? true) && userEmail) {
     // Count emails already sent to this user today
     const todayStart = new Date()
     todayStart.setUTCHours(0, 0, 0, 0)

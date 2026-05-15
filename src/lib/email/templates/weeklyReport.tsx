@@ -1,25 +1,28 @@
 import { Html, Head, Body, Container, Section, Row, Column, Text, Button } from '@react-email/components'
 
-interface MorningFlashProps {
+interface WeeklyReportProps {
   branchName: string
-  businessDate: string
+  weekRange: string
   lang: 'th' | 'en'
   branchType: 'accommodation' | 'fnb'
-  adr?: number
-  adrTarget?: number
-  occupancy?: number
-  occupancyTarget?: number
-  revenue?: number
-  roomsAvailable?: number
-  margin?: number
-  marginTarget?: number
-  covers?: number
-  coversTarget?: number
-  sales?: number
+  daysWithData: number
+  totalRevenue: number
+  /** Optional metric averages (per-day means across rows with data) */
+  avgAdr?: number
+  avgOccupancy?: number
+  avgMargin?: number
+  avgCovers?: number
   avgSpend?: number
-  recommendationText: string
-  plan: 'starter' | 'growth' | 'pro'
-  entryUrl: string
+  /** Previous-week comparison values, when available. */
+  prev?: {
+    totalRevenue?: number
+    avgAdr?: number
+    avgOccupancy?: number
+    avgMargin?: number
+    avgCovers?: number
+    avgSpend?: number
+  }
+  dashboardUrl: string
 }
 
 const COLORS = {
@@ -37,30 +40,30 @@ const COLORS = {
 const FONT_STACK =
   '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "IBM Plex Sans Thai", sans-serif'
 
-export default function MorningFlash(props: MorningFlashProps) {
-  const { branchName, businessDate, lang, branchType, recommendationText, entryUrl } = props
+export default function WeeklyReport(props: WeeklyReportProps) {
+  const { branchName, weekRange, lang, branchType, daysWithData, totalRevenue, prev, dashboardUrl } = props
   const isHotel = branchType === 'accommodation'
 
   const cards: MetricCardData[] = isHotel
     ? [
-        currencyCard('ADR', props.adr, props.adrTarget, '฿'),
-        percentCard('Occupancy', props.occupancy, props.occupancyTarget),
-        currencyCard(lang === 'th' ? 'รายได้' : 'Revenue', props.revenue, undefined, '฿'),
-        plainCard(
-          lang === 'th' ? 'ห้องว่าง' : 'Available Rooms',
-          `${props.roomsAvailable ?? 0}`,
-          lang === 'th' ? 'ห้อง' : 'rooms',
-        ),
+        currencyCard(lang === 'th' ? 'รายได้รวม' : 'Revenue', totalRevenue, prev?.totalRevenue, '฿'),
+        currencyCard(lang === 'th' ? 'ADR เฉลี่ย' : 'Avg ADR', props.avgAdr, prev?.avgAdr, '฿'),
+        percentCard(lang === 'th' ? 'Occupancy เฉลี่ย' : 'Avg Occupancy', props.avgOccupancy, prev?.avgOccupancy),
+        plainCard(lang === 'th' ? 'วันที่มีข้อมูล' : 'Days with data', `${daysWithData}/7`),
       ]
     : [
-        percentCard('Margin', props.margin, props.marginTarget),
-        countCard('Covers', props.covers, props.coversTarget),
-        currencyCard(lang === 'th' ? 'ยอดขาย' : 'Sales', props.sales, undefined, '฿'),
-        currencyCard('Avg Spend', props.avgSpend, undefined, '฿', lang === 'th' ? '/คน' : '/cover'),
+        currencyCard(lang === 'th' ? 'ยอดขายรวม' : 'Revenue', totalRevenue, prev?.totalRevenue, '฿'),
+        percentCard(lang === 'th' ? 'Margin เฉลี่ย' : 'Avg Margin', props.avgMargin, prev?.avgMargin),
+        countCard(lang === 'th' ? 'Covers เฉลี่ย/วัน' : 'Avg Covers/day', props.avgCovers, prev?.avgCovers),
+        currencyCard(lang === 'th' ? 'Avg Spend' : 'Avg Spend', props.avgSpend, prev?.avgSpend, '฿', lang === 'th' ? '/คน' : '/cover'),
       ]
 
-  const ctaLabel = lang === 'th' ? 'กรอกข้อมูลวันนี้' : "Enter today's data"
+  const ctaLabel = lang === 'th' ? 'ดูรายละเอียดใน Dashboard' : 'Open dashboard'
   const footerLabel = lang === 'th' ? 'Aurasea OS · ยกเลิกการแจ้งเตือน' : 'Aurasea OS · Unsubscribe'
+  const subtitle = lang === 'th' ? `รายงานรายสัปดาห์ · ${weekRange}` : `Weekly report · ${weekRange}`
+  const compareNote = prev
+    ? (lang === 'th' ? 'เทียบกับสัปดาห์ก่อนหน้า' : 'vs previous week')
+    : (lang === 'th' ? 'ยังไม่มีข้อมูลสัปดาห์ก่อนเพื่อเปรียบเทียบ' : 'No prior-week data to compare yet')
 
   return (
     <Html>
@@ -70,9 +73,10 @@ export default function MorningFlash(props: MorningFlashProps) {
           {/* Logo */}
           <Text style={{ fontSize: 14, fontWeight: 600, color: COLORS.text, letterSpacing: '-0.01em', margin: '0 0 28px' }}>aurasea</Text>
 
-          {/* Branch + date */}
+          {/* Branch + subtitle */}
           <Text style={{ fontSize: 26, fontWeight: 700, color: COLORS.text, letterSpacing: '-0.02em', lineHeight: 1.2, margin: '0 0 4px' }}>{branchName}</Text>
-          <Text style={{ fontSize: 14, color: COLORS.muted, margin: '0 0 24px' }}>{businessDate}</Text>
+          <Text style={{ fontSize: 14, color: COLORS.muted, margin: '0 0 4px' }}>{subtitle}</Text>
+          <Text style={{ fontSize: 11, color: COLORS.muted, margin: '0 0 24px' }}>{compareNote}</Text>
 
           {/* Metric grid (2 × 2) */}
           <Row style={{ marginBottom: 8 }}>
@@ -83,7 +87,7 @@ export default function MorningFlash(props: MorningFlashProps) {
               <MetricCard data={cards[1]} />
             </Column>
           </Row>
-          <Row style={{ marginBottom: 24 }}>
+          <Row style={{ marginBottom: 28 }}>
             <Column style={{ width: '50%', paddingRight: 4, verticalAlign: 'top' as const }}>
               <MetricCard data={cards[2]} />
             </Column>
@@ -92,25 +96,10 @@ export default function MorningFlash(props: MorningFlashProps) {
             </Column>
           </Row>
 
-          {/* Recommendation */}
-          <Section
-            style={{
-              borderLeft: `3px solid ${COLORS.accent}`,
-              backgroundColor: COLORS.rowBg,
-              padding: '14px 16px',
-              borderRadius: '0 6px 6px 0',
-              marginBottom: 28,
-            }}
-          >
-            <Text style={{ fontSize: 14, lineHeight: 1.6, color: COLORS.text, fontStyle: 'italic', margin: 0 }}>
-              {recommendationText}
-            </Text>
-          </Section>
-
           {/* CTA */}
           <Section style={{ textAlign: 'center' as const, marginBottom: 32 }}>
             <Button
-              href={entryUrl}
+              href={dashboardUrl}
               style={{
                 backgroundColor: COLORS.accent,
                 color: '#ffffff',
@@ -179,51 +168,53 @@ function MetricCard({ data }: { data: MetricCardData }) {
   )
 }
 
-// --- card builders -------------------------------------------------------
+// --- card builders (compare vs previous-week value) ----------------------
 
 function fmtNumber(value: number): string {
   return Math.round(value).toLocaleString()
 }
 
-function currencyCard(label: string, value: number | undefined, target: number | undefined, prefix: string, suffix = ''): MetricCardData {
+function currencyCard(label: string, value: number | undefined, prev: number | undefined, prefix: string, suffix = ''): MetricCardData {
   const display = `${prefix}${fmtNumber(value ?? 0)}${suffix}`
-  if (target == null || target === 0 || value == null) return { label, value: display }
-  const gap = value - target
+  if (prev == null || prev === 0 || value == null) return { label, value: display }
+  const gap = value - prev
   if (gap === 0) return { label, value: display }
+  const pct = (gap / prev) * 100
   const isAbove = gap > 0
   return {
     label,
     value: display,
-    compare: { text: `${isAbove ? '+' : '-'}${prefix}${fmtNumber(Math.abs(gap))}`, isAbove },
+    compare: { text: `${isAbove ? '+' : '-'}${Math.abs(pct).toFixed(0)}% vs prev`, isAbove },
   }
 }
 
-function percentCard(label: string, value: number | undefined, target: number | undefined): MetricCardData {
+function percentCard(label: string, value: number | undefined, prev: number | undefined): MetricCardData {
   const display = `${(value ?? 0).toFixed(1)}%`
-  if (target == null || target === 0 || value == null) return { label, value: display }
-  const gap = value - target
+  if (prev == null || value == null) return { label, value: display }
+  const gap = value - prev
   if (gap === 0) return { label, value: display }
   const isAbove = gap > 0
   return {
     label,
     value: display,
-    compare: { text: `${isAbove ? '+' : '-'}${Math.abs(gap).toFixed(1)}%`, isAbove },
+    compare: { text: `${isAbove ? '+' : '-'}${Math.abs(gap).toFixed(1)}pp vs prev`, isAbove },
   }
 }
 
-function countCard(label: string, value: number | undefined, target: number | undefined): MetricCardData {
-  const display = `${value ?? 0}`
-  if (target == null || target === 0 || value == null) return { label, value: display }
-  const gap = value - target
+function countCard(label: string, value: number | undefined, prev: number | undefined): MetricCardData {
+  const display = `${Math.round(value ?? 0)}`
+  if (prev == null || prev === 0 || value == null) return { label, value: display }
+  const gap = value - prev
   if (gap === 0) return { label, value: display }
+  const pct = (gap / prev) * 100
   const isAbove = gap > 0
   return {
     label,
     value: display,
-    compare: { text: `${isAbove ? '+' : '-'}${Math.abs(gap)}`, isAbove },
+    compare: { text: `${isAbove ? '+' : '-'}${Math.abs(pct).toFixed(0)}% vs prev`, isAbove },
   }
 }
 
-function plainCard(label: string, value: string, suffix: string): MetricCardData {
-  return { label, value: `${value} ${suffix}`.trim() }
+function plainCard(label: string, value: string): MetricCardData {
+  return { label, value }
 }
