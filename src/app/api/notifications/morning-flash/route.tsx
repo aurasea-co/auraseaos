@@ -69,16 +69,34 @@ async function handleMorningFlash(req: NextRequest) {
     const { data: branches } = await supabase.from('branches').select('*').eq('organization_id', setting.organization_id)
 
     for (const branch of branches || []) {
-      // Get latest metrics
+      // Fetch the last 30 daily rows so we can compute a 30-day rolling avg
+      // margin alongside the latest-day values.
       const { data: metrics } = await supabase
         .from('branch_daily_metrics')
         .select('*')
         .eq('branch_id', branch.id)
         .order('metric_date', { ascending: false })
-        .limit(1)
+        .limit(30)
 
       const latest = metrics?.[0]
       if (!latest) continue
+
+      // 30-day average of the daily margin column, ignoring null/zero days.
+      const marginValues = (metrics || [])
+        .map((m: Record<string, unknown>) => Number(m.margin))
+        .filter((v) => Number.isFinite(v) && v > 0)
+      const marginAvg = marginValues.length > 0
+        ? marginValues.reduce((s, v) => s + v, 0) / marginValues.length
+        : undefined
+
+      // Avg per-cover spend: prefer the view's `avg_ticket` column. If null
+      // (legacy rows) fall back to revenue/customers when both are present.
+      const avgTicket = Number(latest.avg_ticket) || 0
+      const revenueNum = Number(latest.revenue) || 0
+      const coversNum = Number(latest.customers) || 0
+      const avgSpend = avgTicket > 0
+        ? avgTicket
+        : (coversNum > 0 ? revenueNum / coversNum : undefined)
 
       // Get targets
       const { data: targets } = await supabase.from('targets').select('*').eq('branch_id', branch.id).maybeSingle()
@@ -111,18 +129,25 @@ async function handleMorningFlash(req: NextRequest) {
         entryUrl: `https://auraseaos.com/entry`,
       }
 
+      // Shorten Buddhist year (2569 → 69) only for the F&B LINE message,
+      // keeping the accommodation LINE message and all email templates on
+      // the original 4-digit form.
+      const lineDateStr = isHotel ? dateStr : dateStr.replace(/25(\d{2})/, '$1')
+
       const lineMsg = buildMorningFlashLine({
         branchName: branch.name,
         branchType: branch.business_type as 'accommodation' | 'fnb',
-        date: dateStr,
+        date: lineDateStr,
         adr: latest.adr || undefined,
         adrTarget: Number(targets?.adr_target) || undefined,
         occupancy: latest.occupancy_rate || undefined,
         roomsAvailable: latest.rooms_available ? latest.rooms_available - (latest.rooms_sold || 0) : undefined,
         revenue: latest.revenue,
         margin: latest.margin || undefined,
+        marginAvg,
         covers: latest.customers || undefined,
         sales: latest.revenue,
+        avgSpend,
         recommendation,
       })
 

@@ -75,8 +75,12 @@ export function buildMorningFlashLine(params: {
   roomsAvailable?: number
   revenue?: number
   margin?: number
+  /** 30-day rolling avg margin (F&B). Preferred over `margin` when supplied. */
+  marginAvg?: number
   covers?: number
   sales?: number
+  /** Per-cover avg spend (F&B). Appended to the covers line when > 0. */
+  avgSpend?: number
   recommendation: string
 }): string {
   const { branchName, branchType, date } = params
@@ -85,5 +89,18 @@ export function buildMorningFlashLine(params: {
     const sign = gap >= 0 ? '+' : ''
     return `🏨 ${branchName} — ${date}\nADR ฿${Math.round(params.adr || 0)} (${sign}฿${Math.round(Math.abs(gap))})\nOcc ${Math.round(params.occupancy || 0)}% · ${params.roomsAvailable || 0} ห้องว่าง\nรายได้ ฿${(params.revenue || 0).toLocaleString()}\n\n💡 ${params.recommendation}`
   }
-  return `☕ ${branchName} — ${date}\nMargin ${(params.margin || 0).toFixed(1)}%\nCovers ${params.covers || 0} · ฿${(params.sales || 0).toLocaleString()}\n\n💡 ${params.recommendation}`
+
+  // F&B formatting:
+  //   - Buddhist year shortened to 2 digits (e.g. 2569 → 69). Idempotent if the
+  //     caller already shortened the date.
+  //   - Margin shown as a 30-day average if `marginAvg` is supplied, otherwise
+  //     falls back to the latest day's margin. Rendered as an integer percent.
+  //   - Covers line gains a per-cover spend suffix when avgSpend > 0.
+  const shortDate = date.replace(/25(\d{2})/, '$1')
+  const marginPct = Math.round(params.marginAvg || params.margin || 0)
+  const avgSpend = params.avgSpend
+  const coversLine = avgSpend && avgSpend > 0
+    ? `Covers ${params.covers || 0} · ฿${(params.sales || 0).toLocaleString()} · ฿${Math.round(avgSpend).toLocaleString()}/คน`
+    : `Covers ${params.covers || 0} · ฿${(params.sales || 0).toLocaleString()}`
+  return `☕ ${branchName} — ${shortDate}\nMargin ${marginPct}%\n${coversLine}\n\n💡 ${params.recommendation}`
 }
