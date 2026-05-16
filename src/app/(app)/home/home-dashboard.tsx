@@ -124,11 +124,11 @@ export function HomeDashboard() {
       : null
     : thirtyDayMargin?.value ?? latestMargin?.value ?? null
 
-  // "Last entry" date is computed directly from the metrics array — the
-  // most recent row with revenue > 0 AND cost > 0. Decoupled from
-  // latestCompleteDayMargin's result so a row whose margin math falls
-  // outside the sanity band (e.g. cost > revenue) still counts as a
-  // valid data-entry day for the label.
+  // "Last entry with cost" date — the most recent row where BOTH
+  // revenue > 0 AND cost > 0 (the rows that actually contribute to
+  // margin). Decoupled from latestCompleteDayMargin's result so a row
+  // whose margin math falls outside the sanity band (e.g. cost > revenue)
+  // still counts as a valid data-entry day for the label.
   const lastEntryDate: string | null = (() => {
     if (isHotel) return null
     for (let i = metrics.length - 1; i >= 0; i--) {
@@ -136,6 +136,37 @@ export function HomeDashboard() {
       if ((m.revenue ?? 0) > 0 && (m.cost ?? 0) > 0) return m.metric_date
     }
     return null
+  })()
+
+  // Latest day the user has entered ANY data (revenue), regardless of
+  // whether cost was filled in. Used to spot "you entered sales but
+  // forgot the cost" gaps so we can nudge the user to complete the row.
+  const latestRevenueOnlyDate: string | null = (() => {
+    if (isHotel) return null
+    for (let i = metrics.length - 1; i >= 0; i--) {
+      const m = metrics[i]
+      if ((m.revenue ?? 0) > 0 && (m.cost ?? 0) <= 0) return m.metric_date
+    }
+    return null
+  })()
+
+  // Show the missing-cost warning only when the revenue-only row is
+  // strictly newer than the most recent row with cost — otherwise the
+  // "Last entry with cost" line is already the most recent action and
+  // there's nothing useful to nudge.
+  const missingCostDate: string | null =
+    latestRevenueOnlyDate && (lastEntryDate == null || latestRevenueOnlyDate > lastEntryDate)
+      ? latestRevenueOnlyDate
+      : null
+
+  const missingCostMessage: string | null = (() => {
+    if (!missingCostDate) return null
+    const dateObj = new Date(missingCostDate + 'T00:00:00')
+    const formatted = dateObj.toLocaleDateString(
+      locale === 'th' ? 'th-TH-u-ca-buddhist' : 'en-GB',
+      { day: 'numeric', month: 'short', timeZone: 'Asia/Bangkok' },
+    )
+    return t('missingCostWarning', { date: formatted })
   })()
 
   const marginContext: string | undefined = (() => {
@@ -342,6 +373,12 @@ export function HomeDashboard() {
             )}
           </div>
 
+          {missingCostMessage && (
+            <p style={{ fontSize: 12, fontWeight: 500, color: 'var(--color-amber-text)', background: 'var(--color-amber-light)', border: '1px solid rgba(186,117,23,0.25)', borderRadius: 8, padding: '8px 12px', margin: 0 }}>
+              ⚠ {missingCostMessage}
+            </p>
+          )}
+
           {/* Entry compliance dots */}
           <EntryStatusPanel metrics={metrics} />
 
@@ -433,6 +470,12 @@ export function HomeDashboard() {
             <KpiCard label={t('sales')} value={latest?.revenue ? formatCurrency(latest.revenue) : '-'} status="neutral" />
             <KpiCard label={t('avgSpend')} value={latest?.avg_ticket ? formatCurrency(latest.avg_ticket) : '-'} status="neutral" />
           </div>
+        )}
+
+        {missingCostMessage && (
+          <p style={{ fontSize: 12, fontWeight: 500, color: 'var(--color-amber-text)', background: 'var(--color-amber-light)', border: '1px solid rgba(186,117,23,0.25)', borderRadius: 8, padding: '8px 12px', margin: 0 }}>
+            ⚠ {missingCostMessage}
+          </p>
         )}
 
         {/* Chart */}

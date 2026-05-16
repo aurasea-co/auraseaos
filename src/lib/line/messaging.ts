@@ -108,5 +108,5 @@ export function buildMorningFlashLine(params: {
   const coversLine = avgSpend && avgSpend > 0
     ? `Covers ${params.covers || 0} · ฿${(params.sales || 0).toLocaleString()} · ฿${Math.round(avgSpend).toLocaleString()}/คน`
     : `Covers ${params.covers || 0} · ฿${(params.sales || 0).toLocaleString()}`
-  return `☕ ${branchName} — ${shortDate}\nMargin ${marginPct}%\n${coversLine}\n\n💡 ${params.recommendation}`
+  return `☕ ${branchName} — ${shortDate}\nMargin (excl. salary) ${marginPct}%\n${coversLine}\n\n💡 ${params.recommendation}`
 }

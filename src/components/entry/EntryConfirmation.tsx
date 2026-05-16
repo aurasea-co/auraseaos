@@ -106,7 +106,7 @@ export function EntryConfirmation({ businessDateLabel, businessDateStr, isHotel,
               <DataRow label={t('sales')} value={formatCurrency(revenue)} />
               <DataRow label={t('covers')} value={`${customers}`} />
               {marginPct != null && (
-                <DataRow label="Margin" value={formatPercent(marginPct)} highlight={marginPct >= (cogsTarget || 32) ? 'green' : 'red'} />
+                <DataRow label="Margin (excl. salary)" value={formatPercent(marginPct)} highlight={marginPct >= (cogsTarget || 32) ? 'green' : 'red'} />
               )}
             </>
           )}

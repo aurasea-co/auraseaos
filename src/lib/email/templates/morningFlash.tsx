@@ -363,5 +363,5 @@ function fnbMarginCard(marginAvg: number | undefined, latest: number | undefined
       ? `วันล่าสุด ${Math.round(latest)}%`
       : undefined
 
-  return { label: 'Margin', value, compare, subtext }
+  return { label: 'Margin (excl. salary)', value, compare, subtext }
 }
