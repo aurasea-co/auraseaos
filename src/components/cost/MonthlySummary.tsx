@@ -42,7 +42,7 @@ export function MonthlySummary({ data, monthlySalary }: Props) {
         <KpiCard label="เงินเดือน/เดือน" value={formatBaht(summary.monthlySalary)} status="neutral" />
         <KpiCard label="ต้นทุนวัตถุดิบ" value={formatBaht(summary.totalVariableCost)} status="neutral" />
         <KpiCard
-          label="กำไรหลังเงินเดือน"
+          label="กำไรประมาณ"
           value={`${formatBaht(summary.estimatedProfit)}`}
           subLabel={formatPct(summary.profitPct, 0)}
           status={summary.estimatedProfit >= 0 ? 'green' : 'red'}

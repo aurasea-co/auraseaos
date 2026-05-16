@@ -106,6 +106,7 @@
     "today": "Today",
     "lastEntry": "Last entry — {date}",
     "thirtyDayAvg": "30-day avg",
+    "latestDay": "Latest day",
     "covers": "Covers",
     "sales": "Sales",
     "avgSpend": "Avg Spend",

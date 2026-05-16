@@ -11,18 +11,12 @@ import { LineChart } from '@/components/charts/LineChart'
 import { PeriodSelector } from '@/components/ui/PeriodSelector'
 import { PlanGate } from '@/components/ui/PlanGate'
 import { formatChartDate, formatBaht, formatPct, groupByWeek, formatWeekRange } from '@/lib/formatters'
-import {
-  calculateDailySalaryCost,
-  calculateNetMargin,
-  calculateGrossMarginStrict,
-} from '@/lib/calculations/fnb'
+import { calculateGrossMarginStrict } from '@/lib/calculations/fnb'
 import { rolling7DayAvg, rollingAvg } from '@/lib/calculations/rolling'
 import { periodAvgMargin, type MarginInputRow } from '@/lib/calculations/marginAggregates'
 import { toBangkokDateStr } from '@/lib/businessDate'
 import { OperationalCompletenessPill } from '@/components/ui/OperationalCompletenessPill'
 import { ChartLegend } from '@/components/charts/ChartLegend'
-import Link from 'next/link'
-
 // Shared palette so the HTML legend swatches track the Chart.js line
 // colours without drifting.
 const COLORS = {
@@ -33,13 +27,10 @@ const COLORS = {
   costRolling: '#BA7517',
 }
 
-// Margin mode — determined once per render from whether the branch has
-// salary + operating-days configured. `net` is the honest number owners
-// care about; `gross` is shown only when salary isn't set, alongside a
-// prompt to configure it. The two modes use different y-axis caps and
-// different targets because gross margins sit much higher than net.
-type MarginMode = 'net' | 'gross'
-
+// Margin is gross-only (excl. salary) across the entire app — every
+// view (KPI, chart, weekly table, target line) reads the same number
+// regardless of who's logged in, matching Home + the morning-flash
+// email.
 export function FnbTrendsView({ branchId }: { branchId: string }) {
   const [period, setPeriod] = useState<30 | 90>(30)
   const [rollingWindow, setRollingWindow] = useState<7 | 14>(7)
@@ -53,13 +44,6 @@ export function FnbTrendsView({ branchId }: { branchId: string }) {
   const grossMarginTarget = 100 - cogsTarget
   const coversTarget = Number(targets?.covers_target) || 75
   const avgSpendTarget = Number(targets?.avg_spend_target) || 0
-  const monthlySalary = Number(targets?.monthly_salary) || 0
-  const operatingDays = Number(targets?.operating_days) || 26
-  const dailySalaryCost = calculateDailySalaryCost(monthlySalary, operatingDays)
-
-  // Choose mode once: if salary + operating days are both set, every
-  // view (KPI, chart, weekly table, target line) switches to net.
-  const mode: MarginMode = monthlySalary > 0 && operatingDays > 0 ? 'net' : 'gross'
 
   // Normalise metric_date to Bangkok YYYY-MM-DD once. The view returns
   // metric_date as a UTC timestamp for date-typed columns ("…T17:00:00+00:00"
@@ -71,17 +55,15 @@ export function FnbTrendsView({ branchId }: { branchId: string }) {
     [data],
   )
 
-  // Per-day margin points (net or gross). null for days missing cost —
-  // these feed the rolling average and are *excluded* from the window
-  // sum (not zero-filled), so one blank day doesn't drag the line down.
+  // Per-day gross margin points (excl. salary). null for days missing
+  // cost — these feed the rolling average and are *excluded* from the
+  // window sum (not zero-filled), so a blank day doesn't drag the line.
   const dailyMarginPoints = useMemo(
     () => rows.map((d) => ({
       date: d.metric_date,
-      value: mode === 'net'
-        ? calculateNetMargin(d.revenue, d.additional_cost_today, monthlySalary, operatingDays)
-        : calculateGrossMarginStrict(d.revenue, d.additional_cost_today),
+      value: calculateGrossMarginStrict(d.revenue, d.additional_cost_today),
     })),
-    [rows, mode, monthlySalary, operatingDays],
+    [rows],
   )
 
   // Rolling-average margin series (default 7 days, toggleable to 14).
@@ -109,19 +91,16 @@ export function FnbTrendsView({ branchId }: { branchId: string }) {
       revenue: d.revenue,
       variableCost: d.additional_cost_today,
     }))
-    const agg = periodAvgMargin(marginInputs, monthlySalary, operatingDays)
+    const agg = periodAvgMargin(marginInputs, 0, 0)
     const avgMargin: number | null = agg ? agg.value : null
 
-    const avgRevenue = rows.reduce((s, d) => s + (d.revenue || 0), 0) / rows.length
-    const avgLabour = avgRevenue > 0 && monthlySalary > 0 ? (dailySalaryCost / avgRevenue) * 100 : null
-    // Net margin target = gross margin target minus the property's
-    // payroll share of average revenue. When gross, target stays as the
-    // pure cogs-based figure.
-    const marginTarget = mode === 'net' && avgRevenue > 0
-      ? Math.max(0, grossMarginTarget - (dailySalaryCost / avgRevenue) * 100)
-      : grossMarginTarget
-    return { avgMargin, avgCovers: avg(covers), avgSpend: avg(spends), avgLabour, marginTarget }
-  }, [rows, mode, monthlySalary, operatingDays, dailySalaryCost, grossMarginTarget])
+    // Labour cost share is no longer surfaced in the gross-only view
+    // (it would imply the margin number includes salary, which it does
+    // not). The KPI tile is suppressed downstream so we don't compute
+    // it here either.
+    const avgLabour: number | null = null
+    return { avgMargin, avgCovers: avg(covers), avgSpend: avg(spends), avgLabour, marginTarget: grossMarginTarget }
+  }, [rows, grossMarginTarget])
 
   const marginTarget = stats?.marginTarget ?? grossMarginTarget
 
@@ -133,13 +112,8 @@ export function FnbTrendsView({ branchId }: { branchId: string }) {
       const weekRevenue = withCost.reduce((s, d) => s + d.revenue, 0)
       const weekCost = withCost.reduce((s, d) => s + (d.additional_cost_today || 0), 0)
       let weekMargin: number | null = null
-      if (weekRevenue > 0) {
-        if (mode === 'net' && monthlySalary > 0 && operatingDays > 0) {
-          const weekSalary = dailySalaryCost * withCost.length
-          weekMargin = Math.round(((weekRevenue - weekCost - weekSalary) / weekRevenue) * 100 * 10) / 10
-        } else if (weekCost > 0) {
-          weekMargin = Math.round((1 - weekCost / weekRevenue) * 100 * 10) / 10
-        }
+      if (weekRevenue > 0 && weekCost > 0) {
+        weekMargin = Math.round((1 - weekCost / weekRevenue) * 100 * 10) / 10
       }
       const daysMissingCost = week.filter(
         (d) => (d.revenue || 0) > 0 && (d.additional_cost_today == null || d.additional_cost_today <= 0),
@@ -155,7 +129,7 @@ export function FnbTrendsView({ branchId }: { branchId: string }) {
         avgSpend: avg(spends),
       }
     })
-  }, [rows, mode, monthlySalary, operatingDays, dailySalaryCost])
+  }, [rows])
 
   const hasMissingWeek = weeks.some((w) => w.daysMissingCost > 0)
 
@@ -213,66 +187,39 @@ export function FnbTrendsView({ branchId }: { branchId: string }) {
       {stats && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
           <KpiCard
-            label={mode === 'net' ? t('kpi_net_margin') : t('kpi_gross_margin_excl')}
+            label={t('kpi_gross_margin_excl')}
             value={stats.avgMargin != null ? formatPct(stats.avgMargin) : '—'}
             target={formatPct(marginTarget, 0)}
             status={stats.avgMargin != null ? getStatus(stats.avgMargin, marginTarget) : 'neutral'}
           />
           <KpiCard label={t('kpi_covers_day')} value={Math.round(stats.avgCovers).toString()} target={`${coversTarget}`} status={getStatus(stats.avgCovers, coversTarget)} />
           <KpiCard label={t('kpi_avg_spend')} value={formatBaht(stats.avgSpend)} target={avgSpendTarget > 0 ? formatBaht(avgSpendTarget) : undefined} status="neutral" />
-          <KpiCard label={t('kpi_labour')} value={stats.avgLabour != null ? formatPct(stats.avgLabour) : t('not_configured')} status="neutral" />
         </div>
       )}
 
-      {/* Margin chart — rolling average (7 or 14 days). Net when salary
-          is configured, gross otherwise. The rolling helper skips days
-          without entries (instead of treating them as 0%), so a single
-          missing day no longer drags the line to the floor. */}
-      <Section label={mode === 'net' ? t('margin_rolling_net') : t('margin_rolling_gross')}>
+      {/* Margin chart — rolling gross-margin average. The rolling helper
+          skips days without entries (rather than treating them as 0%) so a
+          single missing day no longer drags the line to the floor. */}
+      <Section label={t('margin_rolling_gross')}>
         <LineChart
           labels={chartLabels}
           datasets={[{
             data: rollingMargin,
             color: COLORS.margin,
-            label: mode === 'net' ? t('kpi_net_margin') : t('kpi_gross_margin_excl'),
+            label: t('kpi_gross_margin_excl'),
             fill: true,
             fillColor: 'rgba(29,158,117,0.08)',
           }]}
           targetValue={marginTarget}
           targetLabel={`${t('target_line')} ${formatPct(marginTarget, 0)}`}
           yFormatter={(v) => formatPct(v, 0)}
-          yMax={mode === 'net' ? 60 : 80}
-          yMin={mode === 'net' ? -20 : 0}
+          yMax={80}
+          yMin={0}
           spanGaps={false}
         />
-        {mode === 'gross' ? (
-          <div
-            style={{
-              background: 'var(--color-amber-light)',
-              borderLeft: '3px solid var(--color-amber)',
-              borderRadius: '0 6px 6px 0',
-              padding: '10px 14px',
-              marginTop: 10,
-            }}
-          >
-            <p style={{ fontSize: 12, color: 'var(--color-amber-text)', lineHeight: 1.5, marginBottom: 4 }}>
-              {t('gross_only_warning')}
-            </p>
-            <Link
-              href="/settings/targets"
-              style={{ fontSize: 12, color: 'var(--color-amber-text)', textDecoration: 'underline' }}
-            >
-              {t('set_salary_prompt')}
-            </Link>
-            <p style={{ fontSize: 11, color: 'var(--color-amber-text)', marginTop: 6, lineHeight: 1.5 }}>
-              {t('gross_margin_rolling_note', { window: rollingWindow })}
-            </p>
-          </div>
-        ) : (
-          <p style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 6, lineHeight: 1.5 }}>
-            {t('net_margin_rolling_note', { window: rollingWindow })}
-          </p>
-        )}
+        <p style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 6, lineHeight: 1.5 }}>
+          {t('gross_margin_rolling_note', { window: rollingWindow })}
+        </p>
       </Section>
 
       {/* Covers chart */}
@@ -335,7 +282,7 @@ export function FnbTrendsView({ branchId }: { branchId: string }) {
             <thead>
               <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
                 <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 500, color: 'var(--color-text-tertiary)' }}>{t('week_col')}</th>
-                <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 500, color: 'var(--color-text-tertiary)' }}>{mode === 'net' ? t('margin_col_net') : t('margin_col_gross')}</th>
+                <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 500, color: 'var(--color-text-tertiary)' }}>{t('margin_col_gross')}</th>
                 <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 500, color: 'var(--color-text-tertiary)' }}>{t('covers_col')}</th>
                 <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 500, color: 'var(--color-text-tertiary)' }}>{t('avg_spend_col')}</th>
               </tr>

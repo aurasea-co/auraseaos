@@ -19,9 +19,8 @@ interface RecommendationCardProps {
   adrTarget: number
   occupancyTarget: number
   // When provided, the F&B recommendation compares against this
-  // (typically the net margin + net target computed upstream where
-  // salary is known). Falls back to the cost-only gross margin
-  // comparison when omitted.
+  // (the gross-margin headline + target the caller already computed).
+  // Falls back to the cost-only gross margin comparison when omitted.
   marginPctOverride?: number | null
   marginTargetOverride?: number
 }
@@ -122,9 +121,9 @@ function generateRecommendation(
     return { text: `${totalRooms - (latest.rooms_sold || 0)} rooms — ${t('adjustPricing')}`, reason: `Occupancy ${formatPercent(occPct)} (target ${formatPercent(occupancyTarget)})` }
   }
 
-  // Prefer net margin (computed upstream where salary is known) over
-  // the local cost-only gross margin. Falling back to gross keeps the
-  // card working for branches that haven't configured salary yet.
+  // Prefer the upstream-computed gross margin (matches Home + Trends).
+  // Falling back to a locally-computed gross margin keeps the card
+  // working when the caller doesn't pass an override.
   const marginPct = marginPctOverride != null
     ? marginPctOverride
     : latest.revenue > 0 && latest.cost != null

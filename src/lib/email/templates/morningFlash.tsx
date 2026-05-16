@@ -161,9 +161,9 @@ function BranchBlock({ branch, lang }: { branch: MorningFlashBranchData; lang: '
       ]
     : [
         // F&B Margin card:
-        //   - primary value = 30-day net margin avg (periodAvgMargin), int %
+        //   - primary value = 30-day gross margin avg (periodAvgMargin), int %
         //   - target compare uses the same 30-day value vs marginTarget
-        //   - subtext shows the latest day's net margin as muted text
+        //   - subtext shows the latest day's gross margin as muted text
         fnbMarginCard(branch.marginAvg, branch.margin, branch.marginTarget),
         countCard('Covers', branch.covers, branch.coversTarget),
         currencyCard(lang === 'th' ? 'ยอดขาย' : 'Sales', branch.sales, undefined, '฿'),
@@ -336,7 +336,7 @@ function plainCard(label: string, value: string, suffix: string): MetricCardData
 }
 
 /**
- * F&B Margin card. Primary value is the 30-day rolling avg net margin
+ * F&B Margin card. Primary value is the 30-day rolling avg gross margin
  * (`marginAvg` — periodAvgMargin from marginAggregates), rendered as an
  * integer percent to match the LINE message and dashboard. vs-target
  * comparison is computed against the same 30-day value. The latest day's

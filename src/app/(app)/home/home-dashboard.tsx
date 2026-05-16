@@ -19,7 +19,7 @@ import {
   type UnifiedMetric,
 } from '@/lib/supabase/entry-tables'
 import { getTodayBangkok, toBangkokDateStr } from '@/lib/businessDate'
-import { calculateNetMargin, calculateGrossMarginStrict } from '@/lib/calculations/fnb'
+import { calculateGrossMarginStrict } from '@/lib/calculations/fnb'
 import {
   periodAvgMargin,
   latestCompleteDayMargin,
@@ -43,7 +43,6 @@ export function HomeDashboard() {
     avg_spend_target: number
     operating_days: number
   }>({ adr_target: 0, cogs_target: 32, occupancy_target: 80, labour_target: 0, covers_target: 0, avg_spend_target: 0, operating_days: 26 })
-  const [monthlySalary, setMonthlySalary] = useState<number>(0)
   const [loading, setLoading] = useState(true)
   const [lastFetched, setLastFetched] = useState<Date | null>(null)
   const supabase = createClient()
@@ -81,21 +80,15 @@ export function HomeDashboard() {
         operating_days: targetResult.data.operating_days || 26,
       })
     }
-    // Salary lives on the owner-only column, so fetch it separately
-    // with the safe wrapper (role === owner gets the value; manager
-    // gets nothing and the UI falls back to gross margin + prompt).
-    if (role === 'owner' || role === 'superadmin') {
-      const salaryResult = await db.from('targets').select('monthly_salary').eq('branch_id', activeBranch.id).maybeSingle()
-      setMonthlySalary(Number(salaryResult.data?.monthly_salary) || 0)
-    } else {
-      setMonthlySalary(0)
-    }
+    // Margin display is gross-only across the app (Home, Trends, Portfolio,
+    // and the morning-flash email) so the number doesn't depend on whether
+    // an owner has configured a salary. Salary is no longer fetched here.
     const rows = metricsResult.data || []
     const unified = activeBranch.business_type === 'accommodation' ? rows.map(accommodationToUnified) : rows.map(fnbToUnified)
     setMetrics(unified)
     setLastFetched(new Date())
     setLoading(false)
-  }, [activeBranch, supabase, role])
+  }, [activeBranch, supabase])
 
   useEffect(() => { loadMetrics() }, [loadMetrics])
   const handleRefresh = useCallback(async () => { await loadMetrics() }, [loadMetrics])
@@ -108,72 +101,67 @@ export function HomeDashboard() {
   const totalRooms = activeBranch.total_rooms || 0
   const adrTarget = branchTarget.adr_target || 0
   const occupancyPct = latest && totalRooms > 0 && latest.rooms_sold ? Math.round((latest.rooms_sold / totalRooms) * 100) : null
-  // Margin mode for F&B: net (after salary) if we have both salary and
-  // operating days, otherwise gross with a Settings prompt. Net is the
-  // number owners actually care about; gross is a fallback, not equal.
-  const operatingDays = branchTarget.operating_days || 26
-  const netMarginMode: 'net' | 'gross' = !isHotel && monthlySalary > 0 && operatingDays > 0 ? 'net' : 'gross'
-  // Share two F&B selectors with Trends so the Home secondary "30-day avg"
-  // line and the Trends tile are guaranteed to match for the same window.
-  // See src/lib/calculations/marginAggregates.ts.
+  // Margin is gross-only (excl. salary) across the entire app so the
+  // displayed number is identical for every role looking at the same
+  // branch. periodAvgMargin / latestCompleteDayMargin are called with
+  // monthlySalary=0, operatingDays=0 to force `gross` mode internally.
   const marginInputs: MarginInputRow[] = metrics.map((m) => ({
     metric_date: m.metric_date,
     revenue: m.revenue,
     variableCost: m.cost,
   }))
   const latestMargin = !isHotel
-    ? latestCompleteDayMargin(marginInputs, monthlySalary, operatingDays)
+    ? latestCompleteDayMargin(marginInputs, 0, 0)
     : null
   const thirtyDayMargin = !isHotel
-    ? periodAvgMargin(marginInputs, monthlySalary, operatingDays)
+    ? periodAvgMargin(marginInputs, 0, 0)
     : null
-  // Headline number for the F&B margin card: prefer the most recent complete
-  // day (falls back through the window until it finds one), else the 30-day
-  // aggregate so the card never reads "-" when Trends can show a number.
+  // Headline number for the F&B margin card: 30-day rolling avg first,
+  // then the latest complete day, then nothing. Matches the Trends tile.
   const marginPct: number | null = isHotel
     ? latest
       ? calculateGrossMarginStrict(latest.revenue, latest.cost)
       : null
-    : latestMargin?.value ?? thirtyDayMargin?.value ?? null
-  const marginHeadlineDate = latestMargin?.date ?? null
-  // "Today" when latest-complete-day is today; otherwise "Last entry —
-  // 19 เม.ย. 2569" (th) / "Last entry — 19 Apr 2026" (en). If we fell
-  // back to the 30-day aggregate the context line reads "30-day avg".
+    : thirtyDayMargin?.value ?? latestMargin?.value ?? null
+
+  // "Last entry" date is computed directly from the metrics array — the
+  // most recent row with revenue > 0 AND cost > 0. Decoupled from
+  // latestCompleteDayMargin's result so a row whose margin math falls
+  // outside the sanity band (e.g. cost > revenue) still counts as a
+  // valid data-entry day for the label.
+  const lastEntryDate: string | null = (() => {
+    if (isHotel) return null
+    for (let i = metrics.length - 1; i >= 0; i--) {
+      const m = metrics[i]
+      if ((m.revenue ?? 0) > 0 && (m.cost ?? 0) > 0) return m.metric_date
+    }
+    return null
+  })()
+
   const marginContext: string | undefined = (() => {
     if (isHotel) return undefined
-    if (latestMargin) {
+    if (lastEntryDate) {
       const todayStr = getTodayBangkok()
-      if (marginHeadlineDate === todayStr) return t('today')
-      if (marginHeadlineDate) {
-        const dateObj = new Date(marginHeadlineDate + 'T00:00:00')
-        const formatted = dateObj.toLocaleDateString(
-          locale === 'th' ? 'th-TH-u-ca-buddhist' : 'en-GB',
-          { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Bangkok' },
-        )
-        return t('lastEntry', { date: formatted })
-      }
+      if (lastEntryDate === todayStr) return t('today')
+      const dateObj = new Date(lastEntryDate + 'T00:00:00')
+      const formatted = dateObj.toLocaleDateString(
+        locale === 'th' ? 'th-TH-u-ca-buddhist' : 'en-GB',
+        { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Bangkok' },
+      )
+      return t('lastEntry', { date: formatted })
     }
     if (thirtyDayMargin) return t('thirtyDayAvg')
     return undefined
   })()
-  // Secondary comparison line — always the 30-day aggregate (matches Trends
-  // tile). Suppressed when the headline itself IS the 30-day number.
+  // Secondary line — show the latest day's margin when we're showing the
+  // 30-day avg as headline (the more common case). Suppressed when the
+  // headline IS already the latest day.
   const marginSecondary: { label: string; value: string } | undefined =
-    !isHotel && latestMargin && thirtyDayMargin
-      ? { label: t('thirtyDayAvg'), value: formatPercent(thirtyDayMargin.value) }
+    !isHotel && thirtyDayMargin && latestMargin
+      ? { label: t('latestDay'), value: formatPercent(latestMargin.value) }
       : undefined
-  // Net margin target = gross margin target minus the average payroll
-  // share of revenue. For display only — no need to recompute weekly.
-  const grossMarginTarget = 100 - branchTarget.cogs_target
-  const avgRevenueForSalaryShare = metrics.length > 0
-    ? metrics.reduce((s, m) => s + (m.revenue || 0), 0) / metrics.length
-    : 0
-  const salarySharePct = netMarginMode === 'net' && avgRevenueForSalaryShare > 0
-    ? (monthlySalary / operatingDays / avgRevenueForSalaryShare) * 100
-    : 0
-  const marginTarget = netMarginMode === 'net'
-    ? Math.max(0, grossMarginTarget - salarySharePct)
-    : grossMarginTarget
+  // Gross-only target (no salary subtraction).
+  const marginTarget = 100 - branchTarget.cogs_target
 
   function getStatus(value: number | null, target: number, threshold = 5): 'green' | 'amber' | 'red' | 'neutral' {
     if (value == null) return 'neutral'
@@ -311,7 +299,7 @@ export function HomeDashboard() {
             ) : (
               <>
                 <KpiCard
-                  label={netMarginMode === 'net' ? t('marginAfterSalary') : t('marginExclSalary')}
+                  label={t('marginExclSalary')}
                   value={marginPct != null ? formatPercent(marginPct) : '-'}
                   valueContext={marginPct != null ? marginContext : undefined}
                   secondary={marginSecondary}
@@ -432,18 +420,12 @@ export function HomeDashboard() {
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
             <KpiCard
-              label={netMarginMode === 'net' ? t('marginAfterSalary') : t('marginExclSalary')}
+              label={t('marginExclSalary')}
               value={marginPct != null ? formatPercent(marginPct) : '-'}
               valueContext={marginPct != null ? marginContext : undefined}
               secondary={marginSecondary}
               target={marginPct != null ? `${tCommon('target')} ${Math.round(marginTarget)}%` : undefined}
-              subLabel={
-                marginPct != null
-                  ? netMarginMode === 'gross'
-                    ? t('setSalaryPrompt')
-                    : undefined
-                  : t('marginNoDataTooltip')
-              }
+              subLabel={marginPct == null ? t('marginNoDataTooltip') : undefined}
               status={marginPct != null ? getStatus(marginPct, marginTarget) : 'neutral'}
               primary
             />
@@ -460,10 +442,8 @@ export function HomeDashboard() {
           <SparklineChart
             label={t('margin7days')}
             data={metrics.map((m) => {
-              const net = netMarginMode === 'net'
-                ? calculateNetMargin(m.revenue, m.cost, monthlySalary, operatingDays)
-                : calculateGrossMarginStrict(m.revenue, m.cost)
-              return { date: m.metric_date, value: net ?? 0 }
+              const g = calculateGrossMarginStrict(m.revenue, m.cost)
+              return { date: m.metric_date, value: g ?? 0 }
             })}
             target={Math.round(marginTarget)}
             formatValue={(v) => formatPercent(v)}

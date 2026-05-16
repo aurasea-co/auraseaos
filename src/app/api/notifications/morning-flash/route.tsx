@@ -5,7 +5,7 @@ import { EMAIL_SENDERS } from '@/lib/email/resend'
 import MorningFlash, { type MorningFlashBranchData } from '@/lib/email/templates/morningFlash'
 import { buildMorningFlashLine, sendLineMessage } from '@/lib/line/messaging'
 import { getTodayBangkok } from '@/lib/businessDate'
-import { calculateNetMargin } from '@/lib/calculations/fnb'
+import { calculateGrossMarginStrict } from '@/lib/calculations/fnb'
 import { periodAvgMargin, type MarginInputRow } from '@/lib/calculations/marginAggregates'
 
 async function handleMorningFlash(req: NextRequest) {
@@ -166,34 +166,27 @@ async function handleMorningFlash(req: NextRequest) {
 
       const isHotel = branch.business_type === 'accommodation'
 
-      // F&B margin: identical math to the dashboard (Home + Trends).
-      //   - latestMargin = calculateNetMargin(revenue, variableCost,
-      //                                       monthlySalary, operatingDays)
-      //   - marginAvg30d = periodAvgMargin(last 30 rows, monthlySalary,
-      //                                    operatingDays).value
-      // The spec mentioned `branch.monthly_fixed_cost` but the salary value
-      // actually lives in `targets.monthly_salary` (per 001_create_targets).
-      // operatingDays = count of last-30 rows with revenue > 0, matching the
-      // dashboard's "days the branch was actually open" denominator.
+      // F&B margin: gross-only (excl. salary), identical math to the
+      // dashboard (Home + Trends).
+      //   - latestMargin = calculateGrossMarginStrict(revenue, variableCost)
+      //   - marginAvg30d = periodAvgMargin(last 30 rows, 0, 0).value
+      // periodAvgMargin runs in gross mode when monthlySalary or
+      // operatingDays is 0, so passing 0/0 forces gross consistently.
       let latestMargin: number | undefined
       let marginAvg: number | undefined
       if (!isHotel) {
-        const monthlySalary = Number(targets?.monthly_salary) || 0
         const fnbRows: MarginInputRow[] = (metrics || []).map((m: Record<string, unknown>) => ({
           metric_date: String(m.metric_date),
           revenue: Number(m.revenue) || null,
           variableCost: Number(m.additional_cost_today) || null,
         }))
-        const operatingDays = fnbRows.filter((r) => (r.revenue ?? 0) > 0).length
 
-        latestMargin = calculateNetMargin(
+        latestMargin = calculateGrossMarginStrict(
           Number(latest.revenue) || 0,
           latest.additional_cost_today != null ? Number(latest.additional_cost_today) : null,
-          monthlySalary,
-          operatingDays,
         ) ?? undefined
 
-        marginAvg = periodAvgMargin(fnbRows, monthlySalary, operatingDays)?.value
+        marginAvg = periodAvgMargin(fnbRows, 0, 0)?.value
       }
 
       const recommendation = isHotel
