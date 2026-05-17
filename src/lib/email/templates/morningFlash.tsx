@@ -165,7 +165,7 @@ function BranchBlock({ branch, lang }: { branch: MorningFlashBranchData; lang: '
         //   - target compare uses the same 30-day value vs marginTarget
         //   - subtext shows the latest day's gross margin as muted text
         fnbMarginCard(branch.marginAvg, branch.margin, branch.marginTarget),
-        countCard('Covers', branch.covers, branch.coversTarget),
+        countCard('Covers', branch.covers, branch.coversTarget, 'คน'),
         currencyCard(lang === 'th' ? 'ยอดขาย' : 'Sales', branch.sales, undefined, '฿'),
         currencyCard('Avg Spend', branch.avgSpend, undefined, '฿', lang === 'th' ? '/คน' : '/cover'),
       ]
@@ -318,8 +318,10 @@ function percentCardThai(label: string, value: number | undefined, target: numbe
   }
 }
 
-function countCard(label: string, value: number | undefined, target: number | undefined): MetricCardData {
-  const display = `${value ?? 0}`
+function countCard(label: string, value: number | undefined, target: number | undefined, unit = ''): MetricCardData {
+  const display = unit
+    ? `${(value ?? 0).toLocaleString()} ${unit}`
+    : `${value ?? 0}`
   if (target == null || target === 0 || value == null) return { label, value: display }
   const gap = value - target
   if (gap === 0) return { label, value: display }
@@ -363,5 +365,5 @@ function fnbMarginCard(marginAvg: number | undefined, latest: number | undefined
       ? `วันล่าสุด ${Math.round(latest)}%`
       : undefined
 
-  return { label: 'Margin (excl. salary)', value, compare, subtext }
+  return { label: 'Margin (ไม่รวมเงินเดือน)', value, compare, subtext }
 }
