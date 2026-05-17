@@ -213,29 +213,33 @@ function BranchSection({ report }: { report: BranchReport }) {
           <Text style={[styles.th, styles.cellNum]}>{isHotel ? 'Occ' : 'ลูกค้า'}</Text>
           <Text style={[styles.th, styles.cellStatus]}>สถานะ</Text>
         </View>
-        {report.daily.map((d, i) => (
-          <View key={i} style={[styles.tr, { backgroundColor: d.onTarget ? COLORS.rowGreen : COLORS.rowRed }]}>
-            <Text style={[styles.td, styles.cellDate]}>{d.date}</Text>
-            <Text style={[styles.td, styles.cellNum]}>{d.revenue != null ? Math.round(d.revenue).toLocaleString() : '—'}</Text>
-            <Text style={[styles.td, styles.cellNum]}>
-              {isHotel
-                ? (d.adr != null ? Math.round(d.adr).toLocaleString() : '—')
-                : (d.margin != null
-                    ? `${Math.round(d.margin)}%`
-                    : d.marginFallback != null
-                      ? `~${Math.round(d.marginFallback)}%`
-                      : '—')}
-            </Text>
-            <Text style={[styles.td, styles.cellNum]}>
-              {isHotel
-                ? d.occupancy != null ? `${d.occupancy.toFixed(1)}%` : '—'
-                : d.customers != null ? `${d.customers} คน` : '—'}
-            </Text>
-            <Text style={[styles.td, styles.cellStatus, { color: d.onTarget ? COLORS.above : COLORS.below, fontWeight: 700 }]}>
-              {d.onTarget ? '✓' : '✗'}
-            </Text>
-          </View>
-        ))}
+        {report.daily.map((d, i) => {
+          const isMarginEstimate = !isHotel && d.margin == null && d.marginFallback != null
+          const marginText = isHotel
+            ? (d.adr != null ? Math.round(d.adr).toLocaleString() : '—')
+            : (d.margin != null
+                ? `${Math.round(d.margin)}%`
+                : d.marginFallback != null
+                  ? `${Math.round(d.marginFallback)}%`
+                  : '—')
+          return (
+            <View key={i} style={[styles.tr, { backgroundColor: d.onTarget ? COLORS.rowGreen : COLORS.rowRed }]}>
+              <Text style={[styles.td, styles.cellDate]}>{d.date}</Text>
+              <Text style={[styles.td, styles.cellNum]}>{d.revenue != null ? Math.round(d.revenue).toLocaleString() : '—'}</Text>
+              <Text style={[styles.td, styles.cellNum, isMarginEstimate ? { color: '#888888' } : {}]}>
+                {marginText}
+              </Text>
+              <Text style={[styles.td, styles.cellNum]}>
+                {isHotel
+                  ? d.occupancy != null ? `${d.occupancy.toFixed(1)}%` : '—'
+                  : d.customers != null ? `${d.customers} คน` : '—'}
+              </Text>
+              <Text style={[styles.td, styles.cellStatus, { color: d.onTarget ? COLORS.above : COLORS.below, fontWeight: 700 }]}>
+                {d.onTarget ? '✓' : '✗'}
+              </Text>
+            </View>
+          )
+        })}
         <View style={styles.trFooter}>
           <Text style={[styles.td, styles.cellDate, { fontWeight: 700 }]}>รวม/เฉลี่ย</Text>
           <Text style={[styles.td, styles.cellNum, { fontWeight: 700 }]}>
@@ -254,6 +258,12 @@ function BranchSection({ report }: { report: BranchReport }) {
           <Text style={[styles.td, styles.cellStatus]}> </Text>
         </View>
       </View>
+
+      {!isHotel && report.daily.some((d) => d.margin == null && d.marginFallback != null) && (
+        <Text style={{ fontSize: 8, color: COLORS.muted, marginTop: -4, marginBottom: 8, lineHeight: 1.4 }}>
+          หมายเหตุ: ตัวเลข Margin ที่แสดงในสีเทาคือค่าเฉลี่ย 30 วัน (ไม่มีข้อมูลต้นทุนวันนั้น)
+        </Text>
+      )}
 
       {report.previous && (
         <>

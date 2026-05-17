@@ -252,7 +252,7 @@ function buildRecommendation(
 
   if (primary != null && target != null) {
     const gap = target - primary
-    return `Margin ต่ำกว่าเป้า ${fmtPct(gap)} จุด — ตรวจสอบต้นทุนวัตถุดิบและของเสีย; ทดลองปรับเมนูกำไรสูงในสัปดาห์หน้า`
+    return `Margin ต่ำกว่าเป้า ${fmtPct(gap)}% — ตรวจสอบต้นทุนวัตถุดิบและของเสีย; ทดลองปรับเมนูกำไรสูงในสัปดาห์หน้า`
   }
   return `Margin ยังต่ำกว่าเป้า — ตรวจสอบต้นทุนรายวันและสัดส่วนเมนู`
 }

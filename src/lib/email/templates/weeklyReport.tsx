@@ -157,22 +157,25 @@ function BranchBlock({ report, lang }: { report: BranchReport; lang: 'th' | 'en'
           </tr>
         </thead>
         <tbody>
-          {report.daily.map((d) => (
-            <tr key={d.date} style={{ backgroundColor: d.onTarget ? COLORS.rowGreen : COLORS.rowRed }}>
-              <td style={{ textAlign: 'left', padding: '6px 8px' }}>{d.date}</td>
-              <td style={{ textAlign: 'right', padding: '6px 8px' }}>{d.revenue != null ? Math.round(d.revenue).toLocaleString() : '—'}</td>
-              <td style={{ textAlign: 'right', padding: '6px 8px' }}>{isHotel
-                ? (d.adr != null ? Math.round(d.adr).toLocaleString() : '—')
-                : (d.margin != null
-                    ? `${Math.round(d.margin)}%`
-                    : d.marginFallback != null
-                      ? `~${Math.round(d.marginFallback)}%`
-                      : '—')
-              }</td>
-              <td style={{ textAlign: 'right', padding: '6px 8px' }}>{isHotel ? (d.occupancy != null ? `${d.occupancy.toFixed(1)}%` : '—') : (d.customers != null ? `${d.customers} คน` : '—')}</td>
-              <td style={{ textAlign: 'right', padding: '6px 8px', color: d.onTarget ? COLORS.above : COLORS.below, fontWeight: 700 }}>{d.onTarget ? '✓' : '✗'}</td>
-            </tr>
-          ))}
+          {report.daily.map((d) => {
+            const isMarginEstimate = !isHotel && d.margin == null && d.marginFallback != null
+            const marginCell = isHotel
+              ? (d.adr != null ? Math.round(d.adr).toLocaleString() : '—')
+              : (d.margin != null
+                  ? `${Math.round(d.margin)}%`
+                  : d.marginFallback != null
+                    ? `${Math.round(d.marginFallback)}%`
+                    : '—')
+            return (
+              <tr key={d.date} style={{ backgroundColor: d.onTarget ? COLORS.rowGreen : COLORS.rowRed }}>
+                <td style={{ textAlign: 'left', padding: '6px 8px' }}>{d.date}</td>
+                <td style={{ textAlign: 'right', padding: '6px 8px' }}>{d.revenue != null ? Math.round(d.revenue).toLocaleString() : '—'}</td>
+                <td style={{ textAlign: 'right', padding: '6px 8px', color: isMarginEstimate ? COLORS.muted : undefined }}>{marginCell}</td>
+                <td style={{ textAlign: 'right', padding: '6px 8px' }}>{isHotel ? (d.occupancy != null ? `${d.occupancy.toFixed(1)}%` : '—') : (d.customers != null ? `${d.customers} คน` : '—')}</td>
+                <td style={{ textAlign: 'right', padding: '6px 8px', color: d.onTarget ? COLORS.above : COLORS.below, fontWeight: 700 }}>{d.onTarget ? '✓' : '✗'}</td>
+              </tr>
+            )
+          })}
           <tr style={{ backgroundColor: COLORS.rowBg, fontWeight: 700 }}>
             <td style={{ textAlign: 'left', padding: '6px 8px' }}>{lang === 'th' ? 'รวม/เฉลี่ย' : 'Total / Avg'}</td>
             <td style={{ textAlign: 'right', padding: '6px 8px' }}>{Math.round(report.current.totalRevenue).toLocaleString()}</td>
@@ -190,6 +193,12 @@ function BranchBlock({ report, lang }: { report: BranchReport; lang: 'th' | 'en'
           </tr>
         </tbody>
       </table>
+
+      {!isHotel && report.daily.some((d) => d.margin == null && d.marginFallback != null) && (
+        <Text style={{ fontSize: 11, color: COLORS.muted, margin: '-8px 0 16px', lineHeight: 1.5 }}>
+          หมายเหตุ: ตัวเลข Margin ที่แสดงในสีเทาคือค่าเฉลี่ย 30 วัน (ไม่มีข้อมูลต้นทุนวันนั้น)
+        </Text>
+      )}
 
       {/* Recommendation */}
       <Section style={{ borderLeft: `3px solid ${COLORS.accent}`, backgroundColor: COLORS.rowBg, padding: '12px 14px', borderRadius: '0 6px 6px 0' }}>
