@@ -10,15 +10,41 @@ import { Document, Page, Text, View, StyleSheet, Font } from '@react-pdf/rendere
 import type { BranchReport, PortfolioSummary } from '@/lib/notifications/weeklyReportData'
 
 // Register Sarabun (Thai-capable sans-serif). URLs point at Google's
-// gstatic CDN — stable enough for weekly batch use. Pinned weight files
-// avoid the CSS subset negotiation @react-pdf doesn't perform.
+// gstatic CDN — stable enough for weekly batch use. All four variants
+// (regular/italic × 400/700) are registered so react-pdf can resolve
+// any combination its layout requests; without italic variants the
+// recommendation block triggered "Could not resolve font for Sarabun,
+// fontWeight 400, fontStyle italic" at render time.
 Font.register({
   family: 'Sarabun',
   fonts: [
-    { src: 'https://fonts.gstatic.com/s/sarabun/v15/DtVjJx26TKEr37c9YN5jugmJaP5acQ.ttf', fontWeight: 400 },
-    { src: 'https://fonts.gstatic.com/s/sarabun/v15/DtVnJx26TKEr37c9aBBxnu0iWBgVbe5dKQM.ttf', fontWeight: 700 },
+    {
+      src: 'https://fonts.gstatic.com/s/sarabun/v13/DtVhJx26TKEr37c9YK5silUs1WM.woff2',
+      fontWeight: 400,
+      fontStyle: 'normal',
+    },
+    {
+      src: 'https://fonts.gstatic.com/s/sarabun/v13/DtVjJx26TKEr37c9YHZJmnUs1Wn8nA.woff2',
+      fontWeight: 400,
+      fontStyle: 'italic',
+    },
+    {
+      src: 'https://fonts.gstatic.com/s/sarabun/v13/DtVmJx26TKEr37c9YK5silUsKD0T4Cs.woff2',
+      fontWeight: 700,
+      fontStyle: 'normal',
+    },
+    {
+      src: 'https://fonts.gstatic.com/s/sarabun/v13/DtVkJx26TKEr37c9YHZJmnUsKD2T2Kd3.woff2',
+      fontWeight: 700,
+      fontStyle: 'italic',
+    },
   ],
 })
+
+// Thai text doesn't use word spaces, so react-pdf's default hyphenation
+// can break in awkward places (or fail outright on long runs). Returning
+// the word unbroken disables the splitter.
+Font.registerHyphenationCallback((word) => [word])
 
 const COLORS = {
   text: '#1a1a1a',
