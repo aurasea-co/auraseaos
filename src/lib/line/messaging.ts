@@ -92,21 +92,23 @@ export function buildMorningFlashLine(params: {
   if (branchType === 'accommodation') {
     const gap = params.adr && params.adrTarget ? params.adr - params.adrTarget : 0
     const adrGapText = gap < 0
-      ? ` ต่ำกว่าเป้า ฿${Math.round(Math.abs(gap))}`
+      ? ` · ต่ำกว่าเป้า ฿${Math.round(Math.abs(gap))}`
       : gap > 0
-        ? ` เกินเป้า ฿${Math.round(Math.abs(gap))}`
+        ? ` · เกินเป้า ฿${Math.round(Math.abs(gap))}`
         : ''
-    return `🏨 ${branchName} — ${shortDate}\nADR ฿${Math.round(params.adr || 0)}${adrGapText}\nOcc ${Math.round(params.occupancy || 0)}% · ${params.roomsAvailable || 0} ห้องว่าง\nรายได้ ฿${(params.revenue || 0).toLocaleString()}\n\n💡 ${params.recommendation}`
+    return `● ${branchName} — ${shortDate}\nADR ฿${Math.round(params.adr || 0)}${adrGapText}\nOcc ${Math.round(params.occupancy || 0)}% · ${params.roomsAvailable || 0} ห้องว่าง\nรายได้ ฿${(params.revenue || 0).toLocaleString()}\n\n💡 ${params.recommendation}`
   }
 
   // F&B formatting:
   //   - Margin shown as a 30-day average if `marginAvg` is supplied, otherwise
   //     falls back to the latest day's margin. Rendered as an integer percent.
-  //   - Covers line gains a per-cover spend suffix when avgSpend > 0.
+  //   - "ลูกค้า X · ฿Y/คน" and "รายได้ ฿Z" rendered on separate lines so each
+  //     stat reads on its own row in the LINE chat.
   const marginPct = Math.round(params.marginAvg || params.margin || 0)
   const avgSpend = params.avgSpend
-  const coversLine = avgSpend && avgSpend > 0
-    ? `Covers ${params.covers || 0} · ฿${(params.sales || 0).toLocaleString()} · ฿${Math.round(avgSpend).toLocaleString()}/คน`
-    : `Covers ${params.covers || 0} · ฿${(params.sales || 0).toLocaleString()}`
-  return `☕ ${branchName} — ${shortDate}\nMargin (excl. salary) ${marginPct}%\n${coversLine}\n\n💡 ${params.recommendation}`
+  const coversLeft = avgSpend && avgSpend > 0
+    ? `ลูกค้า ${params.covers || 0} · ฿${Math.round(avgSpend).toLocaleString()}/คน`
+    : `ลูกค้า ${params.covers || 0}`
+  const revenueLine = `รายได้ ฿${(params.sales || 0).toLocaleString()}`
+  return `● ${branchName} — ${shortDate}\nMargin (ไม่รวมเงินเดือน) ${marginPct}%\n${coversLeft}\n${revenueLine}\n\n💡 ${params.recommendation}`
 }

@@ -270,7 +270,7 @@ async function handleMorningFlash(req: NextRequest) {
       if (!profile?.line_id) {
         console.log(`[morning-flash] user=${setting.user_id} has no profiles.line_id — cannot push LINE`)
       } else {
-        const combined = lineSnippets.join('\n\n')
+        const combined = lineSnippets.join('\n—————————————\n')
         const ok = await sendLineMessage(profile.line_id as string, combined)
         lineStatus = ok ? 'sent' : 'failed'
         console.log(`[morning-flash] LINE push to user=${setting.user_id} branches=${lineSnippets.length} → ${lineStatus}`)
