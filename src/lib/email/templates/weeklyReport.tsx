@@ -161,7 +161,14 @@ function BranchBlock({ report, lang }: { report: BranchReport; lang: 'th' | 'en'
             <tr key={d.date} style={{ backgroundColor: d.onTarget ? COLORS.rowGreen : COLORS.rowRed }}>
               <td style={{ textAlign: 'left', padding: '6px 8px' }}>{d.date}</td>
               <td style={{ textAlign: 'right', padding: '6px 8px' }}>{d.revenue != null ? Math.round(d.revenue).toLocaleString() : '—'}</td>
-              <td style={{ textAlign: 'right', padding: '6px 8px' }}>{isHotel ? (d.adr != null ? Math.round(d.adr).toLocaleString() : '—') : (d.margin != null ? `${Math.round(d.margin)}%` : '—')}</td>
+              <td style={{ textAlign: 'right', padding: '6px 8px' }}>{isHotel
+                ? (d.adr != null ? Math.round(d.adr).toLocaleString() : '—')
+                : (d.margin != null
+                    ? `${Math.round(d.margin)}%`
+                    : d.marginFallback != null
+                      ? `~${Math.round(d.marginFallback)}%`
+                      : '—')
+              }</td>
               <td style={{ textAlign: 'right', padding: '6px 8px' }}>{isHotel ? (d.occupancy != null ? `${d.occupancy.toFixed(1)}%` : '—') : (d.customers != null ? `${d.customers} คน` : '—')}</td>
               <td style={{ textAlign: 'right', padding: '6px 8px', color: d.onTarget ? COLORS.above : COLORS.below, fontWeight: 700 }}>{d.onTarget ? '✓' : '✗'}</td>
             </tr>

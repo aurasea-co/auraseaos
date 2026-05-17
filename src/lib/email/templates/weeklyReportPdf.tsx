@@ -1,42 +1,34 @@
 /**
  * PDF version of the weekly report (attached to the email).
  *
- * Thai font: Sarabun is registered from Google's CDN once at module load
- * so the PDF can render Thai text correctly. If the remote fetch fails
- * at render time, the renderToBuffer call in the route is wrapped in a
- * try/catch — the email still ships without the attachment.
+ * Thai font: Noto Sans Thai is registered from jsdelivr's @fontsource
+ * mirror once at module load so the PDF can render Thai text correctly.
+ * If the remote fetch fails at render time, the renderToBuffer call in
+ * the route is wrapped in a try/catch — the email still ships without
+ * the attachment.
  */
 import { Document, Page, Text, View, StyleSheet, Font } from '@react-pdf/renderer'
 import type { BranchReport, PortfolioSummary } from '@/lib/notifications/weeklyReportData'
 
-// Register Sarabun (Thai-capable sans-serif). URLs point at Google's
-// gstatic CDN — stable enough for weekly batch use. All four variants
-// (regular/italic × 400/700) are registered so react-pdf can resolve
-// any combination its layout requests; without italic variants the
-// recommendation block triggered "Could not resolve font for Sarabun,
-// fontWeight 400, fontStyle italic" at render time.
+// Thai-capable sans-serif via jsdelivr's @fontsource mirror. Sarabun's
+// gstatic URLs returned 404 in production (Google rotates the hashed
+// path between versions), so we use the pinned @fontsource package
+// which serves the font file directly under a stable npm version.
+// Noto Sans Thai ships normal weight only — the recommendation block's
+// italic accent is dropped to 'normal' below so the resolver doesn't
+// fail looking for an italic face.
 Font.register({
-  family: 'Sarabun',
+  family: 'NotoSansThai',
   fonts: [
     {
-      src: 'https://fonts.gstatic.com/s/sarabun/v13/DtVhJx26TKEr37c9YK5silUs1WM.woff2',
+      src: 'https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-thai@5.0.3/files/noto-sans-thai-thai-400-normal.woff',
       fontWeight: 400,
       fontStyle: 'normal',
     },
     {
-      src: 'https://fonts.gstatic.com/s/sarabun/v13/DtVjJx26TKEr37c9YHZJmnUs1Wn8nA.woff2',
-      fontWeight: 400,
-      fontStyle: 'italic',
-    },
-    {
-      src: 'https://fonts.gstatic.com/s/sarabun/v13/DtVmJx26TKEr37c9YK5silUsKD0T4Cs.woff2',
+      src: 'https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-thai@5.0.3/files/noto-sans-thai-thai-700-normal.woff',
       fontWeight: 700,
       fontStyle: 'normal',
-    },
-    {
-      src: 'https://fonts.gstatic.com/s/sarabun/v13/DtVkJx26TKEr37c9YHZJmnUsKD2T2Kd3.woff2',
-      fontWeight: 700,
-      fontStyle: 'italic',
     },
   ],
 })
@@ -60,7 +52,7 @@ const COLORS = {
 } as const
 
 const styles = StyleSheet.create({
-  page: { padding: 36, fontSize: 10, color: COLORS.text, fontFamily: 'Sarabun' },
+  page: { padding: 36, fontSize: 10, color: COLORS.text, fontFamily: 'NotoSansThai' },
   brand: { fontSize: 11, fontWeight: 700, marginBottom: 4 },
   brandSub: { fontSize: 9, color: COLORS.muted, marginBottom: 16 },
   branchHeader: { marginBottom: 12 },
@@ -88,7 +80,7 @@ const styles = StyleSheet.create({
     padding: 10,
     marginTop: 8,
     fontSize: 10,
-    fontStyle: 'italic',
+    // Italic dropped: Noto Sans Thai jsdelivr package ships normal-only.
   },
   divider: { height: 1, backgroundColor: COLORS.border, marginVertical: 18 },
   portfolioCard: {
@@ -227,8 +219,12 @@ function BranchSection({ report }: { report: BranchReport }) {
             <Text style={[styles.td, styles.cellNum]}>{d.revenue != null ? Math.round(d.revenue).toLocaleString() : '—'}</Text>
             <Text style={[styles.td, styles.cellNum]}>
               {isHotel
-                ? d.adr != null ? Math.round(d.adr).toLocaleString() : '—'
-                : d.margin != null ? `${Math.round(d.margin)}%` : '—'}
+                ? (d.adr != null ? Math.round(d.adr).toLocaleString() : '—')
+                : (d.margin != null
+                    ? `${Math.round(d.margin)}%`
+                    : d.marginFallback != null
+                      ? `~${Math.round(d.marginFallback)}%`
+                      : '—')}
             </Text>
             <Text style={[styles.td, styles.cellNum]}>
               {isHotel

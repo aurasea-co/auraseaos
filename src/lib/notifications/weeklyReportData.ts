@@ -6,6 +6,8 @@
  * the rest of the app.
  */
 
+import { periodAvgMargin, type MarginInputRow } from '@/lib/calculations/marginAggregates'
+
 export interface DailyRow {
   date: string
   revenue: number | null
@@ -16,6 +18,13 @@ export interface DailyRow {
   avgTicket?: number | null
   /** Gross margin (excl. salary), computed from revenue + additional_cost_today. */
   margin?: number | null
+  /**
+   * Rolling 30-day gross-margin average ending on this row's date.
+   * Used as a "~" prefixed fallback in the daily table for F&B rows where
+   * `margin` is null (no cost entered or out-of-band). Undefined when the
+   * window has no qualifying days at all.
+   */
+  marginFallback?: number
   onTarget: boolean
 }
 
@@ -136,8 +145,21 @@ function aggregateWeek(rows: Array<Record<string, unknown>>): BranchWeekly {
   }
 }
 
-function buildDaily(rows: Array<Record<string, unknown>>, targets: BranchTargets, isHotel: boolean): DailyRow[] {
-  return rows.map((r) => {
+function buildDaily(
+  currentRows: Array<Record<string, unknown>>,
+  allHistoryRows: Array<Record<string, unknown>>,
+  targets: BranchTargets,
+  isHotel: boolean,
+): DailyRow[] {
+  // Pre-build MarginInputRow shape over the full history so we can
+  // compute the rolling 30-day fallback per current-day below.
+  const historyMargin: MarginInputRow[] = allHistoryRows.map((row) => ({
+    metric_date: String(row.metric_date),
+    revenue: num(row.revenue),
+    variableCost: num(row.additional_cost_today),
+  }))
+
+  return currentRows.map((r) => {
     const revenue = num(r.revenue)
     const adr = num(r.adr)
     const occ = num(r.occupancy_rate)
@@ -152,6 +174,18 @@ function buildDaily(rows: Array<Record<string, unknown>>, targets: BranchTargets
       : (margin != null && targets.margin != null)
         ? margin >= targets.margin
         : revenue != null && revenue > 0
+
+    // F&B fallback: when the day's own margin is null (no cost entered or
+    // out-of-band), surface a rolling 30-day gross-margin average over
+    // every row ending on (and including) this date. periodAvgMargin runs
+    // in gross mode when monthlySalary + operatingDays are both 0.
+    let marginFallback: number | undefined
+    if (!isHotel && margin == null) {
+      const cutoff = String(r.metric_date)
+      const window = historyMargin.filter((h) => h.metric_date <= cutoff)
+      marginFallback = periodAvgMargin(window, 0, 0)?.value
+    }
+
     return {
       date: String(r.metric_date),
       revenue,
@@ -161,6 +195,7 @@ function buildDaily(rows: Array<Record<string, unknown>>, targets: BranchTargets
       customers: covers,
       avgTicket,
       margin,
+      marginFallback,
       onTarget,
     }
   })
@@ -230,21 +265,31 @@ export function buildBranchReport(args: {
   branchType: 'accommodation' | 'fnb'
   weekStart: Date
   weekEnd: Date
-  /** All rows for the 14-day window, ordered ascending. */
+  /** All rows for the full window (up to ~30 days), ordered ascending. */
   rows: Array<Record<string, unknown>>
   /** Bangkok ISO start date (YYYY-MM-DD) of the current 7-day window. */
   currentStartStr: string
+  /**
+   * Bangkok ISO start date (YYYY-MM-DD) of the prior 7-day window. The
+   * window between [previousStartStr, currentStartStr) is used for the
+   * week-over-week comparison; any rows older than previousStartStr stay
+   * in `rows` for the daily marginFallback calculation but don't count
+   * toward "previous week".
+   */
+  previousStartStr: string
   targets: BranchTargets
   locale: 'th' | 'en'
 }): BranchReport | null {
   const currentRows = args.rows.filter((r) => String(r.metric_date) >= args.currentStartStr)
   if (!currentRows.length) return null
-  const previousRows = args.rows.filter((r) => String(r.metric_date) < args.currentStartStr)
+  const previousRows = args.rows.filter(
+    (r) => String(r.metric_date) >= args.previousStartStr && String(r.metric_date) < args.currentStartStr,
+  )
 
   const current = aggregateWeek(currentRows)
   const previous = previousRows.length > 0 ? aggregateWeek(previousRows) : undefined
   const isHotel = args.branchType === 'accommodation'
-  const daily = buildDaily(currentRows, args.targets, isHotel)
+  const daily = buildDaily(currentRows, args.rows, args.targets, isHotel)
   const weekScore = scoreWeek(current, args.targets, isHotel)
   const recommendation = buildRecommendation(current, previous, args.targets, isHotel, weekScore)
 

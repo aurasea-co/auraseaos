@@ -62,14 +62,19 @@ async function handleWeeklyReport() {
 
     if (!branches?.length) continue
 
-    // Window: previous 14 days (so we can split into current/previous 7s).
+    // Window: previous 30 days (current 7 + prior 7 for the WoW
+    // comparison + ~16 days of trailing history used purely for the
+    // per-day marginFallback rolling avg in the F&B breakdown table).
     const now = new Date()
     const currentStart = new Date(now)
     currentStart.setDate(currentStart.getDate() - 7)
     const previousStart = new Date(now)
     previousStart.setDate(previousStart.getDate() - 14)
+    const historyStart = new Date(now)
+    historyStart.setDate(historyStart.getDate() - 30)
     const currentStartStr = toBangkokDateStr(currentStart.toISOString())
     const previousStartStr = toBangkokDateStr(previousStart.toISOString())
+    const historyStartStr = toBangkokDateStr(historyStart.toISOString())
 
     // Build BranchReport for every branch in this org. Skip branches with
     // zero rows in the current week.
@@ -79,7 +84,7 @@ async function handleWeeklyReport() {
         .from('branch_daily_metrics')
         .select('*')
         .eq('branch_id', branch.id)
-        .gte('metric_date', previousStartStr)
+        .gte('metric_date', historyStartStr)
         .order('metric_date', { ascending: true })
 
       const { data: target } = await supabase
@@ -104,6 +109,7 @@ async function handleWeeklyReport() {
         weekEnd: now,
         rows: rows ?? [],
         currentStartStr,
+        previousStartStr,
         targets,
         locale: 'th',
       })
