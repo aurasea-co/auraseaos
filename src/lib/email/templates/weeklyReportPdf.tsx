@@ -176,8 +176,8 @@ function BranchSection({ report }: { report: BranchReport }) {
     : [
         {
           label: 'Margin (ไม่รวมเงินเดือน)',
-          value: report.current.avgMargin != null ? `${Math.round(report.current.avgMargin)}%` : '—',
-          compare: compareVsTarget(report.current.avgMargin, report.targets.margin, true),
+          value: report.avgMarginDisplay != null ? `${Math.round(report.avgMarginDisplay)}%` : '—',
+          compare: compareVsTarget(report.avgMarginDisplay, report.targets.margin, true),
         },
         {
           label: 'ลูกค้ารวม',
@@ -248,7 +248,7 @@ function BranchSection({ report }: { report: BranchReport }) {
           <Text style={[styles.td, styles.cellNum, { fontWeight: 700 }]}>
             {isHotel
               ? (report.current.avgAdr != null ? Math.round(report.current.avgAdr).toLocaleString() : '—')
-              : (report.current.avgMargin != null ? `${Math.round(report.current.avgMargin)}%` : '—')}
+              : (report.avgMarginDisplay != null ? `${Math.round(report.avgMarginDisplay)}%` : '—')}
           </Text>
           <Text style={[styles.td, styles.cellNum, { fontWeight: 700 }]}>
             {isHotel
@@ -285,9 +285,9 @@ function BranchSection({ report }: { report: BranchReport }) {
             ) : (
               <MetricCard
                 label="Margin"
-                value={report.current.avgMargin != null ? `${Math.round(report.current.avgMargin)}%` : '—'}
-                compare={compareVsPrev(report.current.avgMargin, report.previous.avgMargin)?.text}
-                isAbove={compareVsPrev(report.current.avgMargin, report.previous.avgMargin)?.isAbove}
+                value={report.avgMarginDisplay != null ? `${Math.round(report.avgMarginDisplay)}%` : '—'}
+                compare={compareVsPrev(report.avgMarginDisplay, report.previous.avgMargin)?.text}
+                isAbove={compareVsPrev(report.avgMarginDisplay, report.previous.avgMargin)?.isAbove}
               />
             )}
           </View>

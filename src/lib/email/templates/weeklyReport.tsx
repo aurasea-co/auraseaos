@@ -118,9 +118,12 @@ function BranchBlock({ report, lang }: { report: BranchReport; lang: 'th' | 'en'
   )
 
   // Key metrics
+  // For F&B, the Margin headline uses avgMarginDisplay so it matches the
+  // numbers the user sees in the daily table footer (and in the row
+  // cells when a day falls back to the rolling avg).
   const m1 = isHotel
     ? { label: lang === 'th' ? 'ADR เฉลี่ย' : 'Avg ADR', value: fmtCurrency(report.current.avgAdr), compare: compareVsTarget(report.current.avgAdr, report.targets.adr, 'currency') }
-    : { label: lang === 'th' ? 'Margin (ไม่รวมเงินเดือน)' : 'Margin (excl. salary)', value: report.current.avgMargin != null ? `${Math.round(report.current.avgMargin)}%` : '—', compare: compareVsTarget(report.current.avgMargin, report.targets.margin, 'percent') }
+    : { label: lang === 'th' ? 'Margin (ไม่รวมเงินเดือน)' : 'Margin (excl. salary)', value: report.avgMarginDisplay != null ? `${Math.round(report.avgMarginDisplay)}%` : '—', compare: compareVsTarget(report.avgMarginDisplay, report.targets.margin, 'percent') }
   const m2 = isHotel
     ? { label: lang === 'th' ? 'Occupancy เฉลี่ย' : 'Avg Occupancy', value: fmtPct(report.current.avgOccupancy), compare: compareVsTarget(report.current.avgOccupancy, report.targets.occupancy, 'percent') }
     : { label: lang === 'th' ? 'ลูกค้ารวม' : 'Total Covers', value: report.current.totalCovers != null ? `${fmtInt(report.current.totalCovers)} คน` : '—', compare: undefined }
@@ -182,7 +185,7 @@ function BranchBlock({ report, lang }: { report: BranchReport; lang: 'th' | 'en'
             <td style={{ textAlign: 'right', padding: '6px 8px' }}>
               {isHotel
                 ? (report.current.avgAdr != null ? Math.round(report.current.avgAdr).toLocaleString() : '—')
-                : (report.current.avgMargin != null ? `${Math.round(report.current.avgMargin)}%` : '—')}
+                : (report.avgMarginDisplay != null ? `${Math.round(report.avgMarginDisplay)}%` : '—')}
             </td>
             <td style={{ textAlign: 'right', padding: '6px 8px' }}>
               {isHotel

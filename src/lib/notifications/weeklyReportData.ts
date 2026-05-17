@@ -61,6 +61,14 @@ export interface BranchReport {
   daily: DailyRow[]
   weekScore: WeekScore
   recommendation: string
+  /**
+   * Simple mean of (margin ?? marginFallback) across the daily rows.
+   * Used for the daily-table footer and the week-over-week Margin card
+   * so both displays match the numbers the reader sees row by row. F&B
+   * only; undefined for hotel branches where the daily table tracks ADR
+   * instead.
+   */
+  avgMarginDisplay?: number
 }
 
 export interface PortfolioSummary {
@@ -293,6 +301,20 @@ export function buildBranchReport(args: {
   const weekScore = scoreWeek(current, args.targets, isHotel)
   const recommendation = buildRecommendation(current, previous, args.targets, isHotel, weekScore)
 
+  // Display-mean of the margin column: actual when available, else the
+  // rolling fallback. Skips rows that have neither (the '—' cells).
+  let avgMarginDisplay: number | undefined
+  if (!isHotel) {
+    const displayVals: number[] = []
+    for (const d of daily) {
+      const v = d.margin ?? d.marginFallback
+      if (v != null) displayVals.push(v)
+    }
+    if (displayVals.length > 0) {
+      avgMarginDisplay = displayVals.reduce((s, v) => s + v, 0) / displayVals.length
+    }
+  }
+
   const weekStartLabel = formatBangkokDate(args.weekStart, args.locale, { withYear: false })
   const weekEndLabel = formatBangkokDate(args.weekEnd, args.locale, { withYear: true })
 
@@ -308,6 +330,7 @@ export function buildBranchReport(args: {
     daily,
     weekScore,
     recommendation,
+    avgMarginDisplay,
   }
 }
 
