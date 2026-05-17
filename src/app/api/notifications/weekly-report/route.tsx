@@ -9,6 +9,7 @@ import WeeklyReportPdf from '@/lib/email/templates/weeklyReportPdf'
 import {
   buildBranchReport,
   buildPortfolio,
+  formatBangkokDate,
   type BranchReport,
   type BranchTargets,
 } from '@/lib/notifications/weeklyReportData'
@@ -113,8 +114,10 @@ async function handleWeeklyReport() {
 
     const portfolio = buildPortfolio(reports) ?? undefined
 
-    const weekStart = currentStart.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', timeZone: 'Asia/Bangkok' })
-    const weekEnd = now.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', timeZone: 'Asia/Bangkok' })
+    // Range reads "10 พ.ค. – 17 พ.ค. 69" — year only on the end date so it
+    // doesn't appear twice.
+    const weekStart = formatBangkokDate(currentStart, 'th', { withYear: false })
+    const weekEnd = formatBangkokDate(now, 'th', { withYear: true })
     const weekRange = `${weekStart} – ${weekEnd}`
     const orgPart = reports.length > 1 ? org.name || 'All branches' : reports[0].branchName
     const subject = `Aurasea Weekly Report — ${orgPart} — ${weekRange}`

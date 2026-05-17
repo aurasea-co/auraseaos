@@ -1,10 +1,24 @@
 /**
- * PDF version of the weekly report (attached to the email). Uses Helvetica
- * (built-in) to avoid having to ship a Thai font in the bundle. Labels are
- * English-only here; the HTML email keeps the Thai labels for the inbox.
+ * PDF version of the weekly report (attached to the email).
+ *
+ * Thai font: Sarabun is registered from Google's CDN once at module load
+ * so the PDF can render Thai text correctly. If the remote fetch fails
+ * at render time, the renderToBuffer call in the route is wrapped in a
+ * try/catch — the email still ships without the attachment.
  */
-import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer'
+import { Document, Page, Text, View, StyleSheet, Font } from '@react-pdf/renderer'
 import type { BranchReport, PortfolioSummary } from '@/lib/notifications/weeklyReportData'
+
+// Register Sarabun (Thai-capable sans-serif). URLs point at Google's
+// gstatic CDN — stable enough for weekly batch use. Pinned weight files
+// avoid the CSS subset negotiation @react-pdf doesn't perform.
+Font.register({
+  family: 'Sarabun',
+  fonts: [
+    { src: 'https://fonts.gstatic.com/s/sarabun/v15/DtVjJx26TKEr37c9YN5jugmJaP5acQ.ttf', fontWeight: 400 },
+    { src: 'https://fonts.gstatic.com/s/sarabun/v15/DtVnJx26TKEr37c9aBBxnu0iWBgVbe5dKQM.ttf', fontWeight: 700 },
+  ],
+})
 
 const COLORS = {
   text: '#1a1a1a',
@@ -15,26 +29,29 @@ const COLORS = {
   above: '#1D9E75',
   below: '#A32D2D',
   amber: '#BA7517',
+  rowGreen: '#f0faf5',
+  rowRed: '#fdf3f3',
 } as const
 
 const styles = StyleSheet.create({
-  page: { padding: 36, fontSize: 10, color: COLORS.text, fontFamily: 'Helvetica' },
-  brand: { fontSize: 11, fontWeight: 600, marginBottom: 16 },
+  page: { padding: 36, fontSize: 10, color: COLORS.text, fontFamily: 'Sarabun' },
+  brand: { fontSize: 11, fontWeight: 700, marginBottom: 4 },
+  brandSub: { fontSize: 9, color: COLORS.muted, marginBottom: 16 },
   branchHeader: { marginBottom: 12 },
   branchName: { fontSize: 18, fontWeight: 700, marginBottom: 2 },
   weekRange: { fontSize: 10, color: COLORS.muted },
-  scoreChip: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4, fontSize: 9, fontWeight: 600 },
+  scoreChip: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4, fontSize: 9, fontWeight: 700 },
   sectionTitle: { fontSize: 11, fontWeight: 700, marginBottom: 6, marginTop: 14 },
   metricGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 4 },
   metricCard: { width: '48%', borderWidth: 1, borderColor: COLORS.border, borderRadius: 4, padding: 8, marginBottom: 6 },
-  metricLabel: { fontSize: 8, color: COLORS.muted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 },
+  metricLabel: { fontSize: 8, color: COLORS.muted, marginBottom: 3 },
   metricValue: { fontSize: 14, fontWeight: 700, marginBottom: 2 },
   metricCompare: { fontSize: 8 },
   table: { borderWidth: 1, borderColor: COLORS.border, borderRadius: 4, marginBottom: 8 },
-  th: { fontSize: 8, fontWeight: 700, color: COLORS.muted, textTransform: 'uppercase', letterSpacing: 0.5 },
+  th: { fontSize: 8, fontWeight: 700, color: COLORS.muted },
   td: { fontSize: 9 },
   tr: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: COLORS.border, paddingVertical: 5, paddingHorizontal: 8 },
-  trFooter: { flexDirection: 'row', paddingVertical: 6, paddingHorizontal: 8, backgroundColor: COLORS.rowBg, fontWeight: 700 },
+  trFooter: { flexDirection: 'row', paddingVertical: 6, paddingHorizontal: 8, backgroundColor: COLORS.rowBg },
   cellDate: { flex: 1.4 },
   cellNum: { flex: 1, textAlign: 'right' as const },
   cellStatus: { flex: 0.6, textAlign: 'right' as const },
@@ -56,21 +73,19 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     backgroundColor: COLORS.rowBg,
   },
-  portfolioTitle: { fontSize: 10, fontWeight: 700, color: COLORS.muted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
+  portfolioTitle: { fontSize: 10, fontWeight: 700, color: COLORS.muted, marginBottom: 6 },
   portfolioLine: { fontSize: 11, marginBottom: 3 },
   footer: { position: 'absolute', bottom: 24, left: 36, right: 36, fontSize: 8, color: COLORS.muted, textAlign: 'center' as const },
 })
 
 function fmtCurrency(n: number | undefined): string {
   if (n == null) return '—'
-  return `THB ${Math.round(n).toLocaleString()}`
+  return `฿${Math.round(n).toLocaleString()}`
 }
-
 function fmtPct(n: number | undefined, dp = 1): string {
   if (n == null) return '—'
   return `${n.toFixed(dp)}%`
 }
-
 function fmtCount(n: number | undefined): string {
   if (n == null) return '—'
   return Math.round(n).toLocaleString()
@@ -78,9 +93,9 @@ function fmtCount(n: number | undefined): string {
 
 function scoreLabel(s: BranchReport['weekScore']): { label: string; color: string } {
   switch (s) {
-    case 'on-track': return { label: 'On Track', color: COLORS.above }
-    case 'needs-attention': return { label: 'Needs Attention', color: COLORS.amber }
-    case 'critical': return { label: 'Critical', color: COLORS.below }
+    case 'on-track': return { label: 'ตามเป้า', color: COLORS.above }
+    case 'needs-attention': return { label: 'ต้องดูแล', color: COLORS.amber }
+    case 'critical': return { label: 'วิกฤต', color: COLORS.below }
   }
 }
 
@@ -104,9 +119,9 @@ function compareVsTarget(value: number | undefined, target: number | undefined, 
   if (gap === 0) return undefined
   const isAbove = gap > 0
   if (isPct) {
-    return { text: `${isAbove ? '+' : '-'}${Math.abs(gap).toFixed(1)}pp vs target`, isAbove }
+    return { text: `${isAbove ? '+' : '-'}${Math.abs(gap).toFixed(1)}% vs เป้าหมาย`, isAbove }
   }
-  return { text: `${isAbove ? '+' : '-'}THB ${Math.round(Math.abs(gap)).toLocaleString()} vs target`, isAbove }
+  return { text: `${isAbove ? '+' : '-'}฿${Math.round(Math.abs(gap)).toLocaleString()} vs เป้าหมาย`, isAbove }
 }
 
 function compareVsPrev(value: number | undefined, prev: number | undefined): { text: string; isAbove: boolean } | undefined {
@@ -115,66 +130,43 @@ function compareVsPrev(value: number | undefined, prev: number | undefined): { t
   if (gap === 0) return undefined
   const pct = (gap / prev) * 100
   const isAbove = gap > 0
-  return { text: `${isAbove ? '+' : '-'}${Math.abs(pct).toFixed(0)}% vs prev`, isAbove }
+  return { text: `${isAbove ? '+' : '-'}${Math.abs(pct).toFixed(0)}% vs สัปดาห์ก่อน`, isAbove }
 }
 
 function BranchSection({ report }: { report: BranchReport }) {
   const score = scoreLabel(report.weekScore)
   const isHotel = report.branchType === 'accommodation'
 
-  // Metric cards (vs target line as primary; vs prev secondary in compare)
-  const cards = isHotel
+  // Hotel: ADR | Occupancy | Revenue | RevPAR
+  // F&B:   Margin | Covers | Revenue | Avg Spend
+  type CardSpec = { label: string; value: string; compare?: { text: string; isAbove: boolean } }
+  const cards: CardSpec[] = isHotel
     ? [
         {
-          label: 'ADR (Avg)',
-          value: report.current.avgAdr != null ? fmtCurrency(report.current.avgAdr) : '—',
-          target: report.targets.adr,
-          isPct: false,
+          label: 'ADR เฉลี่ย',
+          value: fmtCurrency(report.current.avgAdr),
+          compare: compareVsTarget(report.current.avgAdr, report.targets.adr, false),
         },
         {
-          label: 'Occupancy (Avg)',
+          label: 'Occupancy เฉลี่ย',
           value: fmtPct(report.current.avgOccupancy),
-          target: report.targets.occupancy,
-          isPct: true,
+          compare: compareVsTarget(report.current.avgOccupancy, report.targets.occupancy, true),
         },
-        {
-          label: 'Revenue (Total)',
-          value: fmtCurrency(report.current.totalRevenue),
-          target: undefined,
-          isPct: false,
-        },
-        {
-          label: 'RevPAR (Avg)',
-          value: report.current.avgRevpar != null ? fmtCurrency(report.current.avgRevpar) : '—',
-          target: undefined,
-          isPct: false,
-        },
+        { label: 'รายได้รวม', value: fmtCurrency(report.current.totalRevenue) },
+        { label: 'RevPAR เฉลี่ย', value: fmtCurrency(report.current.avgRevpar) },
       ]
     : [
         {
-          label: 'Margin (excl. salary)',
+          label: 'Margin (ไม่รวมเงินเดือน)',
           value: report.current.avgMargin != null ? `${Math.round(report.current.avgMargin)}%` : '—',
-          target: report.targets.margin,
-          isPct: true,
+          compare: compareVsTarget(report.current.avgMargin, report.targets.margin, true),
         },
         {
-          label: 'Covers (Total)',
-          value: fmtCount(report.current.totalCovers),
-          target: undefined,
-          isPct: false,
+          label: 'ลูกค้ารวม',
+          value: report.current.totalCovers != null ? `${fmtCount(report.current.totalCovers)} คน` : '—',
         },
-        {
-          label: 'Revenue (Total)',
-          value: fmtCurrency(report.current.totalRevenue),
-          target: undefined,
-          isPct: false,
-        },
-        {
-          label: 'Avg Spend / cover',
-          value: report.current.avgSpend != null ? fmtCurrency(report.current.avgSpend) : '—',
-          target: report.targets.avgSpend,
-          isPct: false,
-        },
+        { label: 'รายได้รวม', value: fmtCurrency(report.current.totalRevenue) },
+        { label: 'Avg Spend/คน', value: fmtCurrency(report.current.avgSpend) },
       ]
 
   return (
@@ -187,38 +179,24 @@ function BranchSection({ report }: { report: BranchReport }) {
         <Text style={[styles.scoreChip, { color: '#ffffff', backgroundColor: score.color }]}>{score.label}</Text>
       </View>
 
-      <Text style={styles.sectionTitle}>Key metrics</Text>
+      <Text style={styles.sectionTitle}>ตัวชี้วัดหลัก</Text>
       <View style={styles.metricGrid}>
-        {cards.map((c, i) => {
-          const valNumber =
-            isHotel && c.label.startsWith('ADR') ? report.current.avgAdr
-            : isHotel && c.label.startsWith('Occupancy') ? report.current.avgOccupancy
-            : !isHotel && c.label.startsWith('Margin') ? report.current.avgMargin
-            : undefined
-          const cmp = compareVsTarget(valNumber, c.target, c.isPct)
-          return (
-            <MetricCard
-              key={i}
-              label={c.label}
-              value={c.value}
-              compare={cmp?.text}
-              isAbove={cmp?.isAbove}
-            />
-          )
-        })}
+        {cards.map((c, i) => (
+          <MetricCard key={i} label={c.label} value={c.value} compare={c.compare?.text} isAbove={c.compare?.isAbove} />
+        ))}
       </View>
 
-      <Text style={styles.sectionTitle}>7-day breakdown</Text>
+      <Text style={styles.sectionTitle}>รายละเอียดรายวัน</Text>
       <View style={styles.table}>
         <View style={[styles.tr, { backgroundColor: COLORS.rowBg }]}>
-          <Text style={[styles.th, styles.cellDate]}>Date</Text>
-          <Text style={[styles.th, styles.cellNum]}>Revenue</Text>
+          <Text style={[styles.th, styles.cellDate]}>วันที่</Text>
+          <Text style={[styles.th, styles.cellNum]}>รายได้</Text>
           <Text style={[styles.th, styles.cellNum]}>{isHotel ? 'ADR' : 'Margin'}</Text>
-          <Text style={[styles.th, styles.cellNum]}>{isHotel ? 'Occ' : 'Covers'}</Text>
-          <Text style={[styles.th, styles.cellStatus]}>Status</Text>
+          <Text style={[styles.th, styles.cellNum]}>{isHotel ? 'Occ' : 'ลูกค้า'}</Text>
+          <Text style={[styles.th, styles.cellStatus]}>สถานะ</Text>
         </View>
         {report.daily.map((d, i) => (
-          <View key={i} style={[styles.tr, { backgroundColor: d.onTarget ? '#f0faf5' : '#fdf3f3' }]}>
+          <View key={i} style={[styles.tr, { backgroundColor: d.onTarget ? COLORS.rowGreen : COLORS.rowRed }]}>
             <Text style={[styles.td, styles.cellDate]}>{d.date}</Text>
             <Text style={[styles.td, styles.cellNum]}>{d.revenue != null ? Math.round(d.revenue).toLocaleString() : '—'}</Text>
             <Text style={[styles.td, styles.cellNum]}>
@@ -229,7 +207,7 @@ function BranchSection({ report }: { report: BranchReport }) {
             <Text style={[styles.td, styles.cellNum]}>
               {isHotel
                 ? d.occupancy != null ? `${d.occupancy.toFixed(1)}%` : '—'
-                : d.customers != null ? d.customers.toString() : '—'}
+                : d.customers != null ? `${d.customers} คน` : '—'}
             </Text>
             <Text style={[styles.td, styles.cellStatus, { color: d.onTarget ? COLORS.above : COLORS.below, fontWeight: 700 }]}>
               {d.onTarget ? '✓' : '✗'}
@@ -237,7 +215,7 @@ function BranchSection({ report }: { report: BranchReport }) {
           </View>
         ))}
         <View style={styles.trFooter}>
-          <Text style={[styles.td, styles.cellDate, { fontWeight: 700 }]}>Total / Avg</Text>
+          <Text style={[styles.td, styles.cellDate, { fontWeight: 700 }]}>รวม/เฉลี่ย</Text>
           <Text style={[styles.td, styles.cellNum, { fontWeight: 700 }]}>
             {Math.round(report.current.totalRevenue).toLocaleString()}
           </Text>
@@ -249,7 +227,7 @@ function BranchSection({ report }: { report: BranchReport }) {
           <Text style={[styles.td, styles.cellNum, { fontWeight: 700 }]}>
             {isHotel
               ? (report.current.avgOccupancy != null ? `${report.current.avgOccupancy.toFixed(1)}%` : '—')
-              : (report.current.totalCovers != null ? report.current.totalCovers.toString() : '—')}
+              : (report.current.totalCovers != null ? `${report.current.totalCovers.toLocaleString()} คน` : '—')}
           </Text>
           <Text style={[styles.td, styles.cellStatus]}> </Text>
         </View>
@@ -257,10 +235,10 @@ function BranchSection({ report }: { report: BranchReport }) {
 
       {report.previous && (
         <>
-          <Text style={styles.sectionTitle}>Week over week</Text>
+          <Text style={styles.sectionTitle}>เทียบสัปดาห์ก่อน</Text>
           <View style={styles.metricGrid}>
             <MetricCard
-              label="Revenue"
+              label="รายได้"
               value={fmtCurrency(report.current.totalRevenue)}
               compare={compareVsPrev(report.current.totalRevenue, report.previous.totalRevenue)?.text}
               isAbove={compareVsPrev(report.current.totalRevenue, report.previous.totalRevenue)?.isAbove}
@@ -292,8 +270,7 @@ function BranchSection({ report }: { report: BranchReport }) {
 }
 
 interface WeeklyReportPdfProps {
-  ownerName?: string
-  weekRange: string  // "12 May – 18 May"
+  weekRange: string
   reports: BranchReport[]
   portfolio?: PortfolioSummary
 }
@@ -302,21 +279,21 @@ export default function WeeklyReportPdf({ weekRange, reports, portfolio }: Weekl
   return (
     <Document>
       <Page size="A4" style={styles.page}>
-        <Text style={styles.brand}>aurasea — Weekly Report</Text>
-        <Text style={{ fontSize: 9, color: COLORS.muted, marginBottom: 16 }}>{weekRange}</Text>
+        <Text style={styles.brand}>aurasea — รายงานรายสัปดาห์</Text>
+        <Text style={styles.brandSub}>{weekRange}</Text>
 
         {portfolio && (
           <View style={styles.portfolioCard}>
-            <Text style={styles.portfolioTitle}>Portfolio summary</Text>
+            <Text style={styles.portfolioTitle}>ภาพรวมพอร์ตโฟลิโอ</Text>
             <Text style={styles.portfolioLine}>
-              Total revenue: {fmtCurrency(portfolio.totalRevenueCurrent)}
+              รายได้รวม: {fmtCurrency(portfolio.totalRevenueCurrent)}
               {portfolio.revenueChangePct != null
-                ? `  (${portfolio.revenueChangePct > 0 ? '+' : ''}${portfolio.revenueChangePct.toFixed(0)}% vs prev)`
+                ? `  (${portfolio.revenueChangePct > 0 ? '+' : ''}${portfolio.revenueChangePct.toFixed(0)}% vs สัปดาห์ก่อน)`
                 : ''}
             </Text>
             {portfolio.bestBranchName && (
               <Text style={styles.portfolioLine}>
-                Best performer: {portfolio.bestBranchName} — {portfolio.bestBranchReason}
+                สาขาที่ทำผลงานดีที่สุด: {portfolio.bestBranchName} — {portfolio.bestBranchReason}
               </Text>
             )}
           </View>
@@ -330,7 +307,7 @@ export default function WeeklyReportPdf({ weekRange, reports, portfolio }: Weekl
         ))}
 
         <Text style={styles.footer} fixed>
-          Aurasea OS · Generated {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+          Aurasea OS · สร้างเมื่อ {new Date().toLocaleDateString('th-TH-u-ca-buddhist', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Bangkok' }).replace(/25(\d{2})/, '$1')}
         </Text>
       </Page>
     </Document>

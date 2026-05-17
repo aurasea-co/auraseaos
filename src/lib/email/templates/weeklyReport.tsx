@@ -69,8 +69,8 @@ function compareVsTarget(value: number | undefined, target: number | undefined, 
   if (gap === 0) return undefined
   const isAbove = gap > 0
   const sign = isAbove ? '+' : '-'
-  if (kind === 'percent') return { text: `${sign}${Math.abs(gap).toFixed(1)}pp vs target`, isAbove }
-  return { text: `${sign}฿${Math.round(Math.abs(gap)).toLocaleString()} vs target`, isAbove }
+  if (kind === 'percent') return { text: `${sign}${Math.abs(gap).toFixed(1)}% vs เป้าหมาย`, isAbove }
+  return { text: `${sign}฿${Math.round(Math.abs(gap)).toLocaleString()} vs เป้าหมาย`, isAbove }
 }
 
 function compareVsPrev(value: number | undefined, prev: number | undefined): { text: string; isAbove: boolean } | undefined {
@@ -79,7 +79,7 @@ function compareVsPrev(value: number | undefined, prev: number | undefined): { t
   if (gap === 0) return undefined
   const pct = (gap / prev) * 100
   const isAbove = gap > 0
-  return { text: `${isAbove ? '+' : '-'}${Math.abs(pct).toFixed(0)}% vs prev`, isAbove: isAbove }
+  return { text: `${isAbove ? '+' : '-'}${Math.abs(pct).toFixed(0)}% vs สัปดาห์ก่อน`, isAbove }
 }
 
 function MetricBlock({ label, value, compare }: { label: string; value: string; compare?: { text: string; isAbove: boolean } }) {
@@ -123,7 +123,7 @@ function BranchBlock({ report, lang }: { report: BranchReport; lang: 'th' | 'en'
     : { label: lang === 'th' ? 'Margin (ไม่รวมเงินเดือน)' : 'Margin (excl. salary)', value: report.current.avgMargin != null ? `${Math.round(report.current.avgMargin)}%` : '—', compare: compareVsTarget(report.current.avgMargin, report.targets.margin, 'percent') }
   const m2 = isHotel
     ? { label: lang === 'th' ? 'Occupancy เฉลี่ย' : 'Avg Occupancy', value: fmtPct(report.current.avgOccupancy), compare: compareVsTarget(report.current.avgOccupancy, report.targets.occupancy, 'percent') }
-    : { label: lang === 'th' ? 'ลูกค้ารวม' : 'Total Covers', value: fmtInt(report.current.totalCovers), compare: undefined }
+    : { label: lang === 'th' ? 'ลูกค้ารวม' : 'Total Covers', value: report.current.totalCovers != null ? `${fmtInt(report.current.totalCovers)} คน` : '—', compare: undefined }
   const m3 = { label: lang === 'th' ? 'รายได้รวม' : 'Revenue', value: fmtCurrency(report.current.totalRevenue), compare: compareVsPrev(report.current.totalRevenue, report.previous?.totalRevenue) }
   const m4 = isHotel
     ? { label: 'RevPAR', value: fmtCurrency(report.current.avgRevpar), compare: undefined }
@@ -162,7 +162,7 @@ function BranchBlock({ report, lang }: { report: BranchReport; lang: 'th' | 'en'
               <td style={{ textAlign: 'left', padding: '6px 8px' }}>{d.date}</td>
               <td style={{ textAlign: 'right', padding: '6px 8px' }}>{d.revenue != null ? Math.round(d.revenue).toLocaleString() : '—'}</td>
               <td style={{ textAlign: 'right', padding: '6px 8px' }}>{isHotel ? (d.adr != null ? Math.round(d.adr).toLocaleString() : '—') : (d.margin != null ? `${Math.round(d.margin)}%` : '—')}</td>
-              <td style={{ textAlign: 'right', padding: '6px 8px' }}>{isHotel ? (d.occupancy != null ? `${d.occupancy.toFixed(1)}%` : '—') : (d.customers != null ? d.customers.toString() : '—')}</td>
+              <td style={{ textAlign: 'right', padding: '6px 8px' }}>{isHotel ? (d.occupancy != null ? `${d.occupancy.toFixed(1)}%` : '—') : (d.customers != null ? `${d.customers} คน` : '—')}</td>
               <td style={{ textAlign: 'right', padding: '6px 8px', color: d.onTarget ? COLORS.above : COLORS.below, fontWeight: 700 }}>{d.onTarget ? '✓' : '✗'}</td>
             </tr>
           ))}
@@ -177,7 +177,7 @@ function BranchBlock({ report, lang }: { report: BranchReport; lang: 'th' | 'en'
             <td style={{ textAlign: 'right', padding: '6px 8px' }}>
               {isHotel
                 ? (report.current.avgOccupancy != null ? `${report.current.avgOccupancy.toFixed(1)}%` : '—')
-                : (report.current.totalCovers != null ? report.current.totalCovers.toString() : '—')}
+                : (report.current.totalCovers != null ? `${report.current.totalCovers.toLocaleString()} คน` : '—')}
             </td>
             <td style={{ textAlign: 'right', padding: '6px 8px' }}> </td>
           </tr>

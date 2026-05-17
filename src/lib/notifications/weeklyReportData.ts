@@ -64,6 +64,32 @@ export interface PortfolioSummary {
 
 // --- helpers -------------------------------------------------------------
 
+/**
+ * Bangkok-local date formatter. Thai output uses Buddhist calendar with a
+ * 2-digit year (e.g. "17 พ.ค. 69"); English uses en-GB ("17 May 26"). The
+ * year is only appended when `withYear` is true so date ranges read
+ * cleanly: "10 พ.ค. – 17 พ.ค. 69".
+ */
+export function formatBangkokDate(d: Date, locale: 'th' | 'en', opts: { withYear: boolean }): string {
+  if (locale === 'th') {
+    const out = d.toLocaleDateString('th-TH-u-ca-buddhist', {
+      day: 'numeric',
+      month: 'short',
+      ...(opts.withYear ? { year: 'numeric' } : {}),
+      timeZone: 'Asia/Bangkok',
+    })
+    // 2-digit BE year: '2569' → '69'. Idempotent on output that doesn't
+    // include a year at all.
+    return out.replace(/25(\d{2})/, '$1')
+  }
+  return d.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    ...(opts.withYear ? { year: '2-digit' } : {}),
+    timeZone: 'Asia/Bangkok',
+  })
+}
+
 const num = (v: unknown): number | null => {
   const n = Number(v)
   return Number.isFinite(n) ? n : null
@@ -222,9 +248,8 @@ export function buildBranchReport(args: {
   const weekScore = scoreWeek(current, args.targets, isHotel)
   const recommendation = buildRecommendation(current, previous, args.targets, isHotel, weekScore)
 
-  const dateFmt = args.locale === 'th' ? 'th-TH' : 'en-GB'
-  const weekStartLabel = args.weekStart.toLocaleDateString(dateFmt, { day: 'numeric', month: 'short', timeZone: 'Asia/Bangkok' })
-  const weekEndLabel = args.weekEnd.toLocaleDateString(dateFmt, { day: 'numeric', month: 'short', timeZone: 'Asia/Bangkok' })
+  const weekStartLabel = formatBangkokDate(args.weekStart, args.locale, { withYear: false })
+  const weekEndLabel = formatBangkokDate(args.weekEnd, args.locale, { withYear: true })
 
   return {
     branchId: args.branchId,
