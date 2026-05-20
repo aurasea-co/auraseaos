@@ -49,11 +49,12 @@ export function MobileDrawer({
     }
   }, [open])
 
-  const visibleItems = navItems.filter((item) => {
-    if (role === 'staff') return item.href === '/entry'
-    if (role === 'manager') return item.href !== '/settings'
-    return true
-  })
+  // Every role sees the three primary actions in this drawer (Home,
+  // Entry, Settings) — staff and manager are no longer filtered out.
+  // The bottom tab bar handles role-specific extras; this drawer is the
+  // always-available fallback list.
+  void role
+  const visibleItems = navItems
 
   async function handleLogout() {
     await supabase.auth.signOut()

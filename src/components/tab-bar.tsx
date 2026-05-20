@@ -41,24 +41,39 @@ function getMobileTabs(
     return [
       { href: '/home', icon: Home, labelKey: 'home' },
       { href: '/entry', icon: PenLine, labelKey: 'entry' },
+      { href: '/settings', icon: Settings, labelKey: 'settings' },
     ]
   }
 
   if (role === 'manager') {
-    return [
+    // Order: Home → Trends → Entry → Pricing/Cost → Labour → Settings.
+    // Manager sees the same analytics as owner now (except Portfolio).
+    const tabs: MobileTab[] = [
       { href: '/home', icon: Home, labelKey: 'home' },
-      { href: '/entry', icon: PenLine, labelKey: 'entry' },
-      { href: '/trends', icon: TrendingUp, labelKey: 'trends' },
     ]
+    if (hasGrowth) tabs.push({ href: '/trends', icon: TrendingUp, labelKey: 'trends' })
+    tabs.push({ href: '/entry', icon: PenLine, labelKey: 'entry' })
+    if (hasGrowth) {
+      tabs.push(
+        isHotel
+          ? { href: '/pricing', icon: DollarSign, labelKey: 'pricing' }
+          : { href: '/cost', icon: PieChart, labelKey: 'cost' },
+      )
+    }
+    if (hasPro) tabs.push({ href: '/labour', icon: Briefcase, labelKey: 'labour' })
+    tabs.push({ href: '/settings', icon: Settings, labelKey: 'settings' })
+    return tabs
   }
 
-  // Owner / superadmin — primary tabs first, then gated analytics in
-  // plan order so they land in the "More" drawer in a sensible order.
+  // Owner / superadmin — Portfolio surfaced second (Pro plan only), then
+  // Trends, then Entry, then plan-gated analytics. Items beyond the third
+  // slot fall into the "More" drawer per the existing overflow logic.
   const tabs: MobileTab[] = [
     { href: '/home', icon: Home, labelKey: 'home' },
-    { href: '/entry', icon: PenLine, labelKey: 'entry' },
   ]
+  if (hasPro) tabs.push({ href: '/portfolio', icon: BarChart3, labelKey: 'portfolio' })
   if (hasGrowth) tabs.push({ href: '/trends', icon: TrendingUp, labelKey: 'trends' })
+  tabs.push({ href: '/entry', icon: PenLine, labelKey: 'entry' })
   if (hasGrowth) {
     tabs.push(
       isHotel
@@ -66,10 +81,7 @@ function getMobileTabs(
         : { href: '/cost', icon: PieChart, labelKey: 'cost' },
     )
   }
-  if (hasPro) {
-    tabs.push({ href: '/labour', icon: Briefcase, labelKey: 'labour' })
-    tabs.push({ href: '/portfolio', icon: BarChart3, labelKey: 'portfolio' })
-  }
+  if (hasPro) tabs.push({ href: '/labour', icon: Briefcase, labelKey: 'labour' })
   tabs.push({ href: '/settings', icon: Settings, labelKey: 'settings' })
   return tabs
 }

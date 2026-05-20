@@ -12,7 +12,7 @@ import { PlanGate } from '@/components/ui/PlanGate'
 import { formatChartDate, formatBaht, formatPct, groupByWeek, formatWeekRange } from '@/lib/formatters'
 import { rolling7DayAvg } from '@/lib/calculations/rolling'
 import { periodAvgMargin, type MarginInputRow } from '@/lib/calculations/marginAggregates'
-import { toBangkokDateStr } from '@/lib/businessDate'
+import { toBangkokDateStr, getTodayBangkok } from '@/lib/businessDate'
 import { OperationalCompletenessPill } from '@/components/ui/OperationalCompletenessPill'
 import { ChartLegend } from '@/components/charts/ChartLegend'
 // Shared palette so the HTML legend swatches track the Chart.js line
@@ -73,7 +73,10 @@ export function FnbTrendsView({ branchId }: { branchId: string }) {
       const daysWithCost = windowRows.filter(
         (r) => (r.additional_cost_today ?? 0) > 0 && (r.revenue ?? 0) > 0,
       ).length
-      if (daysWithCost < 3) return null
+      // Even a single qualifying day in the window is enough — keeps the
+      // line extending all the way to the most recent day with cost data
+      // instead of dropping out for the trailing ~6 days of the chart.
+      if (daysWithCost < 1) return null
       const marginInputs: MarginInputRow[] = windowRows.map((r) => ({
         metric_date: r.metric_date,
         revenue: r.revenue,
@@ -176,6 +179,27 @@ export function FnbTrendsView({ branchId }: { branchId: string }) {
 
   const chartLabels = rows.map((d) => formatChartDate(d.metric_date))
 
+  // Pad the margin-chart x-axis up to today (Bangkok) when the most recent
+  // data row is older. Without this the chart appears to "end early" on
+  // days where the owner hasn't yet entered today's data — the line just
+  // stops at the last row instead of continuing to today's tick. Padding
+  // adds null margin entries so the axis extends without drawing through.
+  const todayStr = getTodayBangkok()
+  const marginPadLabels: string[] = []
+  const marginPadData: (number | null)[] = []
+  if (rows.length > 0) {
+    let cursor = rows[rows.length - 1].metric_date
+    while (cursor < todayStr) {
+      const d = new Date(cursor + 'T00:00:00Z')
+      d.setUTCDate(d.getUTCDate() + 1)
+      cursor = d.toISOString().slice(0, 10)
+      marginPadLabels.push(formatChartDate(cursor))
+      marginPadData.push(null)
+    }
+  }
+  const marginChartLabels = [...chartLabels, ...marginPadLabels]
+  const marginChartData = [...rollingMargin, ...marginPadData]
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div className="flex items-center" style={{ gap: 10 }}>
@@ -201,9 +225,9 @@ export function FnbTrendsView({ branchId }: { branchId: string }) {
           weekly report use, so the line matches the numbers shown there. */}
       <Section label="GROSS MARGIN % (ไม่รวมเงินเดือน) — 30 วันล่าสุด">
         <LineChart
-          labels={chartLabels}
+          labels={marginChartLabels}
           datasets={[{
-            data: rollingMargin,
+            data: marginChartData,
             color: COLORS.margin,
             label: t('kpi_gross_margin_excl'),
             fill: true,

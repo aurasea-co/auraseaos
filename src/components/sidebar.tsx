@@ -35,13 +35,19 @@ function getNavItems(role: AppRole, plan: string, branchType: string): (NavItem 
   const bt: BranchType = branchType === 'fnb' ? 'fnb' : 'accommodation'
   const allItems: NavItem[] = [
     { href: '/home', icon: Home, labelKey: 'home', roles: ['owner', 'manager', 'staff', 'superadmin'] },
-    { href: '/entry', icon: PenLine, labelKey: 'entry', roles: ['owner', 'manager', 'staff', 'superadmin'] },
-    { href: '/trends', icon: TrendingUp, labelKey: 'trends', roles: ['owner', 'manager', 'superadmin'], plans: ['growth', 'pro'], requiredPlan: 'growth' },
-    { href: '/pricing', icon: DollarSign, labelKey: 'pricing', roles: ['owner', 'superadmin'], plans: ['growth', 'pro'], branchTypes: ['accommodation'], requiredPlan: 'growth' },
-    { href: '/cost', icon: PieChart, labelKey: 'cost', roles: ['owner', 'superadmin'], plans: ['growth', 'pro'], branchTypes: ['fnb'], requiredPlan: 'growth' },
-    { href: '/labour', icon: Briefcase, labelKey: 'labour', roles: ['owner', 'superadmin'], plans: ['pro'], requiredPlan: 'pro' },
+    // Order is Home → Portfolio → Trends → Entry → Pricing/Cost → Labour
+    // → Settings. Pro-gated Portfolio is intentionally surfaced near the
+    // top for owners on Pro plans; the plan/role filter below hides it
+    // for any user who isn't entitled. Manager now sees Cost / Labour /
+    // Settings, and Staff sees Settings — matches the spec's per-role
+    // ordering.
     { href: '/portfolio', icon: BarChart3, labelKey: 'portfolio', roles: ['owner', 'superadmin'], plans: ['pro'], requiredPlan: 'pro' },
-    { href: '/settings', icon: Settings, labelKey: 'settings', roles: ['owner', 'superadmin'] },
+    { href: '/trends', icon: TrendingUp, labelKey: 'trends', roles: ['owner', 'manager', 'superadmin'], plans: ['growth', 'pro'], requiredPlan: 'growth' },
+    { href: '/entry', icon: PenLine, labelKey: 'entry', roles: ['owner', 'manager', 'staff', 'superadmin'] },
+    { href: '/pricing', icon: DollarSign, labelKey: 'pricing', roles: ['owner', 'superadmin'], plans: ['growth', 'pro'], branchTypes: ['accommodation'], requiredPlan: 'growth' },
+    { href: '/cost', icon: PieChart, labelKey: 'cost', roles: ['owner', 'manager', 'superadmin'], plans: ['growth', 'pro'], branchTypes: ['fnb'], requiredPlan: 'growth' },
+    { href: '/labour', icon: Briefcase, labelKey: 'labour', roles: ['owner', 'manager', 'superadmin'], plans: ['pro'], requiredPlan: 'pro' },
+    { href: '/settings', icon: Settings, labelKey: 'settings', roles: ['owner', 'manager', 'staff', 'superadmin'] },
   ]
 
   return allItems
