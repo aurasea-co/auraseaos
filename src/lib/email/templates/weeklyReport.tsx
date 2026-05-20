@@ -13,6 +13,10 @@ interface WeeklyReportProps {
   lang: 'th' | 'en'
   reports: BranchReport[]
   portfolio?: PortfolioSummary
+  /** Up to three short Thai action items, rendered as a numbered list at
+   *  the bottom of the report (mirrors the portfolio page's "3 things to
+   *  do this week" block). */
+  actions?: string[]
   dashboardUrl: string
 }
 
@@ -211,7 +215,7 @@ function BranchBlock({ report, lang }: { report: BranchReport; lang: 'th' | 'en'
   )
 }
 
-export default function WeeklyReport({ weekRange, lang, reports, portfolio, dashboardUrl }: WeeklyReportProps) {
+export default function WeeklyReport({ weekRange, lang, reports, portfolio, actions, dashboardUrl }: WeeklyReportProps) {
   const headerLabel = lang === 'th' ? 'รายงานรายสัปดาห์' : 'Weekly Report'
   const ctaLabel = lang === 'th' ? 'ดูรายละเอียดใน Dashboard' : 'Open dashboard'
   const unsubscribeLabel = lang === 'th' ? 'ยกเลิกการแจ้งเตือน' : 'Unsubscribe'
@@ -255,6 +259,40 @@ export default function WeeklyReport({ weekRange, lang, reports, portfolio, dash
               <BranchBlock report={r} lang={lang} />
             </div>
           ))}
+
+          {actions && actions.length > 0 && (
+            <Section style={{ marginTop: 8, marginBottom: 24 }}>
+              <Text style={{ fontSize: 12, fontWeight: 700, color: COLORS.muted, textTransform: 'uppercase' as const, letterSpacing: '0.06em', margin: '0 0 12px' }}>
+                3 สิ่งที่ควรทำสัปดาห์หน้า
+              </Text>
+              {actions.map((action, i) => (
+                <Row key={i} style={{ marginBottom: 10 }}>
+                  <Column style={{ width: 28, verticalAlign: 'top' as const }}>
+                    <div
+                      style={{
+                        width: 22,
+                        height: 22,
+                        borderRadius: 11,
+                        backgroundColor: COLORS.accent,
+                        color: '#ffffff',
+                        fontWeight: 700,
+                        fontSize: 11,
+                        textAlign: 'center' as const,
+                        lineHeight: '22px',
+                      }}
+                    >
+                      {i + 1}
+                    </div>
+                  </Column>
+                  <Column style={{ verticalAlign: 'top' as const }}>
+                    <Text style={{ fontSize: 13, lineHeight: 1.55, color: COLORS.text, margin: 0 }}>
+                      {action}
+                    </Text>
+                  </Column>
+                </Row>
+              ))}
+            </Section>
+          )}
 
           <Section style={{ textAlign: 'center' as const, marginTop: 16, marginBottom: 32 }}>
             <Button

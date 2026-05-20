@@ -93,6 +93,20 @@ const styles = StyleSheet.create({
   },
   portfolioTitle: { fontSize: 10, fontWeight: 700, color: COLORS.muted, marginBottom: 6 },
   portfolioLine: { fontSize: 11, marginBottom: 3 },
+  actionsTitle: { fontSize: 11, fontWeight: 700, color: COLORS.muted, marginBottom: 8, marginTop: 18 },
+  actionRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 6 },
+  actionBadge: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: COLORS.accent,
+    color: '#ffffff',
+    fontWeight: 700,
+    fontSize: 9,
+    textAlign: 'center' as const,
+    marginRight: 8,
+  },
+  actionText: { flex: 1, fontSize: 10, lineHeight: 1.45 },
   footer: { position: 'absolute', bottom: 24, left: 36, right: 36, fontSize: 8, color: COLORS.muted, textAlign: 'center' as const },
 })
 
@@ -305,9 +319,12 @@ interface WeeklyReportPdfProps {
   weekRange: string
   reports: BranchReport[]
   portfolio?: PortfolioSummary
+  /** Up to three short Thai action items, rendered as a numbered list at
+   *  the end of the document (mirrors the email + portfolio page). */
+  actions?: string[]
 }
 
-export default function WeeklyReportPdf({ weekRange, reports, portfolio }: WeeklyReportPdfProps) {
+export default function WeeklyReportPdf({ weekRange, reports, portfolio, actions }: WeeklyReportPdfProps) {
   return (
     <Document>
       <Page size="A4" style={styles.page}>
@@ -337,6 +354,18 @@ export default function WeeklyReportPdf({ weekRange, reports, portfolio }: Weekl
             <BranchSection report={r} />
           </View>
         ))}
+
+        {actions && actions.length > 0 && (
+          <View>
+            <Text style={styles.actionsTitle}>3 สิ่งที่ควรทำสัปดาห์หน้า</Text>
+            {actions.map((action, i) => (
+              <View key={i} style={styles.actionRow} wrap={false}>
+                <Text style={styles.actionBadge}>{String(i + 1)}</Text>
+                <Text style={styles.actionText}>{action}</Text>
+              </View>
+            ))}
+          </View>
+        )}
 
         <Text style={styles.footer} fixed>
           Aurasea OS · สร้างเมื่อ {new Date().toLocaleDateString('th-TH-u-ca-buddhist', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Bangkok' }).replace(/25(\d{2})/, '$1')}

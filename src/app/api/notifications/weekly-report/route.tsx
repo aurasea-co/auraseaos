@@ -10,6 +10,7 @@ import {
   buildBranchReport,
   buildPortfolio,
   formatBangkokDate,
+  generateWeeklyActions,
   type BranchReport,
   type BranchTargets,
 } from '@/lib/notifications/weeklyReportData'
@@ -119,6 +120,7 @@ async function handleWeeklyReport() {
     if (reports.length === 0) continue
 
     const portfolio = buildPortfolio(reports) ?? undefined
+    const actions = generateWeeklyActions(reports)
 
     // Range reads "10 พ.ค. – 17 พ.ค. 69" — year only on the end date so it
     // doesn't appear twice.
@@ -131,7 +133,7 @@ async function handleWeeklyReport() {
     let pdfBuffer: Buffer | null = null
     try {
       pdfBuffer = await renderToBuffer(
-        <WeeklyReportPdf weekRange={weekRange} reports={reports} portfolio={portfolio} />,
+        <WeeklyReportPdf weekRange={weekRange} reports={reports} portfolio={portfolio} actions={actions} />,
       )
     } catch (err) {
       console.error('[weekly-report] PDF render failed; sending email without attachment:', err)
@@ -143,6 +145,7 @@ async function handleWeeklyReport() {
         lang="th"
         reports={reports}
         portfolio={portfolio}
+        actions={actions}
         dashboardUrl="https://app.auraseaos.com/home"
       />,
     )

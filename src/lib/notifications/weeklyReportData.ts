@@ -426,3 +426,83 @@ export function buildPortfolio(reports: BranchReport[]): PortfolioSummary | null
     bestBranchReason: best?.reason,
   }
 }
+
+/**
+ * Three Thai-language action items shown at the bottom of the weekly
+ * report email + PDF, mirroring the portfolio page's "3 things to do
+ * this week" block. Priority order:
+ *   1. Worst-performing branch — biggest target gap on its primary metric
+ *   2. Operational hygiene — incomplete data entry across the week, or
+ *      labour-cost callout when entry compliance is fine
+ *   3. Positive observation — best-performing branch + an extend-from-here
+ *      suggestion
+ *
+ * Falls back to neutral text when signals are missing.
+ */
+export function generateWeeklyActions(reports: BranchReport[]): string[] {
+  if (reports.length === 0) return []
+
+  // 1) Worst gap vs target across all branches
+  let worstAction: string | undefined
+  let worstGap = -Infinity
+  for (const r of reports) {
+    const isHotel = r.branchType === 'accommodation'
+    const value = isHotel ? r.current.avgAdr : (r.avgMarginDisplay ?? r.current.avgMargin)
+    const target = isHotel ? r.targets.adr : r.targets.margin
+    if (value == null || target == null || target <= 0) continue
+    const gap = target - value
+    if (gap > worstGap) {
+      worstGap = gap
+      worstAction = isHotel
+        ? `${r.branchName}: ADR ต่ำกว่าเป้า ฿${Math.round(Math.abs(gap))}`
+        : `${r.branchName}: Margin ต่ำกว่าเป้า ${Math.round(Math.abs(gap))}%`
+    }
+  }
+  if (worstGap <= 0) worstAction = undefined  // everyone hit target
+
+  // 2) Data-entry compliance: branches with < 7 days of data this week
+  const incomplete = reports.filter((r) => r.current.daysWithData < 7)
+  let complianceAction: string
+  if (incomplete.length === 1) {
+    complianceAction = `${incomplete[0].branchName}: กรอกข้อมูลให้ครบทุกวันเพื่อให้รายงานแม่นยำขึ้น`
+  } else if (incomplete.length > 1) {
+    complianceAction = `${incomplete.length} สาขายังกรอกข้อมูลไม่ครบสัปดาห์ — ตั้งเตือนเวลาปิดร้านเพื่อความสม่ำเสมอ`
+  } else {
+    // Compliance fine — surface labour or COGS as the secondary signal
+    // for F&B with poor margin (when present), otherwise generic nudge.
+    const fnbWithThinMargin = reports.find(
+      (r) =>
+        r.branchType === 'fnb' &&
+        (r.avgMarginDisplay ?? r.current.avgMargin ?? 100) <
+          (r.targets.margin ?? 100),
+    )
+    if (fnbWithThinMargin) {
+      complianceAction = `${fnbWithThinMargin.branchName}: ปรับ shift schedule เพื่อลด labour cost`
+    } else {
+      complianceAction = 'กรอกข้อมูลครบทุกสาขา — รักษามาตรฐานความสม่ำเสมอนี้'
+    }
+  }
+
+  // 3) Best-performing branch — encouragement + extend-further nudge
+  let bestAction: string | undefined
+  let bestRatio = -Infinity
+  for (const r of reports) {
+    const isHotel = r.branchType === 'accommodation'
+    const value = isHotel ? r.current.avgAdr : (r.avgMarginDisplay ?? r.current.avgMargin)
+    const target = isHotel ? r.targets.adr : r.targets.margin
+    if (value == null || target == null || target <= 0) continue
+    const ratio = value / target
+    if (ratio > bestRatio) {
+      bestRatio = ratio
+      bestAction = isHotel
+        ? `${r.branchName}: ADR ทำได้ดี — มองหาช่องทาง upsell เพื่อเพิ่ม revenue ต่อห้อง`
+        : `${r.branchName}: Margin / Covers แข็งแรง — มองหาวิธีต่อยอด margin ให้สูงขึ้นอีก`
+    }
+  }
+
+  return [
+    worstAction ?? 'ทบทวนผลประกอบการรายสาขา — มองหาแนวโน้มที่ต้องดูแลในสัปดาห์หน้า',
+    complianceAction,
+    bestAction ?? 'รักษาผลประกอบการให้สม่ำเสมอ และทบทวนรายสาขาในแต่ละสัปดาห์',
+  ]
+}
