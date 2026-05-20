@@ -7,6 +7,7 @@ import { buildMorningFlashLine, sendLineMessage } from '@/lib/line/messaging'
 import { getTodayBangkok } from '@/lib/businessDate'
 import { calculateGrossMarginStrict } from '@/lib/calculations/fnb'
 import { periodAvgMargin, type MarginInputRow } from '@/lib/calculations/marginAggregates'
+import { generateHotelRecommendation, generateFnbRecommendation } from '@/lib/notifications/recommendation'
 
 async function handleMorningFlash(req: NextRequest) {
   // Allowed callers:
@@ -189,9 +190,47 @@ async function handleMorningFlash(req: NextRequest) {
         marginAvg = periodAvgMargin(fnbRows, 0, 0)?.value
       }
 
+      // Recent 7 days, ascending by date, for trend analysis in the
+      // recommendation engine. `metrics` is the 30-day fetch ordered
+      // descending — slice the first 7 (newest) and reverse so the helper
+      // sees them oldest → newest.
+      const recent7Asc = (metrics ?? []).slice(0, 7).slice().reverse()
+
       const recommendation = isHotel
-        ? (latest.adr || 0) >= (Number(targets?.adr_target) || 0) ? 'ADR ตามเป้า — รักษาระดับ' : 'ADR ต่ำกว่าเป้า — ลองเพิ่ม direct booking'
-        : (marginAvg ?? latestMargin ?? 0) >= (100 - Number(targets?.cogs_target || 32)) ? 'Margin ตามเป้า' : 'Margin ต่ำกว่าเป้า — ตรวจสอบ COGS'
+        ? generateHotelRecommendation({
+            adr: Number(latest.adr) || 0,
+            adrTarget: Number(targets?.adr_target) || 0,
+            occupancy: Number(latest.occupancy_rate) || 0,
+            occupancyTarget: Number(targets?.occupancy_target) || 80,
+            revenue: Number(latest.revenue) || 0,
+            roomsAvailable: latest.rooms_available
+              ? Number(latest.rooms_available) - (Number(latest.rooms_sold) || 0)
+              : 0,
+            recentMetrics: recent7Asc.map((m: Record<string, unknown>) => ({
+              adr: m.adr != null ? Number(m.adr) : null,
+              occupancy_rate: m.occupancy_rate != null ? Number(m.occupancy_rate) : null,
+              revenue: m.revenue != null ? Number(m.revenue) : null,
+              metric_date: String(m.metric_date),
+            })),
+          })
+        : generateFnbRecommendation({
+            marginAvg: marginAvg ?? 0,
+            latestMargin: latestMargin ?? null,
+            marginTarget: targets?.cogs_target != null ? 100 - Number(targets.cogs_target) : 68,
+            covers: Number(latest.customers) || 0,
+            coversTarget: Number(targets?.covers_target) || 40,
+            avgSpend: avgSpend ?? 0,
+            revenue: Number(latest.revenue) || 0,
+            // branch_daily_metrics exposes the cover count as `customers`;
+            // remap to `total_customers` to match the recommendation
+            // helper's input shape.
+            recentMetrics: recent7Asc.map((m: Record<string, unknown>) => ({
+              revenue: m.revenue != null ? Number(m.revenue) : null,
+              additional_cost_today: m.additional_cost_today != null ? Number(m.additional_cost_today) : null,
+              total_customers: m.customers != null ? Number(m.customers) : null,
+              metric_date: String(m.metric_date),
+            })),
+          })
 
       const dateStr = new Date(latest.metric_date + 'T00:00:00').toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })
 

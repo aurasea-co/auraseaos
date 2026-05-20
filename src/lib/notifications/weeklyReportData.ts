@@ -7,6 +7,7 @@
  */
 
 import { periodAvgMargin, type MarginInputRow } from '@/lib/calculations/marginAggregates'
+import { generateHotelRecommendation, generateFnbRecommendation } from './recommendation'
 
 export interface DailyRow {
   date: string
@@ -224,45 +225,53 @@ function scoreWeek(current: BranchWeekly, targets: BranchTargets, isHotel: boole
 
 function buildRecommendation(
   current: BranchWeekly,
-  previous: BranchWeekly | undefined,
   targets: BranchTargets,
   isHotel: boolean,
-  weekScore: WeekScore,
+  currentRows: Array<Record<string, unknown>>,
 ): string {
-  const primary = isHotel ? current.avgAdr : current.avgMargin
-  const target = isHotel ? targets.adr : targets.margin
-  const fmtPct = (n: number) => Math.round(n)
-
-  if (weekScore === 'on-track') {
-    if (previous) {
-      const prevPrimary = isHotel ? previous.avgAdr : previous.avgMargin
-      if (primary != null && prevPrimary != null) {
-        const delta = primary - prevPrimary
-        if (delta > 0) {
-          return isHotel
-            ? `ADR เฉลี่ยดีขึ้นจากสัปดาห์ก่อน — รักษาระดับและทบทวนช่องทาง direct booking`
-            : `Margin ดีขึ้นจากสัปดาห์ก่อน — รักษาแนวทางควบคุมต้นทุนต่อไป`
-        }
-      }
-    }
-    return isHotel
-      ? `ผลประกอบการอยู่ในเกณฑ์เป้าหมาย — ทบทวนช่องทางที่ทำผลงานดีสุดเพื่อขยายผล`
-      : `Margin เป็นไปตามเป้า — ตรวจสอบรายการที่กำไรสูงสุดเพื่อเพิ่มสัดส่วน`
-  }
-
+  // Delegate to the same data-driven engine the morning flash uses, so
+  // both surfaces produce comparable, varied messages. The engine reads
+  // the 7-day rows for trend signals (ADR drift, revenue decline, cost
+  // ratio creep) on top of the headline-vs-target comparison.
   if (isHotel) {
-    if (primary != null && target != null && target > 0) {
-      const gap = target - primary
-      return `ADR ต่ำกว่าเป้าเฉลี่ย ฿${fmtPct(gap)} — ลองโปรโมต direct booking หรือปรับราคาช่วงสุดสัปดาห์เพื่อปิดช่องว่างนี้สัปดาห์หน้า`
-    }
-    return `ADR ยังต่ำกว่าเป้า — ทบทวนกลยุทธ์ราคาและช่องทางจองสัปดาห์หน้า`
+    return generateHotelRecommendation({
+      adr: current.avgAdr ?? 0,
+      adrTarget: targets.adr ?? 0,
+      occupancy: current.avgOccupancy ?? 0,
+      occupancyTarget: targets.occupancy ?? 80,
+      revenue: current.totalRevenue,
+      // Weekly view has no "rooms available right now" — pass 0 so the
+      // walk-in branch (which needs >20 free rooms to fire) skips.
+      roomsAvailable: 0,
+      recentMetrics: currentRows.map((m) => ({
+        adr: m.adr != null ? Number(m.adr) : null,
+        occupancy_rate: m.occupancy_rate != null ? Number(m.occupancy_rate) : null,
+        revenue: m.revenue != null ? Number(m.revenue) : null,
+        metric_date: String(m.metric_date),
+      })),
+    })
   }
 
-  if (primary != null && target != null) {
-    const gap = target - primary
-    return `Margin ต่ำกว่าเป้า ${fmtPct(gap)}% — ตรวจสอบต้นทุนวัตถุดิบและของเสีย; ทดลองปรับเมนูกำไรสูงในสัปดาห์หน้า`
-  }
-  return `Margin ยังต่ำกว่าเป้า — ตรวจสอบต้นทุนรายวันและสัดส่วนเมนู`
+  // F&B: pass avgCoversPerDay so the helper's daily-tuned thresholds
+  // (e.g. coversGap < -15) still map sensibly to a weekly aggregate.
+  const avgCoversPerDay = currentRows.length > 0
+    ? currentRows.reduce((s, r) => s + (Number(r.customers) || 0), 0) / currentRows.length
+    : 0
+  return generateFnbRecommendation({
+    marginAvg: current.avgMargin ?? 0,
+    latestMargin: null,
+    marginTarget: targets.margin ?? 68,
+    covers: avgCoversPerDay,
+    coversTarget: targets.covers ?? 40,
+    avgSpend: current.avgSpend ?? 0,
+    revenue: current.totalRevenue,
+    recentMetrics: currentRows.map((m) => ({
+      revenue: m.revenue != null ? Number(m.revenue) : null,
+      additional_cost_today: m.additional_cost_today != null ? Number(m.additional_cost_today) : null,
+      total_customers: m.customers != null ? Number(m.customers) : null,
+      metric_date: String(m.metric_date),
+    })),
+  })
 }
 
 // --- public API ----------------------------------------------------------
@@ -299,7 +308,7 @@ export function buildBranchReport(args: {
   const isHotel = args.branchType === 'accommodation'
   const daily = buildDaily(currentRows, args.rows, args.targets, isHotel)
   const weekScore = scoreWeek(current, args.targets, isHotel)
-  const recommendation = buildRecommendation(current, previous, args.targets, isHotel, weekScore)
+  const recommendation = buildRecommendation(current, args.targets, isHotel, currentRows)
 
   // Display-mean of the margin column: actual when available, else the
   // rolling fallback. Skips rows that have neither (the '—' cells).
