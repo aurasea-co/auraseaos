@@ -7,7 +7,7 @@
  */
 
 import { periodAvgMargin, type MarginInputRow } from '@/lib/calculations/marginAggregates'
-import { generateHotelRecommendation, generateFnbRecommendation } from './recommendation'
+import { generateWeeklyHotelRecommendation, generateWeeklyFnbRecommendation } from './recommendation'
 
 export interface DailyRow {
   date: string
@@ -225,52 +225,84 @@ function scoreWeek(current: BranchWeekly, targets: BranchTargets, isHotel: boole
 
 function buildRecommendation(
   current: BranchWeekly,
+  previous: BranchWeekly | undefined,
   targets: BranchTargets,
   isHotel: boolean,
   currentRows: Array<Record<string, unknown>>,
+  daily: DailyRow[],
+  avgMarginDisplay: number | undefined,
+  locale: 'th' | 'en',
 ): string {
-  // Delegate to the same data-driven engine the morning flash uses, so
-  // both surfaces produce comparable, varied messages. The engine reads
-  // the 7-day rows for trend signals (ADR drift, revenue decline, cost
-  // ratio creep) on top of the headline-vs-target comparison.
+  // Revenue extremes across the current week (skip null/zero days so a
+  // missing entry doesn't masquerade as a "worst day").
+  const revenues = currentRows
+    .map((m) => Number(m.revenue))
+    .filter((v) => Number.isFinite(v) && v > 0)
+  const bestDayRevenue = revenues.length > 0 ? Math.max(...revenues) : 0
+  const worstDayRevenue = revenues.length > 0 ? Math.min(...revenues) : 0
+
   if (isHotel) {
-    return generateHotelRecommendation({
-      adr: current.avgAdr ?? 0,
-      adrTarget: targets.adr ?? 0,
-      occupancy: current.avgOccupancy ?? 0,
-      occupancyTarget: targets.occupancy ?? 80,
-      revenue: current.totalRevenue,
-      // Weekly view has no "rooms available right now" — pass 0 so the
-      // walk-in branch (which needs >20 free rooms to fire) skips.
-      roomsAvailable: 0,
-      recentMetrics: currentRows.map((m) => ({
-        adr: m.adr != null ? Number(m.adr) : null,
-        occupancy_rate: m.occupancy_rate != null ? Number(m.occupancy_rate) : null,
-        revenue: m.revenue != null ? Number(m.revenue) : null,
-        metric_date: String(m.metric_date),
-      })),
+    const adrTarget = targets.adr ?? 0
+    const occupancyTarget = targets.occupancy ?? 80
+    let daysAboveAdrTarget = 0
+    let daysAboveOccTarget = 0
+    for (const m of currentRows) {
+      const adr = Number(m.adr)
+      const occ = Number(m.occupancy_rate)
+      if (adrTarget > 0 && Number.isFinite(adr) && adr >= adrTarget) daysAboveAdrTarget++
+      if (occupancyTarget > 0 && Number.isFinite(occ) && occ >= occupancyTarget) daysAboveOccTarget++
+    }
+    return generateWeeklyHotelRecommendation({
+      avgAdr: current.avgAdr ?? 0,
+      adrTarget,
+      avgOccupancy: current.avgOccupancy ?? 0,
+      occupancyTarget,
+      totalRevenue: current.totalRevenue,
+      prevWeekRevenue: previous?.totalRevenue ?? 0,
+      bestDayRevenue,
+      worstDayRevenue,
+      daysAboveAdrTarget,
+      daysAboveOccTarget,
+      totalDays: currentRows.length,
     })
   }
 
-  // F&B: pass avgCoversPerDay so the helper's daily-tuned thresholds
-  // (e.g. coversGap < -15) still map sensibly to a weekly aggregate.
-  const avgCoversPerDay = currentRows.length > 0
-    ? currentRows.reduce((s, r) => s + (Number(r.customers) || 0), 0) / currentRows.length
-    : 0
-  return generateFnbRecommendation({
-    marginAvg: current.avgMargin ?? 0,
-    latestMargin: null,
+  // F&B aggregates from the daily rows.
+  const totalCovers = currentRows.reduce((s, r) => s + (Number(r.customers) || 0), 0)
+  const daysWithCost = currentRows.filter((r) => Number(r.additional_cost_today) > 0).length
+  const daysWithRevenue = currentRows.filter((r) => Number(r.revenue) > 0).length
+  const avgSpend = totalCovers > 0 ? current.totalRevenue / totalCovers : 0
+
+  // Lowest actual-margin day (rolling-avg fallback rows are excluded so
+  // the message points at a real, investigable day).
+  let lowestMarginDay: string | null = null
+  let lowestMarginValue = Number.POSITIVE_INFINITY
+  for (const d of daily) {
+    if (d.margin == null) continue
+    if (d.margin < lowestMarginValue) {
+      lowestMarginValue = d.margin
+      lowestMarginDay = formatBangkokDate(new Date(d.date + 'T00:00:00'), locale, { withYear: false })
+    }
+  }
+
+  // Weekly cover target ≈ daily target × 7.
+  const dailyCoversTarget = targets.covers ?? 0
+  const weeklyCoversTarget = dailyCoversTarget > 0 ? dailyCoversTarget * 7 : 0
+
+  return generateWeeklyFnbRecommendation({
+    // Display avg matches the number rendered in the email/PDF table.
+    avgMargin: avgMarginDisplay ?? current.avgMargin ?? 0,
     marginTarget: targets.margin ?? 68,
-    covers: avgCoversPerDay,
-    coversTarget: targets.covers ?? 40,
-    avgSpend: current.avgSpend ?? 0,
-    revenue: current.totalRevenue,
-    recentMetrics: currentRows.map((m) => ({
-      revenue: m.revenue != null ? Number(m.revenue) : null,
-      additional_cost_today: m.additional_cost_today != null ? Number(m.additional_cost_today) : null,
-      total_customers: m.customers != null ? Number(m.customers) : null,
-      metric_date: String(m.metric_date),
-    })),
+    totalCovers,
+    coversTarget: weeklyCoversTarget,
+    avgSpend,
+    totalRevenue: current.totalRevenue,
+    prevWeekRevenue: previous?.totalRevenue ?? 0,
+    bestDayRevenue,
+    worstDayRevenue,
+    daysWithCost,
+    totalDays: daysWithRevenue,
+    lowestMarginDay,
   })
 }
 
@@ -308,10 +340,11 @@ export function buildBranchReport(args: {
   const isHotel = args.branchType === 'accommodation'
   const daily = buildDaily(currentRows, args.rows, args.targets, isHotel)
   const weekScore = scoreWeek(current, args.targets, isHotel)
-  const recommendation = buildRecommendation(current, args.targets, isHotel, currentRows)
 
   // Display-mean of the margin column: actual when available, else the
   // rolling fallback. Skips rows that have neither (the '—' cells).
+  // Computed before buildRecommendation so the F&B helper can use this
+  // (matching the email/PDF table footer) as its avgMargin signal.
   let avgMarginDisplay: number | undefined
   if (!isHotel) {
     const displayVals: number[] = []
@@ -323,6 +356,17 @@ export function buildBranchReport(args: {
       avgMarginDisplay = displayVals.reduce((s, v) => s + v, 0) / displayVals.length
     }
   }
+
+  const recommendation = buildRecommendation(
+    current,
+    previous,
+    args.targets,
+    isHotel,
+    currentRows,
+    daily,
+    avgMarginDisplay,
+    args.locale,
+  )
 
   const weekStartLabel = formatBangkokDate(args.weekStart, args.locale, { withYear: false })
   const weekEndLabel = formatBangkokDate(args.weekEnd, args.locale, { withYear: true })

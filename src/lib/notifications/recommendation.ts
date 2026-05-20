@@ -97,6 +97,117 @@ export function generateHotelRecommendation(data: HotelRecommendationData): stri
   return 'ADR ตามเป้า — รักษาระดับราคาและ service quality'
 }
 
+// Weekly variants — same priority-walks but with weekly signals (revenue
+// change vs prior week, hit-rate across 7 days, lowest-margin day, etc.)
+// instead of single-day snapshots. Used by the weekly-report builder.
+
+export interface WeeklyHotelRecommendationData {
+  avgAdr: number
+  adrTarget: number
+  avgOccupancy: number
+  occupancyTarget: number
+  totalRevenue: number
+  prevWeekRevenue: number
+  bestDayRevenue: number
+  worstDayRevenue: number
+  daysAboveAdrTarget: number
+  daysAboveOccTarget: number
+  totalDays: number
+}
+
+export interface WeeklyFnbRecommendationData {
+  avgMargin: number
+  marginTarget: number
+  totalCovers: number
+  /** Weekly target = daily covers target × 7. */
+  coversTarget: number
+  avgSpend: number
+  totalRevenue: number
+  prevWeekRevenue: number
+  bestDayRevenue: number
+  worstDayRevenue: number
+  daysWithCost: number
+  totalDays: number
+  lowestMarginDay: string | null
+}
+
+export function generateWeeklyHotelRecommendation(data: WeeklyHotelRecommendationData): string {
+  const { avgAdr, adrTarget, avgOccupancy, occupancyTarget, totalRevenue, prevWeekRevenue,
+    daysAboveAdrTarget, daysAboveOccTarget, totalDays } = data
+
+  const adrGap = avgAdr - adrTarget
+  const occGap = avgOccupancy - occupancyTarget
+  const revenueChange = prevWeekRevenue > 0 ? ((totalRevenue - prevWeekRevenue) / prevWeekRevenue) * 100 : 0
+  const adrHitRate = totalDays > 0 ? daysAboveAdrTarget / totalDays : 0
+  const occHitRate = totalDays > 0 ? daysAboveOccTarget / totalDays : 0
+
+  if (revenueChange < -20 && adrGap < 0 && occGap < 0) {
+    return 'รายได้ลดลง 20%+ เทียบสัปดาห์ก่อน — ทบทวน pricing strategy และเพิ่ม promotion สัปดาห์หน้า'
+  }
+  if (adrHitRate >= 0.7 && occHitRate < 0.3) {
+    return 'ราคาดี แต่ Occupancy ต่ำ — ลองปรับ rate ช่วง low demand และเพิ่ม package ดึงดูดลูกค้า'
+  }
+  if (occHitRate >= 0.7 && adrHitRate < 0.3) {
+    return 'ห้องเต็มดี แต่ ADR ต่ำ — โอกาสขึ้นราคาได้ ลอง dynamic pricing ช่วง peak demand'
+  }
+  if (adrHitRate < 0.5 && occHitRate < 0.5) {
+    return 'ผลงานไม่สม่ำเสมอทั้งสัปดาห์ — วิเคราะห์ว่าวันไหนดี/ไม่ดี และหาปัจจัยที่ต่างกัน'
+  }
+  if (adrGap >= 0 && occGap < -10) {
+    return 'สัปดาห์ดี แต่ยังมีห้องว่าง — สัปดาห์หน้าลองเพิ่ม last-minute deals ช่วง 3 วันล่วงหน้า'
+  }
+  if (adrGap < -50 && revenueChange > 0) {
+    return 'รายได้ดีขึ้น แต่ ADR ยังต่ำกว่าเป้า — รักษา momentum แต่ค่อยๆ ปรับราคาขึ้น'
+  }
+  if (adrGap >= 0 && occGap >= 0) {
+    return 'สัปดาห์ยอดเยี่ยม ทั้ง ADR และ Occupancy ตามเป้า — รักษามาตรฐานและวางแผน upsell สัปดาห์หน้า'
+  }
+  if (revenueChange > 10) {
+    return 'รายได้เพิ่มขึ้นดี — ติดตามว่าเป็น trend ต่อเนื่องหรือ one-off และวางแผนรับ demand สัปดาห์หน้า'
+  }
+  return 'ADR ต่ำกว่าเป้า — สัปดาห์หน้าทดลอง direct booking campaign ผ่าน LINE หรือ Facebook'
+}
+
+export function generateWeeklyFnbRecommendation(data: WeeklyFnbRecommendationData): string {
+  const { avgMargin, marginTarget, totalCovers, coversTarget, avgSpend, totalRevenue,
+    prevWeekRevenue, daysWithCost, totalDays, lowestMarginDay } = data
+
+  const marginGap = avgMargin - marginTarget
+  const coversGap = totalCovers - coversTarget
+  const revenueChange = prevWeekRevenue > 0 ? ((totalRevenue - prevWeekRevenue) / prevWeekRevenue) * 100 : 0
+  const costEntryRate = totalDays > 0 ? daysWithCost / totalDays : 0
+
+  // Data-quality nag fires first — every other signal depends on cost.
+  if (costEntryRate < 0.5) {
+    return `กรอกต้นทุนไม่ครบ ${daysWithCost}/${totalDays} วัน — กรอกข้อมูลต้นทุนทุกวันเพื่อให้ margin calculation แม่นยำ`
+  }
+  if (revenueChange < -15 && marginGap < -10) {
+    return 'รายได้และ Margin ลดลงพร้อมกัน — ทบทวนเมนูที่ขายดีและต้นทุน พิจารณาปรับราคาขายสัปดาห์หน้า'
+  }
+  if (revenueChange > 0 && marginGap < -15) {
+    return 'ขายดีแต่ Margin ต่ำ — ต้นทุนสูงเกินไป ตรวจสอบ waste, portion size และราคาซื้อวัตถุดิบ'
+  }
+  if (coversGap < -30 && marginGap >= 0) {
+    return `ลูกค้าน้อยกว่าเป้า ${Math.abs(Math.round(coversGap))} คน — ลอง promotion สัปดาห์หน้า เช่น buy 2 get 1 หรือ happy hour`
+  }
+  if (avgSpend < 150 && marginGap < 0) {
+    return 'Avg spend ต่ำกว่า ฿150 — ฝึก upsell เครื่องดื่มและ dessert อย่างน้อย 1 รายการต่อโต๊ะ'
+  }
+  if (lowestMarginDay && marginGap < -5) {
+    return `วันที่ ${lowestMarginDay} margin ต่ำสุดสัปดาห์นี้ — ตรวจสอบว่ามีการสั่งวัตถุดิบพิเศษหรือของเสียมากผิดปกติ`
+  }
+  if (revenueChange > 15 && marginGap >= 0) {
+    return 'สัปดาห์ดีมาก รายได้และ Margin ตามเป้า — รักษา recipe standard และ portion control ต่อไป'
+  }
+  if (marginGap >= 5) {
+    return 'Margin ดีกว่าเป้า — ตรวจสอบว่า quality ยังคงมาตรฐาน ลูกค้าพึงพอใจหรือไม่'
+  }
+  if (marginGap >= 0 && coversGap >= 0) {
+    return 'สัปดาห์ตามเป้าทั้ง Margin และลูกค้า — สัปดาห์หน้าลองเพิ่ม new menu item เพื่อ test market'
+  }
+  return 'Margin ต่ำกว่าเป้า — วิเคราะห์ top 5 เมนูที่ขายดีว่า food cost % อยู่ที่เท่าไหร่'
+}
+
 export function generateFnbRecommendation(data: FnbRecommendationData): string {
   const { marginAvg, latestMargin, marginTarget, covers, coversTarget, avgSpend, recentMetrics } = data
   const displayMargin = latestMargin ?? marginAvg
