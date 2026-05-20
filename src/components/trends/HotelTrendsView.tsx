@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useMemo } from 'react'
 import { useTranslations } from 'next-intl'
 import { useBranchMetrics } from '@/hooks/useBranchMetrics'
 import { useTargets } from '@/hooks/useTargets'
@@ -8,7 +8,6 @@ import { useUser } from '@/providers/user-context'
 import { KpiCard } from '@/components/kpi-card'
 import { BarChart } from '@/components/charts/BarChart'
 import { LineChart } from '@/components/charts/LineChart'
-import { PeriodSelector } from '@/components/ui/PeriodSelector'
 import { PlanGate } from '@/components/ui/PlanGate'
 import { formatChartDate, formatBaht, formatPct, groupByWeek, formatWeekRange } from '@/lib/formatters'
 import { calculateDailySalaryCost, calculateLabourPct } from '@/lib/calculations/hotel'
@@ -16,7 +15,8 @@ import { OperationalCompletenessPill } from '@/components/ui/OperationalComplete
 import { ChartLegend } from '@/components/charts/ChartLegend'
 
 export function HotelTrendsView({ branchId }: { branchId: string; totalRooms?: number }) {
-  const [period, setPeriod] = useState<30 | 90>(30)
+  // Trends fixed at 30 days — same for every role.
+  const period = 30 as const
   const { data, loading } = useBranchMetrics(branchId, period)
   const { targets } = useTargets(branchId)
   const { plan } = useUser()
@@ -102,12 +102,9 @@ export function HotelTrendsView({ branchId }: { branchId: string; totalRooms?: n
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* Header */}
-      <div className="flex items-center justify-between" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 500, color: 'var(--color-text-primary)' }}>{t('title')}</h2>
-          <OperationalCompletenessPill branchId={branchId} businessType="accommodation" />
-        </div>
-        <PeriodSelector value={period} onChange={setPeriod} />
+      <div className="flex items-center" style={{ gap: 10 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 500, color: 'var(--color-text-primary)' }}>{t('title')}</h2>
+        <OperationalCompletenessPill branchId={branchId} businessType="accommodation" />
       </div>
 
       {/* KPI Summary */}

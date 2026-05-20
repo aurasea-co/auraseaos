@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useMemo } from 'react'
 import { useTranslations } from 'next-intl'
 import { useBranchMetrics } from '@/hooks/useBranchMetrics'
 import { useTargets } from '@/hooks/useTargets'
@@ -8,11 +8,9 @@ import { useUser } from '@/providers/user-context'
 import { KpiCard } from '@/components/kpi-card'
 import { BarChart } from '@/components/charts/BarChart'
 import { LineChart } from '@/components/charts/LineChart'
-import { PeriodSelector } from '@/components/ui/PeriodSelector'
 import { PlanGate } from '@/components/ui/PlanGate'
 import { formatChartDate, formatBaht, formatPct, groupByWeek, formatWeekRange } from '@/lib/formatters'
-import { calculateGrossMarginStrict } from '@/lib/calculations/fnb'
-import { rolling7DayAvg, rollingAvg } from '@/lib/calculations/rolling'
+import { rolling7DayAvg } from '@/lib/calculations/rolling'
 import { periodAvgMargin, type MarginInputRow } from '@/lib/calculations/marginAggregates'
 import { toBangkokDateStr } from '@/lib/businessDate'
 import { OperationalCompletenessPill } from '@/components/ui/OperationalCompletenessPill'
@@ -31,10 +29,14 @@ const COLORS = {
 // view (KPI, chart, weekly table, target line) reads the same number
 // regardless of who's logged in, matching Home + the morning-flash
 // email.
+// Trends are fixed at 30 days for every role (no period toggle). The
+// margin chart is a 7-day rolling gross-margin average — same number a
+// stakeholder would see regardless of who's logged in.
+const FIXED_DAYS = 30
+const ROLLING_WINDOW_DAYS = 7
+
 export function FnbTrendsView({ branchId }: { branchId: string }) {
-  const [period, setPeriod] = useState<30 | 90>(30)
-  const [rollingWindow, setRollingWindow] = useState<7 | 14>(7)
-  const { data, loading } = useBranchMetrics(branchId, period)
+  const { data, loading } = useBranchMetrics(branchId, FIXED_DAYS)
   const { targets } = useTargets(branchId)
   const { plan } = useUser()
   const t = useTranslations('trends')
@@ -55,28 +57,31 @@ export function FnbTrendsView({ branchId }: { branchId: string }) {
     [data],
   )
 
-  // Per-day gross margin points (excl. salary). null for days missing
-  // cost — these feed the rolling average and are *excluded* from the
-  // window sum (not zero-filled), so a blank day doesn't drag the line.
-  const dailyMarginPoints = useMemo(
-    () => rows.map((d) => ({
-      date: d.metric_date,
-      value: calculateGrossMarginStrict(d.revenue, d.additional_cost_today),
-    })),
-    [rows],
-  )
-
-  // Rolling-average margin series (default 7 days, toggleable to 14).
-  // Returns null until the window has enough real samples — `LineChart`
-  // renders those as gaps, so the line starts honestly partway through
-  // the chart instead of drawing a warm-up from a single point.
+  // 7-day rolling gross-margin series. For each date, take the 7 days
+  // ending on that date, pass them to periodAvgMargin (gross mode via
+  // monthlySalary=0, operatingDays=0 — same selector Home + the weekly
+  // report use), and surface the totals-of-totals result. Days where the
+  // window contains fewer than 3 entries with cost data return null,
+  // which LineChart renders as a gap rather than a misleading spike.
   const rollingMargin = useMemo(() => {
-    return dailyMarginPoints.map((p) => {
-      const avg = rollingAvg(dailyMarginPoints, p.date, rollingWindow)
-      if (avg == null) return null
-      return Math.round(avg * 10) / 10
+    return rows.map((p) => {
+      const cutoff = p.metric_date
+      const startD = new Date(cutoff + 'T00:00:00Z')
+      startD.setUTCDate(startD.getUTCDate() - (ROLLING_WINDOW_DAYS - 1))
+      const startStr = startD.toISOString().slice(0, 10)
+      const windowRows = rows.filter((r) => r.metric_date >= startStr && r.metric_date <= cutoff)
+      const daysWithCost = windowRows.filter(
+        (r) => (r.additional_cost_today ?? 0) > 0 && (r.revenue ?? 0) > 0,
+      ).length
+      if (daysWithCost < 3) return null
+      const marginInputs: MarginInputRow[] = windowRows.map((r) => ({
+        metric_date: r.metric_date,
+        revenue: r.revenue,
+        variableCost: r.additional_cost_today,
+      }))
+      return periodAvgMargin(marginInputs, 0, 0)?.value ?? null
     })
-  }, [dailyMarginPoints, rollingWindow])
+  }, [rows])
 
   const stats = useMemo(() => {
     if (rows.length === 0) return null
@@ -173,15 +178,9 @@ export function FnbTrendsView({ branchId }: { branchId: string }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <div className="flex items-center justify-between" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 500, color: 'var(--color-text-primary)' }}>{t('title')}</h2>
-          <OperationalCompletenessPill branchId={branchId} businessType="fnb" />
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <RollingWindowSelector value={rollingWindow} onChange={setRollingWindow} />
-          <PeriodSelector value={period} onChange={setPeriod} />
-        </div>
+      <div className="flex items-center" style={{ gap: 10 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 500, color: 'var(--color-text-primary)' }}>{t('title')}</h2>
+        <OperationalCompletenessPill branchId={branchId} businessType="fnb" />
       </div>
 
       {stats && (
@@ -197,10 +196,10 @@ export function FnbTrendsView({ branchId }: { branchId: string }) {
         </div>
       )}
 
-      {/* Margin chart — rolling gross-margin average. The rolling helper
-          skips days without entries (rather than treating them as 0%) so a
-          single missing day no longer drags the line to the floor. */}
-      <Section label={t('margin_rolling_gross')}>
+      {/* 7-day rolling gross-margin chart over the last 30 days. Same
+          calculation (periodAvgMargin in gross mode) the morning flash and
+          weekly report use, so the line matches the numbers shown there. */}
+      <Section label="GROSS MARGIN % (ไม่รวมเงินเดือน) — 30 วันล่าสุด">
         <LineChart
           labels={chartLabels}
           datasets={[{
@@ -218,7 +217,7 @@ export function FnbTrendsView({ branchId }: { branchId: string }) {
           spanGaps={false}
         />
         <p style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 6, lineHeight: 1.5 }}>
-          {t('gross_margin_rolling_note', { window: rollingWindow })}
+          ค่าเฉลี่ย Gross Margin 7 วันย้อนหลัง (ไม่รวมเงินเดือน) วันที่ไม่มีข้อมูลต้นทุนถูกข้าม
         </p>
       </Section>
 
@@ -329,45 +328,4 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   )
 }
 
-function RollingWindowSelector({
-  value,
-  onChange,
-}: {
-  value: 7 | 14
-  onChange: (v: 7 | 14) => void
-}) {
-  const t = useTranslations('trends')
-  return (
-    <div
-      className="inline-flex items-center"
-      aria-label={t('rolling_label')}
-      style={{
-        background: 'var(--color-bg-surface)',
-        borderRadius: 'var(--radius-pill)',
-        padding: 2,
-        border: '1px solid var(--color-border)',
-      }}
-    >
-      {([7, 14] as const).map((w) => (
-        <button
-          key={w}
-          onClick={() => onChange(w)}
-          style={{
-            fontSize: 'var(--font-size-xs)',
-            fontWeight: value === w ? 500 : 400,
-            color: value === w ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)',
-            background: value === w ? 'var(--color-bg-active)' : 'transparent',
-            borderRadius: 'var(--radius-pill)',
-            padding: '4px 12px',
-            border: 'none',
-            cursor: 'pointer',
-            transition: 'all 0.15s',
-          }}
-        >
-          {w === 7 ? t('rolling_7d') : t('rolling_14d')}
-        </button>
-      ))}
-    </div>
-  )
-}
 
