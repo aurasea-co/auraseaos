@@ -2,9 +2,11 @@
 
 import { Suspense, useEffect, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/Button'
+import { LocaleSwitcher } from '@/components/locale-switcher'
 
 interface InvitationDetails {
   organization_name: string
@@ -31,6 +33,7 @@ function JoinPageInner() {
   const router = useRouter()
   const token = params.get('token') || ''
   const supabase = createClient()
+  const t = useTranslations('join')
 
   const [status, setStatus] = useState<Status>('loading')
   const [submitting, setSubmitting] = useState(false)
@@ -95,7 +98,7 @@ function JoinPageInner() {
     })
     const json = await res.json()
     if (!res.ok || !json.success) {
-      return { ok: false, error: json.error || 'เข้าร่วมไม่สำเร็จ' }
+      return { ok: false, error: json.error || t('errJoinFailed') }
     }
     return { ok: true }
   }
@@ -106,15 +109,15 @@ function JoinPageInner() {
     setErrorMessage('')
 
     if (!displayName.trim()) {
-      setErrorMessage('กรุณากรอกชื่อที่ใช้แสดง')
+      setErrorMessage(t('errDisplayName'))
       return
     }
     if (password.length < 8) {
-      setErrorMessage('รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร')
+      setErrorMessage(t('errPasswordShort'))
       return
     }
     if (password !== confirmPassword) {
-      setErrorMessage('รหัสผ่านไม่ตรงกัน')
+      setErrorMessage(t('errPasswordMismatch'))
       return
     }
 
@@ -131,7 +134,7 @@ function JoinPageInner() {
       if (error) {
         const msg = error.message.toLowerCase()
         if (msg.includes('already registered') || msg.includes('already exists') || msg.includes('user already')) {
-          setErrorMessage('อีเมลนี้มีบัญชีอยู่แล้ว — กรุณาเข้าสู่ระบบ')
+          setErrorMessage(t('errEmailExists'))
           setStatus('login')
           return
         }
@@ -142,7 +145,7 @@ function JoinPageInner() {
       // Supabase returns a user with empty identities[] when the email already
       // exists (this avoids leaking existence). Detect and bounce to login.
       if (data.user && (data.user.identities?.length ?? 0) === 0) {
-        setErrorMessage('อีเมลนี้มีบัญชีอยู่แล้ว — กรุณาเข้าสู่ระบบ')
+        setErrorMessage(t('errEmailExists'))
         setStatus('login')
         return
       }
@@ -150,15 +153,13 @@ function JoinPageInner() {
       // If "Confirm email" is enabled in Supabase, signUp returns a user but
       // no session. We can't call /api/invite/accept without a session.
       if (!data.session) {
-        setErrorMessage(
-          'บัญชีถูกสร้างแล้ว แต่ Supabase ต้องการการยืนยันอีเมล กรุณาปิด Confirm email ใน Supabase หรือยืนยันอีเมลก่อนกลับมา',
-        )
+        setErrorMessage(t('errNoSession'))
         return
       }
 
       const result = await acceptInvitation()
       if (!result.ok) {
-        setErrorMessage(result.error || 'เข้าร่วมไม่สำเร็จ')
+        setErrorMessage(result.error || t('errJoinFailed'))
         return
       }
       router.push('/welcome')
@@ -173,7 +174,7 @@ function JoinPageInner() {
     setErrorMessage('')
 
     if (!loginPassword) {
-      setErrorMessage('กรุณากรอกรหัสผ่าน')
+      setErrorMessage(t('errPasswordRequired'))
       return
     }
 
@@ -185,13 +186,13 @@ function JoinPageInner() {
       })
 
       if (error) {
-        setErrorMessage('อีเมลหรือรหัสผ่านไม่ถูกต้อง')
+        setErrorMessage(t('errInvalidCredentials'))
         return
       }
 
       const result = await acceptInvitation()
       if (!result.ok) {
-        setErrorMessage(result.error || 'เข้าร่วมไม่สำเร็จ')
+        setErrorMessage(result.error || t('errJoinFailed'))
         return
       }
       router.push('/welcome')
@@ -207,7 +208,7 @@ function JoinPageInner() {
     try {
       const result = await acceptInvitation()
       if (!result.ok) {
-        setErrorMessage(result.error || 'เข้าร่วมไม่สำเร็จ')
+        setErrorMessage(result.error || t('errJoinFailed'))
         return
       }
       router.push('/welcome')
@@ -217,15 +218,15 @@ function JoinPageInner() {
   }
 
   if (status === 'loading') {
-    return <CenteredCard><p style={muted}>กำลังตรวจสอบลิงก์...</p></CenteredCard>
+    return <CenteredCard><p style={muted}>{t('checkingLink')}</p></CenteredCard>
   }
 
   if (status === 'invalid' || status === 'expired') {
     return (
       <CenteredCard>
-        <h1 style={heading}>ลิงก์หมดอายุหรือไม่ถูกต้อง</h1>
-        <p style={muted}>กรุณาติดต่อ Owner เพื่อขอคำเชิญใหม่</p>
-        <Link href="/login" style={linkStyle}>กลับไปหน้าเข้าสู่ระบบ →</Link>
+        <h1 style={heading}>{t('invalidTitle')}</h1>
+        <p style={muted}>{t('invalidBody')}</p>
+        <Link href="/login" style={linkStyle}>{t('backToLogin')}</Link>
       </CenteredCard>
     )
   }
@@ -233,11 +234,11 @@ function JoinPageInner() {
   if (status === 'accepted') {
     return (
       <CenteredCard>
-        <h1 style={heading}>คุณเข้าร่วมแล้ว</h1>
-        <p style={muted}>คุณได้รับสิทธิ์เข้าใช้งานแล้ว เข้าสู่ระบบเพื่อเริ่มใช้งาน</p>
+        <h1 style={heading}>{t('alreadyAcceptedTitle')}</h1>
+        <p style={muted}>{t('alreadyAcceptedBody')}</p>
         <div style={{ marginTop: 16 }}>
           <Link href="/login">
-            <Button variant="primary" fullWidth>เข้าสู่ระบบ →</Button>
+            <Button variant="primary" fullWidth>{t('signIn')}</Button>
           </Link>
         </div>
       </CenteredCard>
@@ -251,21 +252,25 @@ function JoinPageInner() {
 
   return (
     <CenteredCard>
-      <p style={{ fontSize: 13, color: '#9b9b9b', margin: '0 0 6px', letterSpacing: '0.04em' }}>คำเชิญเข้าร่วม</p>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <LocaleSwitcher />
+      </div>
+
+      <p style={{ fontSize: 13, color: '#9b9b9b', margin: '0 0 6px', letterSpacing: '0.04em' }}>{t('eyebrow')}</p>
       <h1 style={heading}>{orgLabel}</h1>
 
       {/* Invitation info box */}
       <div style={{ marginTop: 14, background: '#f7f7f5', padding: '14px 16px', borderRadius: 8 }}>
         {invitation.branch_name && (
           <div style={{ fontSize: 14, color: '#1a1a1a', marginBottom: 4 }}>
-            สาขา: <strong>{invitation.branch_name}</strong>
+            {t('branchLabel')}: <strong>{invitation.branch_name}</strong>
           </div>
         )}
         <div style={{ fontSize: 14, color: '#1a1a1a' }}>
-          ตำแหน่ง: <strong>{roleLabel}</strong>
+          {t('roleLabel')}: <strong>{roleLabel}</strong>
         </div>
         <div style={{ fontSize: 12, color: '#9b9b9b', marginTop: 6 }}>
-          อีเมล: {invitation.invitee_email}
+          {t('emailLabel')}: {invitation.invitee_email}
         </div>
       </div>
 
@@ -279,7 +284,7 @@ function JoinPageInner() {
       {status === 'authedReady' && (
         <div style={{ marginTop: 20 }}>
           <Button variant="primary" fullWidth onClick={handleAuthedAccept} disabled={submitting}>
-            {submitting ? 'กำลังเข้าร่วม...' : 'ยอมรับและเข้าร่วม →'}
+            {submitting ? t('accepting') : t('acceptCta')}
           </Button>
         </div>
       )}
@@ -287,18 +292,18 @@ function JoinPageInner() {
       {/* SIGN-UP form */}
       {status === 'signup' && (
         <form onSubmit={handleSignUp} style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <Field label="ชื่อที่ใช้แสดง">
+          <Field label={t('displayName')}>
             <input
               type="text"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="ชื่อของคุณ"
+              placeholder={t('displayNamePlaceholder')}
               required
               autoFocus
               style={inputStyle}
             />
           </Field>
-          <Field label="รหัสผ่าน (อย่างน้อย 8 ตัวอักษร)">
+          <Field label={t('password')}>
             <input
               type="password"
               value={password}
@@ -309,7 +314,7 @@ function JoinPageInner() {
               style={inputStyle}
             />
           </Field>
-          <Field label="ยืนยันรหัสผ่าน">
+          <Field label={t('confirmPassword')}>
             <input
               type="password"
               value={confirmPassword}
@@ -322,7 +327,7 @@ function JoinPageInner() {
           </Field>
           <div style={{ marginTop: 4 }}>
             <Button variant="primary" fullWidth type="submit" disabled={submitting}>
-              {submitting ? 'กำลังสร้างบัญชี...' : `สร้างบัญชีและเข้าร่วม ${orgLabel} →`}
+              {submitting ? t('signingUp') : t('signUpCta', { org: orgLabel })}
             </Button>
           </div>
           <button
@@ -330,7 +335,7 @@ function JoinPageInner() {
             onClick={() => { setErrorMessage(''); setStatus('login') }}
             style={textButton}
           >
-            มีบัญชีอยู่แล้ว — เข้าสู่ระบบ
+            {t('haveAccountToggle')}
           </button>
         </form>
       )}
@@ -338,7 +343,7 @@ function JoinPageInner() {
       {/* LOGIN form */}
       {status === 'login' && (
         <form onSubmit={handleLogin} style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <Field label="อีเมล">
+          <Field label={t('emailLabel')}>
             <input
               type="email"
               value={invitation.invitee_email}
@@ -346,7 +351,7 @@ function JoinPageInner() {
               style={{ ...inputStyle, color: '#9b9b9b', background: '#f7f7f5' }}
             />
           </Field>
-          <Field label="รหัสผ่าน">
+          <Field label={t('passwordSimple')}>
             <input
               type="password"
               value={loginPassword}
@@ -359,7 +364,7 @@ function JoinPageInner() {
           </Field>
           <div style={{ marginTop: 4 }}>
             <Button variant="primary" fullWidth type="submit" disabled={submitting}>
-              {submitting ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบและเข้าร่วม →'}
+              {submitting ? t('loggingIn') : t('loginCta')}
             </Button>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
@@ -368,10 +373,10 @@ function JoinPageInner() {
               onClick={() => { setErrorMessage(''); setStatus('signup') }}
               style={textButton}
             >
-              ยังไม่มีบัญชี — สร้างบัญชีใหม่
+              {t('noAccountToggle')}
             </button>
             <Link href="/forgot-password" style={{ fontSize: 13, color: PURPLE, textDecoration: 'none' }}>
-              ลืมรหัสผ่าน?
+              {t('forgotPassword')}
             </Link>
           </div>
         </form>
@@ -391,7 +396,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 export default function JoinPage() {
   return (
-    <Suspense fallback={<CenteredCard><p style={muted}>กำลังโหลด...</p></CenteredCard>}>
+    <Suspense fallback={<CenteredCard><p style={muted}>Loading...</p></CenteredCard>}>
       <JoinPageInner />
     </Suspense>
   )

@@ -56,6 +56,9 @@ export async function POST(req: NextRequest) {
   }
 
   if (role === 'manager') {
+    // NOTE: organization_members in this project's live schema does NOT
+    // have an 'invited_by' column even though types.ts declares one.
+    // Including it here triggers a PostgREST schema-cache error.
     const { error: orgErr } = await db
       .from('organization_members')
       .upsert(
@@ -63,7 +66,6 @@ export async function POST(req: NextRequest) {
           organization_id,
           user_id: user.id,
           role: 'manager',
-          invited_by: null,
         },
         { onConflict: 'organization_id,user_id' },
       )
