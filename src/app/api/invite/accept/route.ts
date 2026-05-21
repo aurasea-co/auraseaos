@@ -7,7 +7,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 //   staff   → branch_members.role = 'branch_user'
 
 export async function POST(req: NextRequest) {
-  let body: { token?: string }
+  let body: { token?: string; displayName?: string }
   try {
     body = await req.json()
   } catch {
@@ -15,6 +15,7 @@ export async function POST(req: NextRequest) {
   }
 
   const token = body.token
+  const submittedDisplayName = body.displayName?.trim() || ''
   if (!token) {
     return NextResponse.json({ error: 'Missing token' }, { status: 400 })
   }
@@ -103,15 +104,23 @@ export async function POST(req: NextRequest) {
   // Make sure the new member has the rows the app expects everywhere else:
   // a profile row (so display_name lookups don't return null) and a
   // notification_settings row (so /settings/notifications has a starting
-  // point). Both are no-ops on conflict for users who already had them.
+  // point). notification_settings is a no-op on conflict; the profile
+  // honours an explicit displayName from the join form when provided.
   const emailPrefix = (user.email || '').split('@')[0] || 'member'
-  await db.from('profiles').upsert(
-    {
-      user_id: user.id,
-      display_name: emailPrefix,
-    },
-    { onConflict: 'user_id', ignoreDuplicates: true },
-  )
+  const finalDisplayName = submittedDisplayName || emailPrefix
+  if (submittedDisplayName) {
+    // Explicit name from the join form — write through even if a profile
+    // already exists (handles users who joined a different org first).
+    await db.from('profiles').upsert(
+      { user_id: user.id, display_name: finalDisplayName },
+      { onConflict: 'user_id' },
+    )
+  } else {
+    await db.from('profiles').upsert(
+      { user_id: user.id, display_name: finalDisplayName },
+      { onConflict: 'user_id', ignoreDuplicates: true },
+    )
+  }
 
   await db.from('notification_settings').upsert(
     {

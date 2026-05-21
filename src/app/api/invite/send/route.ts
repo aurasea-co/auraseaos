@@ -11,6 +11,25 @@ import InvitationEmail from '@/lib/email/templates/invitationEmail'
 // If a 'status' column is later desired, add it via:
 //   ALTER TABLE invitations ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';
 
+// IMPORTANT — Supabase Auth configuration:
+// The /join page calls supabase.auth.signUp() to create the user inline.
+// For that to skip the default Supabase confirmation email, go to:
+//   Supabase Dashboard → Authentication → Settings → Email Auth
+//   → toggle OFF "Confirm email"
+// Invited users are already verified via this Aurasea invitation email,
+// so a second confirmation step would be redundant.
+//
+// If you prefer to keep "Confirm email" ON for the public signup flow,
+// the alternative is to pre-create the invited user with
+//   supabase.auth.admin.createUser({ email, email_confirm: true })
+// inside this route. We don't do that today because the /join page
+// owns password collection — pre-creating without a password leaves the
+// account in a half-built state, and admin.createUser requires us to
+// also wire a separate "set your password" step.
+//
+// Also: customize the default Supabase templates if confirmation is left
+// enabled — Authentication → Email Templates → "Confirm signup".
+
 interface InviteSendBody {
   inviteeEmail: string
   role: 'manager' | 'staff'
