@@ -15,7 +15,17 @@ interface InvitationDetails {
   expires_at: string
 }
 
-type Status = 'loading' | 'invalid' | 'expired' | 'accepted' | 'ready' | 'joining' | 'joinError'
+type Status =
+  | 'loading'
+  | 'invalid'
+  | 'expired'
+  | 'accepted'
+  | 'ready'        // not authed, showing the two-option screen
+  | 'magicForm'    // new-user magic-link form open
+  | 'sendingLink'  // magic link request in flight
+  | 'linkSent'     // success — email sent
+  | 'joining'      // authed user accepting
+  | 'joinError'
 
 function JoinPageInner() {
   const params = useSearchParams()
@@ -27,6 +37,7 @@ function JoinPageInner() {
   const [errorMessage, setErrorMessage] = useState<string>('')
   const [invitation, setInvitation] = useState<InvitationDetails | null>(null)
   const [isAuthed, setIsAuthed] = useState(false)
+  const [magicEmail, setMagicEmail] = useState('')
 
   useEffect(() => {
     async function load() {
@@ -51,6 +62,7 @@ function JoinPageInner() {
         expires_at: data.expiresAt,
       }
       setInvitation(inv)
+      setMagicEmail(inv.invitee_email)
 
       if (inv.accepted_at) {
         setStatus('accepted')
@@ -89,6 +101,31 @@ function JoinPageInner() {
     }
   }
 
+  async function handleSendMagicLink(e: React.FormEvent) {
+    e.preventDefault()
+    if (!magicEmail.trim()) return
+    setStatus('sendingLink')
+    setErrorMessage('')
+
+    // The magic-link confirmation URL routes through /auth/callback
+    // (PKCE code exchange), which then forwards to /join/complete?token=xxx
+    // where we POST to /api/invite/accept and land the user on /welcome.
+    const next = `/join/complete?token=${encodeURIComponent(token)}`
+    const emailRedirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email: magicEmail.trim(),
+      options: { emailRedirectTo },
+    })
+
+    if (error) {
+      setErrorMessage(error.message || 'ส่งลิงก์ไม่สำเร็จ')
+      setStatus('magicForm')
+      return
+    }
+    setStatus('linkSent')
+  }
+
   if (status === 'loading') {
     return <CenteredCard><p style={muted}>กำลังตรวจสอบลิงก์...</p></CenteredCard>
   }
@@ -97,7 +134,7 @@ function JoinPageInner() {
     return (
       <CenteredCard>
         <h1 style={heading}>ลิงก์หมดอายุหรือไม่ถูกต้อง</h1>
-        <p style={muted}>กรุณาติดต่อเจ้าของบัญชีเพื่อขอลิงก์ใหม่</p>
+        <p style={muted}>กรุณาติดต่อ Owner เพื่อขอคำเชิญใหม่</p>
         <Link href="/login" style={linkStyle}>กลับไปหน้าเข้าสู่ระบบ →</Link>
       </CenteredCard>
     )
@@ -117,13 +154,36 @@ function JoinPageInner() {
     )
   }
 
-  // ready or joining or joinError
   if (!invitation) return null
 
   const roleLabel = invitation.role === 'manager' ? 'Manager' : 'Staff'
   const joinPath = `/join?token=${encodeURIComponent(token)}`
   const loginHref = `/login?returnTo=${encodeURIComponent(joinPath)}`
-  const registerHref = `/register?token=${encodeURIComponent(token)}&email=${encodeURIComponent(invitation.invitee_email)}`
+
+  // Magic-link "check your inbox" screen
+  if (status === 'linkSent') {
+    return (
+      <CenteredCard>
+        <div style={{ fontSize: 36, marginBottom: 8 }}>📬</div>
+        <h1 style={heading}>ตรวจสอบอีเมลของคุณ</h1>
+        <p style={{ ...muted, marginTop: 6 }}>
+          ส่งลิงก์ไปที่ <strong>{magicEmail.trim()}</strong> แล้ว
+        </p>
+        <p style={{ ...muted, marginTop: 12 }}>
+          เปิดอีเมลจาก Aurasea แล้วคลิกลิงก์เพื่อเข้าสู่ระบบและเข้าร่วม{' '}
+          <strong>{invitation.organization_name}</strong>
+        </p>
+        <div style={{ marginTop: 20 }}>
+          <button
+            onClick={() => setStatus('magicForm')}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#534AB7', textDecoration: 'underline' }}
+          >
+            ไม่ได้รับอีเมล? ส่งอีกครั้ง
+          </button>
+        </div>
+      </CenteredCard>
+    )
+  }
 
   return (
     <CenteredCard>
@@ -149,7 +209,8 @@ function JoinPageInner() {
         </div>
       )}
 
-      {isAuthed ? (
+      {/* Already-signed-in shortcut */}
+      {isAuthed && status !== 'magicForm' && (
         <div style={{ marginTop: 20 }}>
           <Button
             variant="primary"
@@ -160,15 +221,45 @@ function JoinPageInner() {
             {status === 'joining' ? 'กำลังเข้าร่วม...' : 'ยอมรับและเข้าร่วม →'}
           </Button>
         </div>
+      )}
+
+      {/* Magic-link form */}
+      {status === 'magicForm' || status === 'sendingLink' ? (
+        <form onSubmit={handleSendMagicLink} style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <label style={{ fontSize: 12, color: '#6b6b6b' }}>อีเมล</label>
+          <input
+            type="email"
+            value={magicEmail}
+            onChange={(e) => setMagicEmail(e.target.value)}
+            placeholder="you@example.com"
+            required
+            style={{ width: '100%', padding: '10px 12px', border: '1px solid #d4d4d4', borderRadius: 8, fontSize: 14, color: '#1a1a1a' }}
+          />
+          <Button variant="primary" fullWidth type="submit" disabled={status === 'sendingLink' || !magicEmail.trim()}>
+            {status === 'sendingLink' ? 'กำลังส่ง...' : 'ส่งลิงก์เข้าสู่ระบบ'}
+          </Button>
+          <button
+            type="button"
+            onClick={() => setStatus('ready')}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#9b9b9b', padding: 6 }}
+          >
+            ย้อนกลับ
+          </button>
+        </form>
       ) : (
-        <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <Link href={loginHref}>
-            <Button variant="primary" fullWidth>มีบัญชีอยู่แล้ว — เข้าสู่ระบบ</Button>
-          </Link>
-          <Link href={registerHref}>
-            <Button variant="secondary" fullWidth>สร้างบัญชีใหม่</Button>
-          </Link>
-        </div>
+        !isAuthed && (
+          <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <Button variant="primary" fullWidth onClick={() => setStatus('magicForm')}>
+              สร้างบัญชีใหม่ด้วยอีเมล {invitation.invitee_email}
+            </Button>
+            <Link href={loginHref}>
+              <Button variant="secondary" fullWidth>มีบัญชีอยู่แล้ว — เข้าสู่ระบบ</Button>
+            </Link>
+            <p style={{ fontSize: 12, color: '#9b9b9b', textAlign: 'center', margin: '4px 0 0', lineHeight: 1.5 }}>
+              ไม่ต้องตั้งรหัสผ่าน — เราจะส่งลิงก์เข้าสู่ระบบให้ทางอีเมล
+            </p>
+          </div>
+        )
       )}
     </CenteredCard>
   )

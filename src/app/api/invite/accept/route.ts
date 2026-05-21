@@ -100,6 +100,29 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Make sure the new member has the rows the app expects everywhere else:
+  // a profile row (so display_name lookups don't return null) and a
+  // notification_settings row (so /settings/notifications has a starting
+  // point). Both are no-ops on conflict for users who already had them.
+  const emailPrefix = (user.email || '').split('@')[0] || 'member'
+  await db.from('profiles').upsert(
+    {
+      user_id: user.id,
+      display_name: emailPrefix,
+    },
+    { onConflict: 'user_id', ignoreDuplicates: true },
+  )
+
+  await db.from('notification_settings').upsert(
+    {
+      user_id: user.id,
+      organization_id,
+      email_notifications: true,
+      line_notify_enabled: false,
+    },
+    { onConflict: 'user_id,organization_id', ignoreDuplicates: true },
+  )
+
   await db
     .from('invitations')
     .update({ accepted_at: new Date().toISOString() })
