@@ -36,6 +36,9 @@ export async function updateSession(request: NextRequest) {
     '/api/',
     '/forgot-password',
     '/reset-password',
+    '/join',
+    '/welcome',
+    '/register',
   ]
   const isPublicPath = publicPaths.some((path) =>
     request.nextUrl.pathname.startsWith(path)
