@@ -581,5 +581,31 @@
     "errPasswordRequired": "กรุณากรอกรหัสผ่าน",
     "errInvalidCredentials": "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
     "errJoinFailed": "เข้าร่วมไม่สำเร็จ"
+  },
+  "welcome": {
+    "loading": "กำลังโหลด...",
+    "title": "ยินดีต้อนรับสู่ Aurasea OS 👋",
+    "roleManager": "Manager",
+    "roleStaff": "Staff",
+    "ctaStart": "เริ่มใช้งานเลย →",
+    "footer": "คุณสามารถดูคำแนะนำนี้อีกครั้งได้ที่ Settings",
+    "connectLine": "เชื่อมต่อ LINE ตอนนี้",
+    "connectLineShort": "เชื่อมต่อ LINE",
+    "manager": {
+      "step1Title": "รับสรุปเช้าทาง LINE",
+      "step1Body": "เพิ่ม LINE OA @aurasea เป็นเพื่อน แล้วส่งอีเมลของคุณเพื่อเชื่อมต่อบัญชี",
+      "step2Title": "รับการแจ้งเตือน",
+      "step2Body": "คุณจะได้รับสรุปธุรกิจประจำวันทาง LINE เวลา 7.00 น. ทุกวัน รวมถึงแจ้งเตือนเมื่อ Margin หรือ Labour ผิดปกติ",
+      "step3Title": "ดูภาพรวมธุรกิจ",
+      "step3Body": "ไปที่ Home เพื่อดู KPI ล่าสุด และ Trends เพื่อดูแนวโน้ม"
+    },
+    "staff": {
+      "step1Title": "กรอกข้อมูลประจำวัน",
+      "step1Body": "ไปที่ Entry ทุกวันหลังปิดร้าน กรอกยอดขาย จำนวนลูกค้า และต้นทุน\nใช้เวลาไม่ถึง 2 นาที",
+      "step2Title": "รับการแจ้งเตือน",
+      "step2Body": "เพิ่ม LINE OA @aurasea เพื่อรับ reminder กรอกข้อมูลเวลา 22.00 น. ทุกวัน",
+      "step3Title": "ติดต่อ Manager หากมีคำถาม",
+      "step3Body": "หากไม่แน่ใจว่าต้องกรอกอะไร ถาม Manager หรือ Owner ของคุณ"
+    }
   }
 }

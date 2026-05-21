@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/Button'
+import { LocaleSwitcher } from '@/components/locale-switcher'
 
 type Role = 'manager' | 'staff'
 
@@ -15,9 +17,17 @@ interface Orientation {
 
 const WELCOME_FLAG_KEY = 'aurasea:welcome_shown'
 
+// branch_members.role values seen in this project:
+//   'manager' (current, written by /api/invite/accept after 2f6fc4f)
+//   'branch_manager' (legacy / types.ts value — still possible on
+//                     older rows or seeded data)
+// Treat either as the manager role.
+const MANAGER_BRANCH_ROLES = new Set(['manager', 'branch_manager'])
+
 export default function WelcomePage() {
   const router = useRouter()
   const supabase = createClient()
+  const t = useTranslations('welcome')
   const [orientation, setOrientation] = useState<Orientation | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -34,7 +44,7 @@ export default function WelcomePage() {
       const db = supabase as any
 
       // Resolve role + branch from org/branch membership.
-      // Prefer org-level (manager) when present; otherwise look at branch_members.
+      // Prefer org-level (owner) when present; otherwise look at branch_members.
       const { data: orgMem } = await db
         .from('organization_members')
         .select('role, organization_id')
@@ -51,7 +61,7 @@ export default function WelcomePage() {
       let role: Role = 'staff'
       if (orgMem && (orgMem.role === 'owner' || orgMem.role === 'manager')) {
         role = 'manager'
-      } else if (branchMem?.role === 'branch_manager') {
+      } else if (branchMem?.role && MANAGER_BRANCH_ROLES.has(branchMem.role)) {
         role = 'manager'
       }
 
@@ -75,16 +85,21 @@ export default function WelcomePage() {
   if (loading || !orientation) {
     return (
       <CenteredCard>
-        <p style={muted}>กำลังโหลด...</p>
+        <p style={muted}>{t('loading')}</p>
       </CenteredCard>
     )
   }
 
-  const roleLabel = orientation.role === 'manager' ? 'Manager' : 'Staff'
+  const roleLabel = orientation.role === 'manager' ? t('roleManager') : t('roleStaff')
+  const ns = orientation.role === 'manager' ? 'manager' : 'staff'
 
   return (
     <CenteredCard>
-      <h1 style={heading}>ยินดีต้อนรับสู่ Aurasea OS 👋</h1>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <LocaleSwitcher />
+      </div>
+
+      <h1 style={heading}>{t('title')}</h1>
       <p style={{ ...muted, marginTop: 4 }}>
         {orientation.branchName ? `${orientation.branchName} — ` : ''}{roleLabel}
       </p>
@@ -94,40 +109,40 @@ export default function WelcomePage() {
           <>
             <Step
               num="1️⃣"
-              title="รับสรุปเช้าทาง LINE"
-              body="เพิ่ม LINE OA @aurasea เป็นเพื่อน แล้วส่งอีเมลของคุณเพื่อเชื่อมต่อบัญชี"
-              ctaLabel="เชื่อมต่อ LINE ตอนนี้"
+              title={t(`${ns}.step1Title`)}
+              body={t(`${ns}.step1Body`)}
+              ctaLabel={t('connectLine')}
               ctaHref="/settings/notifications"
             />
             <Step
               num="2️⃣"
-              title="ดูภาพรวมธุรกิจ"
-              body="ไปที่ Home เพื่อดู KPI ล่าสุด และ Trends เพื่อดูแนวโน้ม"
+              title={t(`${ns}.step2Title`)}
+              body={t(`${ns}.step2Body`)}
             />
             <Step
               num="3️⃣"
-              title="กรอกข้อมูลถ้าจำเป็น"
-              body="ถ้า Owner มอบหมาย ให้กรอกข้อมูลประจำวันที่เมนู Entry"
+              title={t(`${ns}.step3Title`)}
+              body={t(`${ns}.step3Body`)}
             />
           </>
         ) : (
           <>
             <Step
               num="1️⃣"
-              title="กรอกข้อมูลประจำวัน"
-              body={'ไปที่ Entry ทุกวันหลังปิดร้าน กรอกยอดขาย จำนวนลูกค้า และต้นทุน\nใช้เวลาไม่ถึง 2 นาที'}
+              title={t(`${ns}.step1Title`)}
+              body={t(`${ns}.step1Body`)}
             />
             <Step
               num="2️⃣"
-              title="รับการแจ้งเตือน"
-              body="เพิ่ม LINE OA @aurasea เพื่อรับ reminder กรอกข้อมูลเวลา 22.00 น."
-              ctaLabel="เชื่อมต่อ LINE"
+              title={t(`${ns}.step2Title`)}
+              body={t(`${ns}.step2Body`)}
+              ctaLabel={t('connectLineShort')}
               ctaHref="/settings/notifications"
             />
             <Step
               num="3️⃣"
-              title="ติดต่อ Manager หากมีคำถาม"
-              body="หากไม่แน่ใจว่าต้องกรอกอะไร ถาม Manager หรือ Owner ของคุณ"
+              title={t(`${ns}.step3Title`)}
+              body={t(`${ns}.step3Body`)}
             />
           </>
         )}
@@ -135,10 +150,10 @@ export default function WelcomePage() {
 
       <div style={{ marginTop: 24 }}>
         <Button variant="primary" fullWidth onClick={handleStart}>
-          เริ่มใช้งานเลย →
+          {t('ctaStart')}
         </Button>
         <p style={{ fontSize: 12, color: '#9b9b9b', textAlign: 'center', margin: '12px 0 0' }}>
-          คุณสามารถดูคำแนะนำนี้อีกครั้งได้ที่ Settings
+          {t('footer')}
         </p>
       </div>
     </CenteredCard>

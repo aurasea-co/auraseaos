@@ -581,5 +581,31 @@
     "errPasswordRequired": "Please enter your password",
     "errInvalidCredentials": "Invalid email or password",
     "errJoinFailed": "Could not join"
+  },
+  "welcome": {
+    "loading": "Loading...",
+    "title": "Welcome to Aurasea OS 👋",
+    "roleManager": "Manager",
+    "roleStaff": "Staff",
+    "ctaStart": "Get started →",
+    "footer": "You can revisit this guide anytime in Settings.",
+    "connectLine": "Connect LINE now",
+    "connectLineShort": "Connect LINE",
+    "manager": {
+      "step1Title": "Get the morning brief on LINE",
+      "step1Body": "Add LINE OA @aurasea as a friend, then send your email to link your account.",
+      "step2Title": "Receive your daily alert",
+      "step2Body": "You'll get a daily business summary on LINE at 7:00 AM, plus alerts when Margin or Labour go off track.",
+      "step3Title": "See the business at a glance",
+      "step3Body": "Go to Home for the latest KPIs and Trends to watch direction."
+    },
+    "staff": {
+      "step1Title": "Enter today's numbers",
+      "step1Body": "Open Entry at end of day to log sales, customers, and costs.\nUnder 2 minutes per day.",
+      "step2Title": "Receive your reminder",
+      "step2Body": "Add LINE OA @aurasea to get a daily reminder at 10:00 PM to enter your data.",
+      "step3Title": "Ask your Manager if unsure",
+      "step3Body": "If you're not sure what to log, check with your Manager or Owner."
+    }
   }
 }
