@@ -39,6 +39,9 @@ export default function TeamPage() {
   const [inviteRole, setInviteRole] = useState<'manager' | 'staff'>('manager')
   const [inviteBranch, setInviteBranch] = useState(branches[0]?.id || '')
   const [inviting, setInviting] = useState(false)
+  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null)
+  const [inviteError, setInviteError] = useState<string | null>(null)
+  const [ownerDisplayName, setOwnerDisplayName] = useState<string>('')
   const [removeId, setRemoveId] = useState<string | null>(null)
 
   if (role !== 'owner' || !organization) return null
@@ -109,6 +112,9 @@ export default function TeamPage() {
         }
       })
 
+      const ownerProfile = profileMap.get(user.id)
+      setOwnerDisplayName(ownerProfile?.display_name || user.email || '')
+
       setMembers(final)
       setLoading(false)
     }
@@ -118,18 +124,38 @@ export default function TeamPage() {
   async function handleInvite() {
     if (!inviteEmail || !organization) return
     setInviting(true)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const db = supabase as any
-    await db.from('invitations').insert({
-      organization_id: organization.id,
-      branch_id: inviteBranch || null,
-      invitee_email: inviteEmail,
-      role: inviteRole,
-      invited_by: user.id,
-    })
-    setInviting(false)
-    setShowInvite(false)
-    setInviteEmail('')
+    setInviteError(null)
+    setInviteSuccess(null)
+
+    const branchName = branches.find((b) => b.id === inviteBranch)?.name || ''
+
+    try {
+      const res = await fetch('/api/invite/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          inviteeEmail: inviteEmail,
+          role: inviteRole,
+          branchId: inviteBranch || null,
+          organizationId: organization.id,
+          invitedBy: user.id,
+          organizationName: organization.name,
+          branchName,
+          inviterName: ownerDisplayName || user.email,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok || !json.success) {
+        setInviteError(json.error || 'ส่งคำเชิญไม่สำเร็จ')
+      } else {
+        setInviteSuccess(`ส่งคำเชิญไปที่ ${inviteEmail} แล้ว ✓`)
+        setInviteEmail('')
+      }
+    } catch (err) {
+      setInviteError(err instanceof Error ? err.message : 'ส่งคำเชิญไม่สำเร็จ')
+    } finally {
+      setInviting(false)
+    }
   }
 
   async function handleRemove(memberId: string, memberUserId: string) {
@@ -259,6 +285,28 @@ export default function TeamPage() {
             <Button variant="primary" fullWidth disabled={inviting || !inviteEmail} onClick={handleInvite}>
               {inviting ? tCommon('saving') : t('sendInvite')}
             </Button>
+            {inviteSuccess && (
+              <div style={{
+                fontSize: 'var(--font-size-sm)',
+                color: 'var(--color-green-text, #1D9E75)',
+                background: 'var(--color-green-light, #E6F4EE)',
+                padding: '8px 12px',
+                borderRadius: 'var(--radius-md)',
+              }}>
+                {inviteSuccess}
+              </div>
+            )}
+            {inviteError && (
+              <div style={{
+                fontSize: 'var(--font-size-sm)',
+                color: 'var(--color-red-text, #A32D2D)',
+                background: 'var(--color-red-light, #FBEAEA)',
+                padding: '8px 12px',
+                borderRadius: 'var(--radius-md)',
+              }}>
+                {inviteError}
+              </div>
+            )}
           </div>
         </div>
       )}
