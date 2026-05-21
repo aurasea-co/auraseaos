@@ -76,6 +76,25 @@ export async function POST(req: NextRequest) {
 
   const branchRole = role === 'manager' ? 'branch_manager' : 'branch_user'
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function fail(step: string, err: any) {
+    const message = err?.message || 'unknown error'
+    console.error(`[invite/accept] step=${step} failed:`, err)
+    // "permission denied" almost always means a custom trigger or RLS
+    // policy is reaching for a table the service_role can't access (in
+    // this project's history, that's usually an unqualified `users`
+    // reference inside a function — make sure any helper function /
+    // trigger uses SECURITY DEFINER and qualifies as auth.users).
+    const hint = /permission denied/i.test(message)
+      ? ' (likely a trigger or RLS policy on this table is querying a "users" table the service_role lacks access to — check is_super_admin() or any custom trigger on this table is SECURITY DEFINER and references auth.users explicitly)'
+      : ''
+    return NextResponse.json(
+      { error: `${step}: ${message}${hint}` },
+      { status: 500 },
+    )
+  }
+
+  // 1) Membership
   const { error: branchErr } = await db
     .from('branch_members')
     .upsert(
@@ -86,32 +105,28 @@ export async function POST(req: NextRequest) {
       },
       { onConflict: 'branch_id,user_id' },
     )
-  if (branchErr) {
-    return NextResponse.json({ error: branchErr.message }, { status: 500 })
-  }
+  if (branchErr) return fail('branch_members.upsert', branchErr)
 
-  // Make sure the new member has the rows the app expects everywhere else:
-  // a profile row (so display_name lookups don't return null) and a
-  // notification_settings row (so /settings/notifications has a starting
-  // point). notification_settings is a no-op on conflict; the profile
-  // honours an explicit displayName from the join form when provided.
+  // 2) Profile row so display_name lookups don't return null.
+  // The user's own anon client could also handle this (RLS allows
+  // auth.uid() = user_id) — but we stay on service_role for consistency.
   const emailPrefix = (user.email || '').split('@')[0] || 'member'
   const finalDisplayName = submittedDisplayName || emailPrefix
-  if (submittedDisplayName) {
+  const profileUpsertOpts = submittedDisplayName
     // Explicit name from the join form — write through even if a profile
     // already exists (handles users who joined a different org first).
-    await db.from('profiles').upsert(
+    ? { onConflict: 'user_id' as const }
+    : { onConflict: 'user_id' as const, ignoreDuplicates: true }
+  const { error: profileErr } = await db
+    .from('profiles')
+    .upsert(
       { user_id: user.id, display_name: finalDisplayName },
-      { onConflict: 'user_id' },
+      profileUpsertOpts,
     )
-  } else {
-    await db.from('profiles').upsert(
-      { user_id: user.id, display_name: finalDisplayName },
-      { onConflict: 'user_id', ignoreDuplicates: true },
-    )
-  }
+  if (profileErr) return fail('profiles.upsert', profileErr)
 
-  await db.from('notification_settings').upsert(
+  // 3) Notification settings — starting point for /settings/notifications.
+  const { error: notifErr } = await db.from('notification_settings').upsert(
     {
       user_id: user.id,
       organization_id,
@@ -120,11 +135,14 @@ export async function POST(req: NextRequest) {
     },
     { onConflict: 'user_id,organization_id', ignoreDuplicates: true },
   )
+  if (notifErr) return fail('notification_settings.upsert', notifErr)
 
-  await db
+  // 4) Mark invitation accepted
+  const { error: inviteErr } = await db
     .from('invitations')
     .update({ accepted_at: new Date().toISOString() })
     .eq('id', invitation.id)
+  if (inviteErr) return fail('invitations.update', inviteErr)
 
   return NextResponse.json({
     success: true,
