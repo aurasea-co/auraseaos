@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
 
   const result = await sendEmail({
     to: inviteeEmail,
-    from: EMAIL_SENDERS.team,
+    from: EMAIL_SENDERS.notifications,
     subject: `คุณได้รับเชิญให้เข้าร่วม ${organizationName} บน Aurasea OS`,
     react: InvitationEmail({
       inviterName,
