@@ -95,6 +95,16 @@ export async function POST(req: NextRequest) {
   }
 
   // 1) Membership
+  //
+  // We also pass `email` here even though branch_members.user_id is the
+  // canonical FK. There's a `fill_branch_member_email` trigger that
+  // reads auth.users.email to populate a denormalized email column;
+  // under service_role that SELECT can fail with "permission denied for
+  // table users" because service_role lacks SELECT on auth.users. If
+  // the trigger is guarded with WHEN (NEW.email IS NULL) — which we
+  // can't tell from prosrc alone — pre-filling email skips the trigger
+  // entirely. If the trigger fires unconditionally, see migration 021
+  // which converts these helpers to SECURITY DEFINER.
   const { error: branchErr } = await db
     .from('branch_members')
     .upsert(
@@ -102,6 +112,7 @@ export async function POST(req: NextRequest) {
         branch_id,
         user_id: user.id,
         role: branchRole,
+        email: user.email,
       },
       { onConflict: 'branch_id,user_id' },
     )
