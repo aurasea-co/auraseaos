@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
 
-// invitee role ('manager' | 'staff') is mapped onto branch_members only:
-//   manager → branch_members.role = 'branch_manager'
-//   staff   → branch_members.role = 'branch_user'
+// invitee role ('manager' | 'staff') maps 1:1 onto branch_members.role.
+// Despite what types.ts says ('branch_manager' | 'branch_user' | 'viewer'),
+// the live CHECK constraint `branch_members_role_check` accepts the same
+// values invitations.role does — 'manager' and 'staff'. get-user-context.ts
+// already treats 'manager' and 'branch_manager' as interchangeable on the
+// read side, so the rest of the app handles either value.
 // (organization_members is owner-only; see comment below.)
 
 export async function POST(req: NextRequest) {
@@ -74,7 +77,8 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const branchRole = role === 'manager' ? 'branch_manager' : 'branch_user'
+  // Pass the invited role through verbatim — see header comment.
+  const branchRole = role
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function fail(step: string, err: any) {
