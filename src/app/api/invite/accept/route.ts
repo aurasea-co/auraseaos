@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
 
-// invitee role ('manager' | 'staff') is mapped onto the membership tables:
-//   manager → organization_members.role = 'manager' (+ optional branch_members.branch_manager)
+// invitee role ('manager' | 'staff') is mapped onto branch_members only:
+//   manager → branch_members.role = 'branch_manager'
 //   staff   → branch_members.role = 'branch_user'
+// (organization_members is owner-only; see comment below.)
 
 export async function POST(req: NextRequest) {
   let body: { token?: string; displayName?: string }
@@ -55,52 +56,38 @@ export async function POST(req: NextRequest) {
     role: 'manager' | 'staff'
   }
 
-  if (role === 'manager') {
-    // NOTE: organization_members in this project's live schema does NOT
-    // have an 'invited_by' column even though types.ts declares one.
-    // Including it here triggers a PostgREST schema-cache error.
-    const { error: orgErr } = await db
-      .from('organization_members')
-      .upsert(
-        {
-          organization_id,
-          user_id: user.id,
-          role: 'manager',
-        },
-        { onConflict: 'organization_id,user_id' },
-      )
-    if (orgErr) {
-      return NextResponse.json({ error: orgErr.message }, { status: 500 })
-    }
-    if (branch_id) {
-      await db
-        .from('branch_members')
-        .upsert(
-          {
-            branch_id,
-            user_id: user.id,
-            role: 'branch_manager',
-          },
-          { onConflict: 'branch_id,user_id' },
-        )
-    }
-  } else {
-    if (!branch_id) {
-      return NextResponse.json({ error: 'Staff invitation missing branch' }, { status: 400 })
-    }
-    const { error: branchErr } = await db
-      .from('branch_members')
-      .upsert(
-        {
-          branch_id,
-          user_id: user.id,
-          role: 'branch_user',
-        },
-        { onConflict: 'branch_id,user_id' },
-      )
-    if (branchErr) {
-      return NextResponse.json({ error: branchErr.message }, { status: 500 })
-    }
+  // Schema reality check (verified from get-user-context.ts + the
+  // organization_members.role CHECK constraint "org_role_check"):
+  //   organization_members  → owners only. The CHECK constraint rejects
+  //                           any role other than 'owner', so we must NOT
+  //                           insert 'manager' here even though types.ts
+  //                           claims it's allowed.
+  //   branch_members        → 'branch_manager' | 'branch_user' | 'viewer'.
+  //
+  // So invited 'manager' and 'staff' both land in branch_members; the
+  // app derives the AppRole from branch_members.role in get-user-context.
+
+  if (!branch_id) {
+    return NextResponse.json(
+      { error: role === 'manager' ? 'Manager invitation missing branch' : 'Staff invitation missing branch' },
+      { status: 400 },
+    )
+  }
+
+  const branchRole = role === 'manager' ? 'branch_manager' : 'branch_user'
+
+  const { error: branchErr } = await db
+    .from('branch_members')
+    .upsert(
+      {
+        branch_id,
+        user_id: user.id,
+        role: branchRole,
+      },
+      { onConflict: 'branch_id,user_id' },
+    )
+  if (branchErr) {
+    return NextResponse.json({ error: branchErr.message }, { status: 500 })
   }
 
   // Make sure the new member has the rows the app expects everywhere else:
