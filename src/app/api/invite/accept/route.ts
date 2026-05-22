@@ -141,12 +141,24 @@ export async function POST(req: NextRequest) {
   if (profileErr) return fail('profiles.upsert', profileErr)
 
   // 3) Notification settings — starting point for /settings/notifications.
+  //
+  // entry_reminder_enabled is explicitly false for new invited members
+  // so they don't get pinged at 10:00 PM the same day they join (annoying
+  // first impression). They can opt in from /settings/notifications.
+  //
+  // Note: if entry_reminder_enabled still defaults to true at the DB
+  // level, run:
+  //   ALTER TABLE notification_settings
+  //     ALTER COLUMN entry_reminder_enabled SET DEFAULT false;
+  // …so any other code path that inserts without specifying this column
+  // also opts new users out.
   const { error: notifErr } = await db.from('notification_settings').upsert(
     {
       user_id: user.id,
       organization_id,
       email_notifications: true,
       line_notify_enabled: false,
+      entry_reminder_enabled: false,
     },
     { onConflict: 'user_id,organization_id', ignoreDuplicates: true },
   )

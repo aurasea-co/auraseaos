@@ -607,5 +607,10 @@
       "step3Title": "Ask your Manager if unsure",
       "step3Body": "If you're not sure what to log, check with your Manager or Owner."
     }
+  },
+  "lineBanner": {
+    "message": "Connect LINE to get your daily 7:00 AM business summary",
+    "cta": "Connect now",
+    "dismiss": "Dismiss"
   }
 }

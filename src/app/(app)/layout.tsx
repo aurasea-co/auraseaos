@@ -5,6 +5,7 @@ import { UserProvider } from '@/providers/user-context'
 import { TabBar } from '@/components/tab-bar'
 import { Sidebar } from '@/components/sidebar'
 import { ResponsiveHeader } from '@/components/responsive-header'
+import { LineConnectBanner } from '@/components/line-connect-banner'
 
 export default async function AppLayout({
   children,
@@ -52,6 +53,7 @@ export default async function AppLayout({
         `}</style>
         <div className="app-content-area" style={{ marginLeft: 0, paddingBottom: 'calc(var(--bottomnav-height) + 16px)' }}>
           <ResponsiveHeader />
+          <LineConnectBanner />
           <main
             style={{
               maxWidth: 'var(--content-max-width)',

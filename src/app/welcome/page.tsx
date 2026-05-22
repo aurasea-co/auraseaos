@@ -16,6 +16,8 @@ interface Orientation {
 }
 
 const WELCOME_FLAG_KEY = 'aurasea:welcome_shown'
+// LineConnectBanner reads this flag — see src/components/line-connect-banner.tsx
+const LINE_REMINDER_PENDING_KEY = 'line_reminder_pending'
 
 // branch_members.role values seen in this project:
 //   'manager' (current, written by /api/invite/accept after 2f6fc4f)
@@ -76,6 +78,10 @@ export default function WelcomePage() {
   function handleStart() {
     try {
       localStorage.setItem(WELCOME_FLAG_KEY, '1')
+      // Arm the persistent "Connect LINE" banner. The banner itself
+      // verifies profile.line_id and clears this flag if LINE is
+      // already connected, so it's safe to set unconditionally.
+      localStorage.setItem(LINE_REMINDER_PENDING_KEY, 'true')
     } catch {
       // ignore quota / SSR issues
     }
