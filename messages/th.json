@@ -275,7 +275,31 @@
     "inviteTitle": "เชิญสมาชิกใหม่",
     "emailPlaceholder": "อีเมลของผู้ที่ต้องการเชิญ",
     "sendInvite": "ส่งคำเชิญ",
-    "confirmRemove": "ยืนยันการลบสมาชิกออกจากทีม?"
+    "confirmRemove": "ยืนยันการลบสมาชิกออกจากทีม?",
+    "activeMembers": "สมาชิก",
+    "pendingInvites": "คำเชิญที่รอตอบรับ",
+    "noPending": "ไม่มีคำเชิญที่รอตอบรับ",
+    "statusActive": "Active",
+    "statusInactive": "Inactive",
+    "statusPending": "Pending",
+    "lastSeen": "ใช้งานล่าสุด {when}",
+    "noLastSeen": "ยังไม่ได้ใช้งาน",
+    "branchLabel": "สาขา",
+    "roleOwner": "Owner",
+    "roleManager": "Manager",
+    "roleStaff": "Staff",
+    "toggleActive": "เปิด/ปิดการใช้งาน",
+    "invitedAgo": "เชิญเมื่อ {when}",
+    "resend": "ส่งอีกครั้ง",
+    "cancelInvite": "ยกเลิกคำเชิญ",
+    "resendSuccess": "ส่งคำเชิญใหม่แล้ว",
+    "cancelSuccess": "ยกเลิกคำเชิญแล้ว",
+    "loadError": "โหลดข้อมูลไม่สำเร็จ",
+    "updateError": "บันทึกไม่สำเร็จ",
+    "justNow": "เมื่อสักครู่",
+    "minutesAgo": "{n} นาทีที่แล้ว",
+    "hoursAgo": "{n} ชั่วโมงที่แล้ว",
+    "daysAgo": "{n} วันที่แล้ว"
   },
   "settingsBilling": {
     "title": "แพ็กเกจและการชำระเงิน",
@@ -607,6 +631,11 @@
       "step3Title": "ติดต่อ Manager หากมีคำถาม",
       "step3Body": "หากไม่แน่ใจว่าต้องกรอกอะไร ถาม Manager หรือ Owner ของคุณ"
     }
+  },
+  "suspended": {
+    "title": "บัญชีของคุณถูกระงับชั่วคราว",
+    "body": "Owner ของบัญชีได้ปิดการใช้งานชั่วคราว กรุณาติดต่อ Owner เพื่อเปิดใช้งานอีกครั้ง",
+    "signOut": "ออกจากระบบ"
   },
   "lineBanner": {
     "message": "เชื่อมต่อ LINE เพื่อรับสรุปธุรกิจทุกเช้า 7.00 น.",

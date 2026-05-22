@@ -39,6 +39,7 @@ export async function updateSession(request: NextRequest) {
     '/join',
     '/welcome',
     '/register',
+    '/suspended',
   ]
   const isPublicPath = publicPaths.some((path) =>
     request.nextUrl.pathname.startsWith(path)
@@ -55,6 +56,52 @@ export async function updateSession(request: NextRequest) {
     const url = request.nextUrl.clone()
     url.pathname = '/home'
     return NextResponse.redirect(url)
+  }
+
+  // Suspension check — if the user has memberships but ALL of them
+  // have is_active = false, send them to /suspended. We allow a few
+  // escape hatches so they can still see their status and log out.
+  if (user) {
+    const allowedWhileSuspended = (path: string) =>
+      path === '/suspended' ||
+      path === '/login' ||
+      path.startsWith('/auth/') ||
+      path === '/settings/profile' ||
+      path.startsWith('/api/')
+
+    if (!allowedWhileSuspended(request.nextUrl.pathname)) {
+      const { createClient } = await import('@supabase/supabase-js')
+      const serviceClient = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+      )
+
+      const [orgResult, branchResult] = await Promise.all([
+        serviceClient
+          .from('organization_members')
+          .select('is_active')
+          .eq('user_id', user.id),
+        serviceClient
+          .from('branch_members')
+          .select('is_active')
+          .eq('user_id', user.id),
+      ])
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const orgRows = (orgResult.data || []) as any[]
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const branchRows = (branchResult.data || []) as any[]
+      const allRows = [...orgRows, ...branchRows]
+
+      const hasMemberships = allRows.length > 0
+      const hasActiveMembership = allRows.some((r) => r.is_active !== false)
+
+      if (hasMemberships && !hasActiveMembership) {
+        const url = request.nextUrl.clone()
+        url.pathname = '/suspended'
+        return NextResponse.redirect(url)
+      }
+    }
   }
 
   // Superadmin route guard — silent redirect to /login if not super_admin

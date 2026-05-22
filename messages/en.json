@@ -269,13 +269,42 @@
     "minRooms": "Minimum rooms / day",
     "minCovers": "Minimum covers / day"
   },
+  "suspended": {
+    "title": "Your account is suspended",
+    "body": "The account Owner has temporarily disabled your access. Please contact the Owner to re-activate.",
+    "signOut": "Sign out"
+  },
   "settingsTeam": {
     "title": "Team",
     "invite": "Invite member",
     "inviteTitle": "Invite new member",
     "emailPlaceholder": "Email address to invite",
     "sendInvite": "Send invitation",
-    "confirmRemove": "Confirm removing this member from the team?"
+    "confirmRemove": "Confirm removing this member from the team?",
+    "activeMembers": "Members",
+    "pendingInvites": "Pending invitations",
+    "noPending": "No pending invitations",
+    "statusActive": "Active",
+    "statusInactive": "Inactive",
+    "statusPending": "Pending",
+    "lastSeen": "Last seen {when}",
+    "noLastSeen": "Hasn't signed in yet",
+    "branchLabel": "Branch",
+    "roleOwner": "Owner",
+    "roleManager": "Manager",
+    "roleStaff": "Staff",
+    "toggleActive": "Toggle access",
+    "invitedAgo": "Invited {when}",
+    "resend": "Resend",
+    "cancelInvite": "Cancel invite",
+    "resendSuccess": "Invitation re-sent",
+    "cancelSuccess": "Invitation cancelled",
+    "loadError": "Could not load team",
+    "updateError": "Save failed",
+    "justNow": "just now",
+    "minutesAgo": "{n} min ago",
+    "hoursAgo": "{n}h ago",
+    "daysAgo": "{n}d ago"
   },
   "settingsBilling": {
     "title": "Plan & Billing",

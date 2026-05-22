@@ -132,10 +132,16 @@ export async function POST(req: NextRequest) {
     // already exists (handles users who joined a different org first).
     ? { onConflict: 'user_id' as const }
     : { onConflict: 'user_id' as const, ignoreDuplicates: true }
+  // Mirror email on profiles (added in migration 023) so the team
+  // list doesn't have to hit auth.users for every read.
   const { error: profileErr } = await db
     .from('profiles')
     .upsert(
-      { user_id: user.id, display_name: finalDisplayName },
+      {
+        user_id: user.id,
+        display_name: finalDisplayName,
+        email: user.email,
+      },
       profileUpsertOpts,
     )
   if (profileErr) return fail('profiles.upsert', profileErr)
