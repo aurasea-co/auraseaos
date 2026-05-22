@@ -18,6 +18,8 @@ export async function GET(req: NextRequest) {
   const { data, error } = await db
     .from('invitations')
     .select(`
+      organization_id,
+      branch_id,
       invitee_email,
       role,
       accepted_at,
@@ -32,7 +34,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 })
   }
 
+  // organization_id + branch_id are needed by /join so the client can
+  // check whether the currently logged-in user already has a membership
+  // in this branch (the "alreadyMember" case). The token holder gets
+  // these via the accept response anyway — leaking them here is fine.
   return NextResponse.json({
+    organizationId: data.organization_id,
+    branchId: data.branch_id,
     inviteeEmail: data.invitee_email,
     role: data.role,
     acceptedAt: data.accepted_at,

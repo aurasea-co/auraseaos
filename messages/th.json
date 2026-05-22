@@ -606,7 +606,20 @@
     "errNoSession": "บัญชีถูกสร้างแล้ว แต่ Supabase ต้องการการยืนยันอีเมล กรุณาปิด Confirm email ใน Supabase หรือยืนยันอีเมลก่อนกลับมา",
     "errPasswordRequired": "กรุณากรอกรหัสผ่าน",
     "errInvalidCredentials": "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
-    "errJoinFailed": "เข้าร่วมไม่สำเร็จ"
+    "errJoinFailed": "เข้าร่วมไม่สำเร็จ",
+    "wrongAccountTitle": "คุณเข้าสู่ระบบด้วยบัญชีอื่นอยู่",
+    "wrongAccountBody": "คำเชิญนี้ส่งถึงอีเมลอื่น คุณต้องสลับบัญชีก่อนจึงจะเข้าร่วมได้",
+    "currentAccount": "บัญชีปัจจุบัน",
+    "invitedTo": "คำเชิญส่งถึง",
+    "signOutAndJoin": "ออกจากระบบและเข้าร่วมในฐานะ {email}",
+    "signingOut": "กำลังออกจากระบบ...",
+    "incognitoOption": "เปิดลิงก์ในหน้าต่าง Incognito แทน",
+    "incognitoHint": "กด Ctrl+Shift+N (Windows) หรือ Cmd+Shift+N (Mac) เพื่อเปิดหน้าต่าง Incognito แล้ววางลิงก์นี้:",
+    "copyLink": "คัดลอกลิงก์",
+    "copied": "คัดลอกแล้ว ✓",
+    "alreadyMemberTitle": "คุณเป็นสมาชิกอยู่แล้ว",
+    "alreadyMemberBody": "บัญชี {email} มีสิทธิ์เข้าถึง {org} แล้ว",
+    "goToDashboard": "ไปที่ Dashboard →"
   },
   "welcome": {
     "loading": "กำลังโหลด...",

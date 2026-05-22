@@ -611,7 +611,20 @@
     "errNoSession": "Account created, but Supabase requires email confirmation. Disable Confirm email in Supabase or verify your email before returning.",
     "errPasswordRequired": "Please enter your password",
     "errInvalidCredentials": "Invalid email or password",
-    "errJoinFailed": "Could not join"
+    "errJoinFailed": "Could not join",
+    "wrongAccountTitle": "You're signed in with a different account",
+    "wrongAccountBody": "This invitation was sent to a different email. You'll need to switch accounts to join.",
+    "currentAccount": "Current account",
+    "invitedTo": "Invitation sent to",
+    "signOutAndJoin": "Sign out and join as {email}",
+    "signingOut": "Signing out...",
+    "incognitoOption": "Open this link in an Incognito window instead",
+    "incognitoHint": "Press Ctrl+Shift+N (Windows) or Cmd+Shift+N (Mac) to open an Incognito window, then paste this link:",
+    "copyLink": "Copy link",
+    "copied": "Copied ✓",
+    "alreadyMemberTitle": "You're already a member",
+    "alreadyMemberBody": "{email} already has access to {org}.",
+    "goToDashboard": "Go to dashboard →"
   },
   "welcome": {
     "loading": "Loading...",

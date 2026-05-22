@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/Button'
 import { LocaleSwitcher } from '@/components/locale-switcher'
 
 interface InvitationDetails {
+  organization_id: string
+  branch_id: string | null
   organization_name: string
   branch_name: string | null
   role: 'manager' | 'staff'
@@ -22,9 +24,11 @@ type Status =
   | 'invalid'
   | 'expired'
   | 'accepted'
-  | 'signup'      // new user — show signUp form (default)
-  | 'login'       // existing user — show signIn form
-  | 'authedReady' // already logged-in, just need to accept
+  | 'signup'        // new user — show signUp form (default)
+  | 'login'         // existing user — show signIn form
+  | 'authedReady'   // logged in AS invitee, not yet a member — one-click accept
+  | 'wrongAccount'  // logged in as a different user than the invitee_email
+  | 'alreadyMember' // logged in AS invitee and already a member of this branch
 
 const PURPLE = '#534AB7'
 
@@ -39,6 +43,8 @@ function JoinPageInner() {
   const [submitting, setSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string>('')
   const [invitation, setInvitation] = useState<InvitationDetails | null>(null)
+  const [currentEmail, setCurrentEmail] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
 
   // signUp form
   const [displayName, setDisplayName] = useState('')
@@ -63,6 +69,8 @@ function JoinPageInner() {
       const data = await res.json()
 
       const inv: InvitationDetails = {
+        organization_id: data.organizationId || '',
+        branch_id: data.branchId || null,
         organization_name: data.organizationName || '',
         branch_name: data.branchName || null,
         role: data.role,
@@ -72,17 +80,56 @@ function JoinPageInner() {
       }
       setInvitation(inv)
 
-      if (inv.accepted_at) {
-        setStatus('accepted')
-        return
-      }
       if (new Date(inv.expires_at).getTime() < Date.now()) {
         setStatus('expired')
         return
       }
 
       const { data: userRes } = await supabase.auth.getUser()
-      setStatus(userRes?.user ? 'authedReady' : 'signup')
+      const sessionUser = userRes?.user
+      const sessionEmail = sessionUser?.email?.toLowerCase() || null
+      setCurrentEmail(sessionUser?.email || null)
+
+      // No active session — accepted invitations show the "already accepted"
+      // screen (existing behaviour); pending ones show the signup form.
+      if (!sessionUser) {
+        setStatus(inv.accepted_at ? 'accepted' : 'signup')
+        return
+      }
+
+      const inviteEmailLower = inv.invitee_email.toLowerCase()
+      const emailsMatch = sessionEmail === inviteEmailLower
+
+      if (!emailsMatch) {
+        // Different account is signed in — show the disambiguation screen
+        // even if the invitation itself is already accepted. We don't
+        // want to tell user X that user Y has joined.
+        setStatus('wrongAccount')
+        return
+      }
+
+      // Emails match. If the user already has a row in branch_members for
+      // this branch, they've already joined — send them to the dashboard
+      // instead of trying to re-accept.
+      if (inv.branch_id) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const db = supabase as any
+        const { data: existingMembership } = await db
+          .from('branch_members')
+          .select('id')
+          .eq('user_id', sessionUser.id)
+          .eq('branch_id', inv.branch_id)
+          .maybeSingle()
+        if (existingMembership) {
+          setStatus('alreadyMember')
+          return
+        }
+      }
+
+      // If the invitation row was marked accepted but the membership
+      // doesn't exist (e.g. branch was recreated), still let them through
+      // the authedReady flow — the accept route is idempotent.
+      setStatus('authedReady')
     }
     load()
   }, [token, supabase])
@@ -217,6 +264,35 @@ function JoinPageInner() {
     }
   }
 
+  async function handleSignOutAndRejoin() {
+    if (submitting) return
+    setErrorMessage('')
+    setSubmitting(true)
+    try {
+      await supabase.auth.signOut()
+      setCurrentEmail(null)
+      // Drop into the signup form with the invitee_email pre-bound by
+      // the existing render path (it reads invitation.invitee_email).
+      setStatus('signup')
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : t('errJoinFailed'))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleCopyLink() {
+    try {
+      const url = typeof window !== 'undefined' ? window.location.href : ''
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Clipboard might be blocked — surface a manual prompt as fallback
+      window.prompt(t('copyLink'), typeof window !== 'undefined' ? window.location.href : '')
+    }
+  }
+
   if (status === 'loading') {
     return <CenteredCard><p style={muted}>{t('checkingLink')}</p></CenteredCard>
   }
@@ -242,6 +318,112 @@ function JoinPageInner() {
             <Button variant="primary" fullWidth>{t('signIn')}</Button>
           </Link>
         </div>
+      </CenteredCard>
+    )
+  }
+
+  if (status === 'alreadyMember' && invitation) {
+    return (
+      <CenteredCard>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <LocaleSwitcher />
+        </div>
+        <h1 style={heading}>{t('alreadyMemberTitle')}</h1>
+        <p style={muted}>
+          {t('alreadyMemberBody', {
+            email: currentEmail || invitation.invitee_email,
+            org: invitation.organization_name,
+          })}
+        </p>
+        <div style={{ marginTop: 20 }}>
+          <Link href="/home">
+            <Button variant="primary" fullWidth>{t('goToDashboard')}</Button>
+          </Link>
+        </div>
+      </CenteredCard>
+    )
+  }
+
+  if (status === 'wrongAccount' && invitation) {
+    return (
+      <CenteredCard>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <LocaleSwitcher />
+        </div>
+        <h1 style={heading}>{t('wrongAccountTitle')}</h1>
+        <p style={muted}>{t('wrongAccountBody')}</p>
+
+        <div style={{ marginTop: 16, background: '#f7f7f5', padding: '14px 16px', borderRadius: 8, fontSize: 13, lineHeight: 1.55 }}>
+          <div style={{ marginBottom: 6 }}>
+            <span style={{ color: '#9b9b9b' }}>{t('currentAccount')}: </span>
+            <strong style={{ color: '#1a1a1a' }}>{currentEmail || '—'}</strong>
+          </div>
+          <div>
+            <span style={{ color: '#9b9b9b' }}>{t('invitedTo')}: </span>
+            <strong style={{ color: '#1a1a1a' }}>{invitation.invitee_email}</strong>
+          </div>
+        </div>
+
+        {errorMessage && (
+          <div style={{ marginTop: 12, fontSize: 13, color: '#A32D2D', background: '#FBEAEA', padding: '8px 12px', borderRadius: 6 }}>
+            {errorMessage}
+          </div>
+        )}
+
+        <div style={{ marginTop: 20 }}>
+          <Button
+            variant="primary"
+            fullWidth
+            disabled={submitting}
+            onClick={handleSignOutAndRejoin}
+          >
+            {submitting
+              ? t('signingOut')
+              : t('signOutAndJoin', { email: invitation.invitee_email })}
+          </Button>
+        </div>
+
+        <details style={{ marginTop: 16 }}>
+          <summary style={{ fontSize: 13, color: PURPLE, cursor: 'pointer' }}>
+            {t('incognitoOption')}
+          </summary>
+          <div style={{ marginTop: 10, fontSize: 12, color: '#6b6b6b', lineHeight: 1.5 }}>
+            <p style={{ margin: '0 0 8px' }}>{t('incognitoHint')}</p>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                readOnly
+                value={typeof window !== 'undefined' ? window.location.href : ''}
+                style={{
+                  flex: 1,
+                  padding: '6px 8px',
+                  fontSize: 12,
+                  border: '1px solid #d4d4d4',
+                  borderRadius: 6,
+                  background: '#fafafa',
+                  color: '#1a1a1a',
+                  fontFamily: 'monospace',
+                }}
+                onFocus={(e) => e.currentTarget.select()}
+              />
+              <button
+                type="button"
+                onClick={handleCopyLink}
+                style={{
+                  fontSize: 12,
+                  padding: '6px 10px',
+                  border: '1px solid #d4d4d4',
+                  borderRadius: 6,
+                  background: '#fff',
+                  cursor: 'pointer',
+                  color: '#1a1a1a',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {copied ? t('copied') : t('copyLink')}
+              </button>
+            </div>
+          </div>
+        </details>
       </CenteredCard>
     )
   }
