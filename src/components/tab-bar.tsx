@@ -13,6 +13,7 @@ import {
   PieChart,
   Briefcase,
   BarChart3,
+  HelpCircle,
   MoreHorizontal,
 } from 'lucide-react'
 import { useUser } from '@/providers/user-context'
@@ -41,12 +42,13 @@ function getMobileTabs(
     return [
       { href: '/home', icon: Home, labelKey: 'home' },
       { href: '/entry', icon: PenLine, labelKey: 'entry' },
+      { href: '/help', icon: HelpCircle, labelKey: 'help' },
       { href: '/settings', icon: Settings, labelKey: 'settings' },
     ]
   }
 
   if (role === 'manager') {
-    // Order: Home → Trends → Entry → Pricing/Cost → Labour → Settings.
+    // Order: Home → Trends → Entry → Pricing/Cost → Labour → Help → Settings.
     // Manager sees the same analytics as owner now (except Portfolio).
     const tabs: MobileTab[] = [
       { href: '/home', icon: Home, labelKey: 'home' },
@@ -61,6 +63,7 @@ function getMobileTabs(
       )
     }
     if (hasPro) tabs.push({ href: '/labour', icon: Briefcase, labelKey: 'labour' })
+    tabs.push({ href: '/help', icon: HelpCircle, labelKey: 'help' })
     tabs.push({ href: '/settings', icon: Settings, labelKey: 'settings' })
     return tabs
   }
@@ -82,6 +85,7 @@ function getMobileTabs(
     )
   }
   if (hasPro) tabs.push({ href: '/labour', icon: Briefcase, labelKey: 'labour' })
+  tabs.push({ href: '/help', icon: HelpCircle, labelKey: 'help' })
   tabs.push({ href: '/settings', icon: Settings, labelKey: 'settings' })
   return tabs
 }
