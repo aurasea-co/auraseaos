@@ -299,7 +299,11 @@
     "justNow": "เมื่อสักครู่",
     "minutesAgo": "{n} นาทีที่แล้ว",
     "hoursAgo": "{n} ชั่วโมงที่แล้ว",
-    "daysAgo": "{n} วันที่แล้ว"
+    "daysAgo": "{n} วันที่แล้ว",
+    "managerLimitReached": "ถึงขีดจำกัด Manager แล้ว — อัปเกรดแผนเพื่อเพิ่ม Manager",
+    "staffLimitReached": "ถึงขีดจำกัด Staff แล้ว — อัปเกรดแผนเพื่อเพิ่ม Staff",
+    "bothLimitsReached": "ถึงขีดจำกัดของแผนแล้ว",
+    "viewPricing": "ดูแผนราคา →"
   },
   "settingsBilling": {
     "title": "แพ็กเกจและการชำระเงิน",

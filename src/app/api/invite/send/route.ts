@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { sendEmail, EMAIL_SENDERS } from '@/lib/email/resend'
 import InvitationEmail from '@/lib/email/templates/invitationEmail'
+import { SEAT_LIMITS, type Plan } from '@/lib/config/pricing'
 
 // invitations table (from migration 007) has these columns:
 //   id, organization_id, branch_id, invitee_email, role, token,
@@ -75,6 +76,55 @@ export async function POST(req: NextRequest) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = supabase as any
+
+  // Server-side seat enforcement. The team page enforces client-side
+  // too but we can't trust that; an owner could craft a request that
+  // bypasses the UI. We count existing branch_members for this org
+  // and reject if the invite would exceed the plan limit.
+  const { data: org, error: orgFetchErr } = await db
+    .from('organizations')
+    .select('plan')
+    .eq('id', organizationId)
+    .single()
+  if (orgFetchErr || !org) {
+    return NextResponse.json({ error: 'Organization not found' }, { status: 404 })
+  }
+  const plan: Plan = (org.plan as Plan) || 'starter'
+  const limits = SEAT_LIMITS[plan]
+  const seatLimitForRole = role === 'manager' ? limits.managers : limits.staff
+  if (seatLimitForRole !== Infinity) {
+    // Get the org's branch IDs, then count active memberships of this role.
+    // (Inactive memberships don't consume a seat.)
+    const { data: branchRows } = await db
+      .from('branches')
+      .select('id')
+      .eq('organization_id', organizationId)
+    const branchIds = (branchRows || []).map((b: { id: string }) => b.id)
+
+    let activeCount = 0
+    if (branchIds.length) {
+      const { count } = await db
+        .from('branch_members')
+        .select('id', { count: 'exact', head: true })
+        .in('branch_id', branchIds)
+        .eq('role', role)
+        .eq('is_active', true)
+      activeCount = count || 0
+    }
+
+    if (activeCount >= seatLimitForRole) {
+      return NextResponse.json(
+        {
+          error:
+            role === 'manager'
+              ? 'Manager seat limit reached. Please upgrade your plan.'
+              : 'Staff seat limit reached. Please upgrade your plan.',
+          code: 'seat_limit_reached',
+        },
+        { status: 403 },
+      )
+    }
+  }
 
   // If a pending invitation already exists for this email+org pair,
   // rotate it in place instead of inserting a duplicate row. This

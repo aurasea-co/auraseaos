@@ -99,19 +99,43 @@ export default function TeamPage() {
 
   if (role !== 'owner' || !organization) return null
 
-  const limits = seatLimits[plan]
-  const managerCount = members.filter(
+  // Resolve seat limits with a starter fallback. Inside seatLimits the
+  // Pro plan's Infinity is encoded as 999 — the UI renders 999 as ∞ and
+  // the limit checks treat 999 as "no cap" (matches Infinity behaviour).
+  const limits = seatLimits[plan] || seatLimits.starter
+  const isManagerUnlimited = limits.manager === 999
+  const isStaffUnlimited = limits.staff === 999
+  // Count only active members against seats — inactive members don't
+  // consume a seat (matches the server-side check in /api/invite/send).
+  const activeMembers = members.filter((m) => m.is_active !== false)
+  const managerCount = activeMembers.filter(
     (m) => m.role === 'manager' || m.role === 'branch_manager',
   ).length
-  const staffCount = members.filter(
+  const staffCount = activeMembers.filter(
     (m) => m.role === 'branch_user' || m.role === 'staff' || m.role === 'viewer',
   ).length
+  const atManagerLimit = !isManagerUnlimited && managerCount >= limits.manager
+  const atStaffLimit = !isStaffUnlimited && staffCount >= limits.staff
+  const atBothLimits = atManagerLimit && atStaffLimit
 
   async function handleInvite() {
     if (!inviteEmail || !organization) return
-    setInviting(true)
     setInviteError(null)
     setInviteSuccess(null)
+
+    // Client-side seat check — short-circuit before hitting the API
+    // so the owner sees an instant, role-specific reason. The server
+    // still enforces the same rule.
+    if (inviteRole === 'manager' && atManagerLimit) {
+      setInviteError(t('managerLimitReached'))
+      return
+    }
+    if (inviteRole === 'staff' && atStaffLimit) {
+      setInviteError(t('staffLimitReached'))
+      return
+    }
+
+    setInviting(true)
     const branchName = branches.find((b) => b.id === inviteBranch)?.name || ''
     try {
       const res = await fetch('/api/invite/send', {
@@ -533,11 +557,37 @@ export default function TeamPage() {
         </div>
       )}
 
-      {/* Invite button */}
-      <Button variant="secondary" fullWidth onClick={() => setShowInvite(true)}>
+      {/* Invite button — disabled when BOTH manager and staff seats are
+          maxed. If only one role is at the limit the button stays
+          enabled; the limit-specific message surfaces inside the form
+          when the owner picks the maxed-out role. */}
+      <Button
+        variant="secondary"
+        fullWidth
+        disabled={atBothLimits}
+        onClick={() => setShowInvite(true)}
+      >
         <UserPlus size={14} />
         {t('invite')}
       </Button>
+      {atBothLimits && (
+        <div style={{
+          background: 'var(--color-amber-light, #FFF4E0)',
+          color: 'var(--color-amber-text, #8A5A00)',
+          borderRadius: 'var(--radius-md)',
+          padding: '10px 12px',
+          fontSize: 'var(--font-size-sm)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+        }}>
+          <span>{t('bothLimitsReached')}</span>
+          <Link href="/settings/billing" style={{ color: 'var(--color-amber-text, #8A5A00)', fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' }}>
+            {t('viewPricing')}
+          </Link>
+        </div>
+      )}
 
       {/* Invite form */}
       {showInvite && (
@@ -579,17 +629,43 @@ export default function TeamPage() {
                 {inviteSuccess}
               </div>
             )}
-            {inviteError && (
-              <div style={{
-                fontSize: 'var(--font-size-sm)',
-                color: 'var(--color-red-text, #A32D2D)',
-                background: 'var(--color-red-light, #FBEAEA)',
-                padding: '8px 12px',
-                borderRadius: 'var(--radius-md)',
-              }}>
-                {inviteError}
-              </div>
-            )}
+            {inviteError && (() => {
+              // Limit-reached messages are styled as amber warnings, not
+              // red errors, and carry a link to the billing page. We
+              // detect them by checking for the Thai "อัปเกรด" or English
+              // "upgrade" hint that both server and client errors include.
+              const isLimitWarning = /อัปเกรด|upgrade/i.test(inviteError)
+              if (isLimitWarning) {
+                return (
+                  <div style={{
+                    fontSize: 'var(--font-size-sm)',
+                    color: 'var(--color-amber-text, #8A5A00)',
+                    background: 'var(--color-amber-light, #FFF4E0)',
+                    padding: '10px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                  }}>
+                    <span>{inviteError}</span>
+                    <Link href="/settings/billing" style={{ color: 'var(--color-amber-text, #8A5A00)', fontWeight: 600, textDecoration: 'none' }}>
+                      {t('viewPricing')}
+                    </Link>
+                  </div>
+                )
+              }
+              return (
+                <div style={{
+                  fontSize: 'var(--font-size-sm)',
+                  color: 'var(--color-red-text, #A32D2D)',
+                  background: 'var(--color-red-light, #FBEAEA)',
+                  padding: '8px 12px',
+                  borderRadius: 'var(--radius-md)',
+                }}>
+                  {inviteError}
+                </div>
+              )
+            })()}
           </div>
         </div>
       )}
