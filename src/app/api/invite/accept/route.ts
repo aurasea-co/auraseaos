@@ -158,11 +158,16 @@ export async function POST(req: NextRequest) {
   //     ALTER COLUMN entry_reminder_enabled SET DEFAULT false;
   // …so any other code path that inserts without specifying this column
   // also opts new users out.
+  // Staff don't receive email notifications by default — the
+  // /settings/notifications page hides the email + LINE toggles for
+  // staff entirely, so leaving email_notifications=true would be a
+  // setting they can't see or change.
+  const emailNotificationsDefault = role !== 'staff'
   const { error: notifErr } = await db.from('notification_settings').upsert(
     {
       user_id: user.id,
       organization_id,
-      email_notifications: true,
+      email_notifications: emailNotificationsDefault,
       line_notify_enabled: false,
       entry_reminder_enabled: false,
     },

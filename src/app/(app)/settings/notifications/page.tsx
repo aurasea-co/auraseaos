@@ -142,41 +142,44 @@ export default function NotificationsPage() {
       )}
 
       <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-4">
-        <Toggle label={t('emailNotifications')} checked={emailNotif} onChange={setEmailNotif} />
-
-        {/* Line Messaging API */}
-        <div style={{ padding: '4px 0' }}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}>{t('lineNotifications')}</span>
-              <span style={{ fontSize: 10, fontWeight: 500, padding: '1px 6px', borderRadius: 'var(--radius-pill)', background: 'var(--color-green-light)', color: 'var(--color-green-text)' }}>
-                {lineConnected ? t('lineConnected') : t('lineReady')}
-              </span>
-            </div>
-          </div>
-          {!lineConnected && (
-            <>
-              <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-tertiary)', marginTop: 4 }}>
-                {t('lineInstructions')}
-              </p>
-              <a
-                href="https://line.me/R/ti/p/@270cokmy"
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ display: 'inline-block', marginTop: 8, fontSize: 12, fontWeight: 500, color: 'var(--color-accent)', textDecoration: 'none' }}
-              >
-                {t('lineAddFriend')}
-              </a>
-            </>
-          )}
-        </div>
-
-        {/* Morning-flash email opt-in. LINE is the default channel; the
-            email goes out only when this toggle is on for the user/org.
-            Gated to owner+manager because staff don't receive morning
-            flash on any channel (filtered server-side). */}
+        {/* Email + LINE channels are only relevant to manager/owner.
+            Staff's job is daily entry — they only see the entry reminder
+            below. Hiding these sections keeps their screen calm. */}
         {(role === 'owner' || role === 'manager') && (
-          <Toggle label={t('morningFlashEmail')} checked={morningFlashEmail} onChange={setMorningFlashEmail} />
+          <>
+            <Toggle label={t('emailNotifications')} checked={emailNotif} onChange={setEmailNotif} />
+
+            {/* Line Messaging API */}
+            <div style={{ padding: '4px 0' }}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}>{t('lineNotifications')}</span>
+                  <span style={{ fontSize: 10, fontWeight: 500, padding: '1px 6px', borderRadius: 'var(--radius-pill)', background: 'var(--color-green-light)', color: 'var(--color-green-text)' }}>
+                    {lineConnected ? t('lineConnected') : t('lineReady')}
+                  </span>
+                </div>
+              </div>
+              {!lineConnected && (
+                <>
+                  <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-tertiary)', marginTop: 4 }}>
+                    {t('lineInstructions')}
+                  </p>
+                  <a
+                    href="https://line.me/R/ti/p/@270cokmy"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ display: 'inline-block', marginTop: 8, fontSize: 12, fontWeight: 500, color: 'var(--color-accent)', textDecoration: 'none' }}
+                  >
+                    {t('lineAddFriend')}
+                  </a>
+                </>
+              )}
+            </div>
+
+            {/* Morning-flash email opt-in. LINE is the default channel; the
+                email goes out only when this toggle is on for the user/org. */}
+            <Toggle label={t('morningFlashEmail')} checked={morningFlashEmail} onChange={setMorningFlashEmail} />
+          </>
         )}
 
         <Toggle label={t('entryReminder')} checked={entryReminder} onChange={setEntryReminder} />

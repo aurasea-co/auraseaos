@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { createClient } from '@/lib/supabase/client'
+import { useUser } from '@/providers/user-context'
 
 // Persistent reminder shown across the app when an invited user clicks
 // "Get started" on /welcome without connecting LINE. The /welcome page
@@ -13,6 +14,9 @@ import { createClient } from '@/lib/supabase/client'
 //   - profile.line_id becomes non-null (LINE is connected) → clear flag
 //   - the user dismisses 3 times → stop showing permanently
 //   - the user dismisses fewer than 3 times → snooze for 3 days each time
+//
+// Staff users never see this banner — the LINE morning summary is a
+// manager/owner feature, so prompting staff to connect would be noise.
 
 const PENDING_KEY = 'line_reminder_pending'
 const DISMISSED_COUNT_KEY = 'line_reminder_dismissed_count'
@@ -48,12 +52,15 @@ function clear(key: string) {
 export function LineConnectBanner() {
   const t = useTranslations('lineBanner')
   const supabase = createClient()
+  const { role } = useUser()
   const [visible, setVisible] = useState(false)
 
   useEffect(() => {
     let cancelled = false
 
     async function decide() {
+      // Staff don't get morning summaries — nothing to nudge them about
+      if (role === 'staff') return
       // Bail out early if the flag isn't set
       if (read(PENDING_KEY) !== 'true') return
 
@@ -98,7 +105,7 @@ export function LineConnectBanner() {
     return () => {
       cancelled = true
     }
-  }, [supabase])
+  }, [supabase, role])
 
   function handleDismiss() {
     const count = Number(read(DISMISSED_COUNT_KEY) || '0') + 1
