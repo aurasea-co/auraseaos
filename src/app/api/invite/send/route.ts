@@ -69,29 +69,65 @@ export async function POST(req: NextRequest) {
 
   const supabase = createServiceClient()
   const token = crypto.randomUUID()
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+  // 14 days — gives invitees two weekends to act before we make the
+  // owner re-issue. resend-invite uses the same window.
+  const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = supabase as any
-  const { data: invitation, error: insertError } = await db
-    .from('invitations')
-    .insert({
-      organization_id: organizationId,
-      branch_id: branchId || null,
-      invitee_email: inviteeEmail,
-      role,
-      invited_by: invitedBy,
-      token,
-      expires_at: expiresAt,
-    })
-    .select('id, token')
-    .single()
 
-  if (insertError || !invitation) {
-    return NextResponse.json(
-      { error: insertError?.message || 'Failed to create invitation' },
-      { status: 500 },
-    )
+  // If a pending invitation already exists for this email+org pair,
+  // rotate it in place instead of inserting a duplicate row. This
+  // keeps the team page's "Pending" section deduplicated and lets the
+  // owner click "Invite" twice without polluting state.
+  const { data: existingPending } = await db
+    .from('invitations')
+    .select('id')
+    .eq('organization_id', organizationId)
+    .eq('invitee_email', inviteeEmail)
+    .is('accepted_at', null)
+    .maybeSingle()
+
+  let invitationToken = token
+
+  if (existingPending) {
+    const { error: updateErr } = await db
+      .from('invitations')
+      .update({
+        token,
+        expires_at: expiresAt,
+        // refresh the role/branch in case the owner changed them on the
+        // second click
+        role,
+        branch_id: branchId || null,
+        invited_by: invitedBy,
+      })
+      .eq('id', existingPending.id)
+    if (updateErr) {
+      return NextResponse.json({ error: updateErr.message }, { status: 500 })
+    }
+  } else {
+    const { data: invitation, error: insertError } = await db
+      .from('invitations')
+      .insert({
+        organization_id: organizationId,
+        branch_id: branchId || null,
+        invitee_email: inviteeEmail,
+        role,
+        invited_by: invitedBy,
+        token,
+        expires_at: expiresAt,
+      })
+      .select('id, token')
+      .single()
+
+    if (insertError || !invitation) {
+      return NextResponse.json(
+        { error: insertError?.message || 'Failed to create invitation' },
+        { status: 500 },
+      )
+    }
+    invitationToken = invitation.token
   }
 
   const result = await sendEmail({
@@ -103,7 +139,7 @@ export async function POST(req: NextRequest) {
       organizationName,
       branchName,
       role,
-      token: invitation.token,
+      token: invitationToken,
     }),
     organizationId,
     branchId: branchId || undefined,

@@ -578,8 +578,10 @@
   "join": {
     "checkingLink": "Checking your link...",
     "loading": "Loading...",
-    "invalidTitle": "Link expired or invalid",
-    "invalidBody": "Please contact the Owner to request a new invitation.",
+    "invalidTitle": "This invitation link is invalid",
+    "invalidBody": "Please contact the Owner to request a new link.",
+    "expiredTitle": "This invitation has expired",
+    "expiredBody": "Invitation links are valid for 14 days. Please ask the Owner to send a new one.",
     "backToLogin": "Back to sign in →",
     "alreadyAcceptedTitle": "You're already a member",
     "alreadyAcceptedBody": "You already have access. Sign in to get started.",

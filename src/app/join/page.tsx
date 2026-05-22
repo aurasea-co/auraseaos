@@ -222,10 +222,11 @@ function JoinPageInner() {
   }
 
   if (status === 'invalid' || status === 'expired') {
+    const isExpired = status === 'expired'
     return (
       <CenteredCard>
-        <h1 style={heading}>{t('invalidTitle')}</h1>
-        <p style={muted}>{t('invalidBody')}</p>
+        <h1 style={heading}>{isExpired ? t('expiredTitle') : t('invalidTitle')}</h1>
+        <p style={muted}>{isExpired ? t('expiredBody') : t('invalidBody')}</p>
         <Link href="/login" style={linkStyle}>{t('backToLogin')}</Link>
       </CenteredCard>
     )

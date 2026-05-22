@@ -88,7 +88,7 @@ export default function InvitationEmail({
             </Button>
           </Section>
           <Text style={{ fontSize: 12, color: COLORS.muted, textAlign: 'center' as const, margin: '0 0 28px' }}>
-            ลิงก์นี้หมดอายุใน 7 วัน
+            ลิงก์นี้หมดอายุใน 14 วัน
           </Text>
 
           <Hr style={{ borderTop: `1px solid ${COLORS.divider}`, margin: '0 0 24px' }} />

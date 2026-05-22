@@ -7,9 +7,11 @@ import { authenticateOwner } from '../_lib'
 // POST /api/team/resend-invite
 //   { organizationId, invitationId }
 //
-// Regenerates the token + extends expires_at by 7 days, then re-sends
+// Regenerates the token + extends expires_at by 14 days, then re-sends
 // the invitation email. We rotate the token so an old, possibly-leaked
-// link from the previous send stops working.
+// link from the previous send stops working. This route ALWAYS updates
+// the existing row in place — never inserts a new invitation — to keep
+// the team page's pending list clean.
 
 export async function POST(req: NextRequest) {
   let body: { organizationId?: string; invitationId?: string }
@@ -58,9 +60,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invitation already accepted' }, { status: 409 })
   }
 
-  // Rotate token + extend expiry
+  // Rotate token + extend expiry (14 days, same window as send route).
   const newToken = crypto.randomUUID()
-  const newExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+  const newExpires = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
   const { error: updateErr } = await db
     .from('invitations')
     .update({ token: newToken, expires_at: newExpires })
