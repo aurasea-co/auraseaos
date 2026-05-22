@@ -21,6 +21,7 @@ import {
 } from '@/lib/businessDate'
 import type { Target } from '@/lib/supabase/types'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { StaffEntryTip } from '@/components/onboarding/StaffEntryTip'
 
 export default function EntryPage() {
   const { activeBranch, role, user, organization } = useUser()
@@ -148,6 +149,9 @@ export default function EntryPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Staff-only tip — self-hides for owner/manager and after dismissal */}
+      <StaffEntryTip />
+
       {/* Business date selector */}
       <div
         className="flex items-center justify-between"

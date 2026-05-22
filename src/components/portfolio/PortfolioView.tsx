@@ -13,6 +13,7 @@ import { calculateDailySalaryCost } from '@/lib/calculations/hotel'
 import Link from 'next/link'
 import type { Branch, Target } from '@/lib/supabase/types'
 import { getTodayBangkok } from '@/lib/businessDate'
+import { OwnerGettingStarted } from '@/components/onboarding/OwnerGettingStarted'
 
 // Health score calculation (spec Appendix 14.1)
 function calcHealthScore(
@@ -220,6 +221,8 @@ export function PortfolioView() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <OwnerGettingStarted />
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <h2 style={{ fontSize: 18, fontWeight: 500, color: 'var(--color-text-primary)' }}>{t('title')}</h2>
         <OperationalCompletenessPill

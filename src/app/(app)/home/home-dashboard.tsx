@@ -27,6 +27,7 @@ import {
 } from '@/lib/calculations/marginAggregates'
 import Link from 'next/link'
 import { ArrowRight } from 'lucide-react'
+import { ManagerGettingStarted } from '@/components/onboarding/ManagerGettingStarted'
 
 export function HomeDashboard() {
   const { user, role, activeBranch, plan } = useUser()
@@ -262,6 +263,9 @@ export function HomeDashboard() {
     return (
       <PullToRefresh onRefresh={handleRefresh}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Manager-only — self-hides for owner/staff and after dismissal */}
+          <ManagerGettingStarted />
+
           <div className="flex items-center justify-between">
             <OperationalCompletenessPill
               branchId={activeBranch.id}

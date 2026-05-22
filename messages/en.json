@@ -29,6 +29,7 @@
     "cost": "Cost",
     "labour": "Labour",
     "portfolio": "Portfolio",
+    "help": "Help",
     "more": "More"
   },
   "login": {
@@ -268,6 +269,78 @@
     "minRevenue": "Minimum daily revenue",
     "minRooms": "Minimum rooms / day",
     "minCovers": "Minimum covers / day"
+  },
+  "onboarding": {
+    "stepsCount": "{n} steps",
+    "progressLabel": "{done}/{total} steps complete",
+    "dismiss": "Dismiss",
+    "showGuide": "Show guide",
+    "owner": {
+      "title": "Getting started with Aurasea OS",
+      "step1Title": "Set up branches and targets",
+      "step1Body": "Confirm branch details under Settings → Branches, then set ADR / Margin targets under Settings → Targets.",
+      "step1Cta": "Go to Targets →",
+      "step2Title": "Invite your team",
+      "step2Body": "Invite Managers and Staff to help capture daily data under Settings → Team.",
+      "step2Cta": "Invite team →",
+      "step3Title": "Connect LINE",
+      "step3Body": "Receive your daily business summary at 7:00 AM via LINE. Add the Aurasea LINE OA as a friend.",
+      "step3Cta": "Connect LINE →",
+      "step4Title": "See the business at a glance",
+      "step4Body": "Once your team has logged 7 days of data, Portfolio and Trends start showing meaningful insights."
+    },
+    "manager": {
+      "title": "Welcome to Aurasea OS",
+      "subtitle": "What to do as a Manager",
+      "step1Title": "Connect LINE for the morning brief",
+      "step1Body": "Add the LINE OA @aurasea as a friend, then send your email in chat to receive the daily summary at 7:00 AM.",
+      "step1Cta": "Connect LINE →",
+      "step2Title": "Check daily KPIs",
+      "step2Body": "This Home page shows your latest Margin, Covers, ADR, Occupancy and a daily recommendation.",
+      "step3Title": "Review Trends",
+      "step3Body": "Open Trends for 30-day movement and comparison against targets.",
+      "step3Cta": "View Trends →"
+    },
+    "staffEntryTip": "Log data every day after closing — under 2 minutes. Your entries help the Owner analyse the business."
+  },
+  "help": {
+    "title": "Help",
+    "searchPlaceholder": "Search questions...",
+    "filterAll": "All",
+    "filterOwner": "Owner",
+    "filterManager": "Manager",
+    "filterStaff": "Staff",
+    "noResults": "No matching questions",
+    "sections": {
+      "basics": "Getting started",
+      "entry": "Daily data entry",
+      "notifications": "Notifications",
+      "settings": "Settings"
+    },
+    "qa": {
+      "what_is_q": "What is Aurasea OS?",
+      "what_is_a": "An AI-powered operational analytics platform for Hospitality and F&B businesses in Thailand. Get a daily business summary on LINE plus automatic alerts when numbers go off track.",
+      "why_daily_q": "Why do I need to log data every day?",
+      "why_daily_a": "Daily data lets the system calculate Margin, ADR, and Occupancy accurately and give recommendations you can act on. Without entries, charts and insights won't show.",
+      "what_to_enter_q": "What do I need to enter each day?",
+      "what_to_enter_a": "F&B: sales, covers, food cost. Hotels: revenue, rooms sold, ADR.",
+      "backdate_q": "Can I backfill past days?",
+      "backdate_a": "Yes. Use the ← / → arrows on the Entry page to pick the date you want to edit.",
+      "forget_cost_q": "What happens if I forget to log cost?",
+      "forget_cost_a": "Margin won't show for that day, but sales and covers still count. Log the cost as soon as you can.",
+      "line_setup_q": "How do I get the morning brief on LINE?",
+      "line_setup_a": "Open Settings → Notifications, add the Aurasea LINE OA as a friend, then send your email in the chat.",
+      "morning_time_q": "When does the morning brief send?",
+      "morning_time_a": "Every day at 7:00 AM Thailand time.",
+      "weekly_q": "When is the weekly report sent?",
+      "weekly_a": "Sundays at 7:00 AM, by email (Owner only).",
+      "add_team_q": "How do I add team members?",
+      "add_team_a": "Settings → Team → Invite member. Enter their email, pick a role and branch, then click Send invitation.",
+      "roles_q": "What's the difference between Manager and Staff?",
+      "roles_a": "Manager: see the business overview, get the LINE morning summary, view Trends and Cost. Staff: log daily data only.",
+      "targets_q": "How do I set targets?",
+      "targets_a": "Settings → Targets — set ADR target for hotels, or Margin / Covers target for F&B."
+    }
   },
   "suspended": {
     "title": "Your account is suspended",

@@ -29,6 +29,7 @@
     "cost": "ต้นทุน",
     "labour": "แรงงาน",
     "portfolio": "ภาพรวม",
+    "help": "คู่มือ",
     "more": "อื่นๆ"
   },
   "login": {
@@ -649,6 +650,78 @@
       "step2Body": "เพิ่ม LINE OA @aurasea เพื่อรับ reminder กรอกข้อมูลเวลา 22.00 น. ทุกวัน",
       "step3Title": "ติดต่อ Manager หากมีคำถาม",
       "step3Body": "หากไม่แน่ใจว่าต้องกรอกอะไร ถาม Manager หรือ Owner ของคุณ"
+    }
+  },
+  "onboarding": {
+    "stepsCount": "{n} ขั้นตอน",
+    "progressLabel": "{done}/{total} ขั้นตอนเสร็จแล้ว",
+    "dismiss": "ปิด",
+    "showGuide": "ดูคู่มือ",
+    "owner": {
+      "title": "เริ่มต้นใช้งาน Aurasea OS",
+      "step1Title": "ตั้งค่าสาขาและเป้าหมาย",
+      "step1Body": "ไปที่ Settings → Branches เพื่อยืนยันข้อมูลสาขา และ Settings → Targets เพื่อตั้ง ADR / Margin target",
+      "step1Cta": "ไปที่ Targets →",
+      "step2Title": "เชิญทีมงาน",
+      "step2Body": "เชิญ Manager และ Staff เพื่อช่วยกรอกข้อมูลประจำวัน ที่ Settings → Team",
+      "step2Cta": "เชิญทีม →",
+      "step3Title": "เชื่อมต่อ LINE",
+      "step3Body": "รับสรุปธุรกิจทุกเช้า 7.00 น. ทาง LINE เพิ่ม LINE OA Aurasea เป็นเพื่อน",
+      "step3Cta": "เชื่อมต่อ LINE →",
+      "step4Title": "ดูภาพรวมธุรกิจ",
+      "step4Body": "เมื่อทีมกรอกข้อมูลครบ 7 วัน Portfolio และ Trends จะแสดงผลที่มีความหมาย"
+    },
+    "manager": {
+      "title": "ยินดีต้อนรับสู่ Aurasea OS",
+      "subtitle": "สิ่งที่คุณต้องทำในฐานะ Manager",
+      "step1Title": "เชื่อมต่อ LINE รับสรุปเช้า",
+      "step1Body": "เพิ่ม LINE OA @aurasea เป็นเพื่อน แล้วส่งอีเมลของคุณในแชท เพื่อรับสรุปธุรกิจทุกเช้า 7.00 น.",
+      "step1Cta": "เชื่อมต่อ LINE →",
+      "step2Title": "ดู KPI ประจำวัน",
+      "step2Body": "หน้านี้คือ Home ดู Margin, Covers, ADR, Occupancy ล่าสุด และคำแนะนำประจำวัน",
+      "step3Title": "ดู Trends",
+      "step3Body": "ไปที่ Trends เพื่อดูแนวโน้ม 30 วัน และเปรียบเทียบกับเป้าหมาย",
+      "step3Cta": "ดู Trends →"
+    },
+    "staffEntryTip": "กรอกข้อมูลทุกวันหลังปิดร้าน ใช้เวลาไม่ถึง 2 นาที ข้อมูลที่กรอกจะช่วย Owner วิเคราะห์ธุรกิจ"
+  },
+  "help": {
+    "title": "คู่มือ",
+    "searchPlaceholder": "ค้นหาคำถาม...",
+    "filterAll": "ทั้งหมด",
+    "filterOwner": "Owner",
+    "filterManager": "Manager",
+    "filterStaff": "Staff",
+    "noResults": "ไม่พบคำถามที่ตรงกัน",
+    "sections": {
+      "basics": "การใช้งานเบื้องต้น",
+      "entry": "การกรอกข้อมูล",
+      "notifications": "การแจ้งเตือน",
+      "settings": "การตั้งค่า"
+    },
+    "qa": {
+      "what_is_q": "Aurasea OS คืออะไร?",
+      "what_is_a": "ระบบ AI วิเคราะห์การดำเนินงานสำหรับธุรกิจ Hospitality และ F&B ในไทย รับสรุปธุรกิจทุกเช้าทาง LINE และแจ้งเตือนอัตโนมัติเมื่อตัวเลขผิดปกติ",
+      "why_daily_q": "ทำไมต้องกรอกข้อมูลทุกวัน?",
+      "why_daily_a": "ข้อมูลรายวันทำให้ระบบคำนวณ Margin, ADR, Occupancy ได้แม่นยำ และให้คำแนะนำที่มีประโยชน์จริง ถ้าไม่กรอก กราฟและ insights จะไม่แสดงผล",
+      "what_to_enter_q": "ต้องกรอกอะไรบ้างทุกวัน?",
+      "what_to_enter_a": "F&B: ยอดขาย, จำนวนลูกค้า, ต้นทุนวัตถุดิบ | โรงแรม: รายได้, จำนวนห้องที่ขายได้, ADR",
+      "backdate_q": "กรอกข้อมูลย้อนหลังได้ไหม?",
+      "backdate_a": "ได้ ใช้ลูกศร ← → ที่หน้า Entry เพื่อเลือกวันที่ต้องการแก้ไข",
+      "forget_cost_q": "ถ้าลืมกรอกต้นทุนจะเกิดอะไร?",
+      "forget_cost_a": "Margin จะไม่แสดงผลสำหรับวันนั้น แต่ข้อมูลยอดขายและลูกค้ายังใช้ได้ แนะนำให้กรอกต้นทุนให้ครบ",
+      "line_setup_q": "จะรับสรุปเช้าทาง LINE ได้อย่างไร?",
+      "line_setup_a": "ไปที่ Settings → Notifications → เพิ่ม LINE OA Aurasea เป็นเพื่อน แล้วส่งอีเมลของคุณในแชท",
+      "morning_time_q": "สรุปเช้าส่งเวลาไหน?",
+      "morning_time_a": "ทุกวัน 7.00 น. เวลาไทย",
+      "weekly_q": "รายงานรายสัปดาห์ส่งเมื่อไหร่?",
+      "weekly_a": "ทุกวันอาทิตย์ 7.00 น. ทางอีเมล (เฉพาะ Owner)",
+      "add_team_q": "จะเพิ่มทีมงานได้อย่างไร?",
+      "add_team_a": "Settings → Team → Invite member กรอกอีเมล เลือก Role และสาขา แล้วกด Send invitation",
+      "roles_q": "ความแตกต่างระหว่าง Manager และ Staff คืออะไร?",
+      "roles_a": "Manager: ดูภาพรวมธุรกิจ รับสรุปเช้า LINE ดู Trends และ Cost | Staff: กรอกข้อมูลประจำวันเท่านั้น",
+      "targets_q": "จะตั้งเป้าหมายได้อย่างไร?",
+      "targets_a": "Settings → Targets ตั้ง ADR target สำหรับโรงแรม หรือ Margin/Covers target สำหรับ F&B"
     }
   },
   "suspended": {
