@@ -90,20 +90,34 @@ function JoinPageInner() {
       const sessionEmail = sessionUser?.email?.toLowerCase() || null
       setCurrentEmail(sessionUser?.email || null)
 
-      // No active session — accepted invitations show the "already accepted"
-      // screen (existing behaviour); pending ones show the signup form.
-      if (!sessionUser) {
-        setStatus(inv.accepted_at ? 'accepted' : 'signup')
-        return
-      }
-
       const inviteEmailLower = inv.invitee_email.toLowerCase()
       const emailsMatch = sessionEmail === inviteEmailLower
 
+      // Already-accepted invitation — three paths:
+      //   logged in as the invitee    → go straight to /home
+      //   logged in as someone else   → wrongAccount screen
+      //   not logged in               → 'accepted' screen with login form
+      if (inv.accepted_at) {
+        if (sessionUser && emailsMatch) {
+          router.replace('/home')
+          return
+        }
+        if (sessionUser && !emailsMatch) {
+          setStatus('wrongAccount')
+          return
+        }
+        setStatus('accepted')
+        return
+      }
+
+      // Pending invitation, no session → signup form
+      if (!sessionUser) {
+        setStatus('signup')
+        return
+      }
+
       if (!emailsMatch) {
-        // Different account is signed in — show the disambiguation screen
-        // even if the invitation itself is already accepted. We don't
-        // want to tell user X that user Y has joined.
+        // Different account is signed in — show the disambiguation screen.
         setStatus('wrongAccount')
         return
       }
@@ -132,9 +146,9 @@ function JoinPageInner() {
       setStatus('authedReady')
     }
     load()
-  }, [token, supabase])
+  }, [token, supabase, router])
 
-  async function acceptInvitation(): Promise<{ ok: boolean; error?: string }> {
+  async function acceptInvitation(): Promise<{ ok: boolean; error?: string; alreadyAccepted?: boolean }> {
     const res = await fetch('/api/invite/accept', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -143,6 +157,13 @@ function JoinPageInner() {
         displayName: displayName.trim() || undefined,
       }),
     })
+    // 409 = invitation already accepted. That's not an error — it just
+    // means we beat the server to it (e.g. user signed in with an
+    // already-joined account). Treat as success so the caller can
+    // proceed to redirect.
+    if (res.status === 409) {
+      return { ok: true, alreadyAccepted: true }
+    }
     const json = await res.json()
     if (!res.ok || !json.success) {
       return { ok: false, error: json.error || t('errJoinFailed') }
@@ -209,7 +230,7 @@ function JoinPageInner() {
         setErrorMessage(result.error || t('errJoinFailed'))
         return
       }
-      router.push('/welcome')
+      router.push(result.alreadyAccepted ? '/home' : '/welcome')
     } finally {
       setSubmitting(false)
     }
@@ -242,7 +263,10 @@ function JoinPageInner() {
         setErrorMessage(result.error || t('errJoinFailed'))
         return
       }
-      router.push('/welcome')
+      // If the invitation was already accepted (e.g. user is logging in
+      // from the 'accepted' screen), skip /welcome and go straight to
+      // the dashboard — they've seen it before.
+      router.push(result.alreadyAccepted ? '/home' : '/welcome')
     } finally {
       setSubmitting(false)
     }
@@ -258,7 +282,7 @@ function JoinPageInner() {
         setErrorMessage(result.error || t('errJoinFailed'))
         return
       }
-      router.push('/welcome')
+      router.push(result.alreadyAccepted ? '/home' : '/welcome')
     } finally {
       setSubmitting(false)
     }
@@ -308,16 +332,52 @@ function JoinPageInner() {
     )
   }
 
-  if (status === 'accepted') {
+  if (status === 'accepted' && invitation) {
     return (
       <CenteredCard>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <LocaleSwitcher />
+        </div>
         <h1 style={heading}>{t('alreadyAcceptedTitle')}</h1>
         <p style={muted}>{t('alreadyAcceptedBody')}</p>
-        <div style={{ marginTop: 16 }}>
-          <Link href="/login">
-            <Button variant="primary" fullWidth>{t('signIn')}</Button>
-          </Link>
-        </div>
+
+        <form onSubmit={handleLogin} style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <Field label={t('emailLabel')}>
+            <input
+              type="email"
+              value={invitation.invitee_email}
+              disabled
+              style={{ ...inputStyle, color: '#9b9b9b', background: '#f7f7f5' }}
+            />
+          </Field>
+          <Field label={t('passwordSimple')}>
+            <input
+              type="password"
+              value={loginPassword}
+              onChange={(e) => setLoginPassword(e.target.value)}
+              required
+              autoFocus
+              autoComplete="current-password"
+              style={inputStyle}
+            />
+          </Field>
+
+          {errorMessage && (
+            <div style={{ fontSize: 13, color: '#A32D2D', background: '#FBEAEA', padding: '8px 12px', borderRadius: 6 }}>
+              {errorMessage}
+            </div>
+          )}
+
+          <Button variant="primary" fullWidth type="submit" disabled={submitting}>
+            {submitting ? t('loggingIn') : t('signIn')}
+          </Button>
+
+          <div style={{ textAlign: 'center', marginTop: 2 }}>
+            <Link href="/forgot-password" style={{ fontSize: 13, color: PURPLE, textDecoration: 'none' }}>
+              {t('forgotPassword')}
+            </Link>
+          </div>
+        </form>
       </CenteredCard>
     )
   }
