@@ -51,10 +51,23 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // Redirect logged-in users away from login page
+  // Redirect logged-in users away from login page — honour returnTo
+  // when present (used by /api/line/link and the /join wrongAccount
+  // re-login path) so the deep-link completes instead of dumping the
+  // user on /home.
   if (user && request.nextUrl.pathname === '/login') {
+    const returnTo = request.nextUrl.searchParams.get('returnTo')
     const url = request.nextUrl.clone()
-    url.pathname = '/home'
+    // Same-origin only — anything not starting with a single '/' is
+    // ignored to avoid being used as an open-redirect helper.
+    if (returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//')) {
+      url.pathname = returnTo.split('?')[0]
+      const qs = returnTo.includes('?') ? returnTo.slice(returnTo.indexOf('?') + 1) : ''
+      url.search = qs ? `?${qs}` : ''
+    } else {
+      url.pathname = '/home'
+      url.search = ''
+    }
     return NextResponse.redirect(url)
   }
 

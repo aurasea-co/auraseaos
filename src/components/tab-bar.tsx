@@ -48,8 +48,9 @@ function getMobileTabs(
   }
 
   if (role === 'manager') {
-    // Order: Home → Trends → Entry → Pricing/Cost → Labour → Help → Settings.
-    // Manager sees the same analytics as owner now (except Portfolio).
+    // Order: Home → Trends → Entry → Pricing/Cost → Help → Settings.
+    // Manager sees the same analytics as owner except Portfolio and
+    // Labour — Labour is owner-only (sensitive staffing data).
     const tabs: MobileTab[] = [
       { href: '/home', icon: Home, labelKey: 'home' },
     ]
@@ -62,7 +63,6 @@ function getMobileTabs(
           : { href: '/cost', icon: PieChart, labelKey: 'cost' },
       )
     }
-    if (hasPro) tabs.push({ href: '/labour', icon: Briefcase, labelKey: 'labour' })
     tabs.push({ href: '/help', icon: HelpCircle, labelKey: 'help' })
     tabs.push({ href: '/settings', icon: Settings, labelKey: 'settings' })
     return tabs

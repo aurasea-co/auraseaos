@@ -35,15 +35,19 @@ export async function POST(req: NextRequest) {
 async function handleFollow(lineUserId: string) {
   const linkUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/line/link?lineUserId=${Buffer.from(lineUserId).toString('base64')}`
 
-  await sendLineFlexMessage(lineUserId, 'ยินดีต้อนรับสู่ Aurasea', {
+  // Single CTA — the button URL is the entire link flow. The user is
+  // either logged in (account links immediately) or they hit /login
+  // with a returnTo that completes the connection after they sign in.
+  // We intentionally don't ask them to type their email in chat.
+  await sendLineFlexMessage(lineUserId, 'ยินดีต้อนรับสู่ Aurasea OS', {
     type: 'bubble',
     body: {
       type: 'box',
       layout: 'vertical',
       spacing: 'md',
       contents: [
-        { type: 'text', text: 'ยินดีต้อนรับสู่ Aurasea', weight: 'bold', size: 'lg' },
-        { type: 'text', text: 'เชื่อมต่อบัญชีเพื่อรับสรุปธุรกิจทุกเช้า', wrap: true, color: '#6b6b6b', size: 'sm' },
+        { type: 'text', text: 'ยินดีต้อนรับสู่ Aurasea OS', weight: 'bold', size: 'lg' },
+        { type: 'text', text: 'กดปุ่มด้านล่างเพื่อเชื่อมต่อบัญชีและรับสรุปธุรกิจทุกเช้า 7.00 น.', wrap: true, color: '#6b6b6b', size: 'sm' },
       ],
     },
     footer: {
@@ -52,7 +56,7 @@ async function handleFollow(lineUserId: string) {
       contents: [
         {
           type: 'button',
-          action: { type: 'uri', label: 'เชื่อมต่อบัญชี Aurasea', uri: linkUrl },
+          action: { type: 'uri', label: 'เชื่อมต่อบัญชี Aurasea →', uri: linkUrl },
           style: 'primary',
           color: '#534AB7',
         },

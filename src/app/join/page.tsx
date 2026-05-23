@@ -230,7 +230,11 @@ function JoinPageInner() {
         setErrorMessage(result.error || t('errJoinFailed'))
         return
       }
-      router.push(result.alreadyAccepted ? '/home' : '/welcome')
+      // Fresh signUp always goes through /welcome — the alreadyAccepted
+      // branch here is effectively dead code (a brand-new account can't
+      // have already accepted this token). /welcome itself routes the
+      // user to /home when they tap "เริ่มใช้งานเลย →".
+      router.push('/welcome')
     } finally {
       setSubmitting(false)
     }

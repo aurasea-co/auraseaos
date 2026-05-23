@@ -27,20 +27,34 @@ export async function GET(req: NextRequest) {
     .from('profiles')
     .upsert({ user_id: user.id, line_id: lineUserId }, { onConflict: 'user_id' })
 
-  // Also enable Line notifications
-  await serviceClient
-    .from('notification_settings')
-    .upsert(
-      { user_id: user.id, organization_id: (await serviceClient.from('organization_members').select('organization_id').eq('user_id', user.id).limit(1).single()).data?.organization_id, line_notify_enabled: true },
-      { onConflict: 'user_id,organization_id' }
-    )
+  // Enable LINE notifications + stamp when the link happened. The
+  // line_notify_connected_at column was added in migration 024.
+  const { data: orgRow } = await serviceClient
+    .from('organization_members')
+    .select('organization_id')
+    .eq('user_id', user.id)
+    .limit(1)
+    .single()
+  if (orgRow?.organization_id) {
+    await serviceClient
+      .from('notification_settings')
+      .upsert(
+        {
+          user_id: user.id,
+          organization_id: orgRow.organization_id,
+          line_notify_enabled: true,
+          line_notify_connected_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id,organization_id' }
+      )
+  }
 
   // Confirm connection back to the user's LINE chat. Best-effort: link is
   // already persisted at this point, so a delivery failure here must not
   // block the redirect.
   await sendLineMessage(
     lineUserId,
-    'เชื่อมต่อสำเร็จ ✅\nคุณจะได้รับสรุปธุรกิจทุกเช้า 7:00 น.\nหากต้องการยกเลิก ไปที่ Settings > Notifications'
+    'เชื่อมต่อสำเร็จ ✅\n\nบัญชี Aurasea OS ของคุณเชื่อมต่อกับ LINE แล้ว\nคุณจะได้รับสรุปธุรกิจทุกเช้า 7.00 น.\n\nหากต้องการยกเลิก ไปที่ Settings → Notifications'
   )
 
   return NextResponse.redirect(new URL('/settings/notifications?line=connected', req.url))

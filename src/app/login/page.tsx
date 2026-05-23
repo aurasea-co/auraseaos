@@ -1,13 +1,23 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { createClient } from '@/lib/supabase/client'
 import { LocaleSwitcher } from '@/components/locale-switcher'
 
-export default function LoginPage() {
+// Allowed returnTo paths — same-origin only. We refuse anything that
+// looks like an absolute URL (http://…, //…, etc.) to avoid being
+// abused as an open redirect.
+function safeReturnTo(value: string | null): string {
+  if (!value) return '/home'
+  if (!value.startsWith('/')) return '/home'
+  if (value.startsWith('//')) return '/home'
+  return value
+}
+
+function LoginPageInner() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -15,6 +25,8 @@ export default function LoginPage() {
   const router = useRouter()
   const supabase = createClient()
   const t = useTranslations('login')
+  const searchParams = useSearchParams()
+  const returnTo = safeReturnTo(searchParams.get('returnTo'))
 
   function mapAuthError(raw: string): string {
     const m = raw.toLowerCase()
@@ -41,7 +53,7 @@ export default function LoginPage() {
       return
     }
 
-    router.push('/home')
+    router.push(returnTo)
     router.refresh()
   }
 
@@ -126,5 +138,13 @@ export default function LoginPage() {
         </form>
       </div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginPageInner />
+    </Suspense>
   )
 }

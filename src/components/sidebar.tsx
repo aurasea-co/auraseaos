@@ -46,7 +46,7 @@ function getNavItems(role: AppRole, plan: string, branchType: string): (NavItem 
     { href: '/entry', icon: PenLine, labelKey: 'entry', roles: ['owner', 'manager', 'staff', 'superadmin'] },
     { href: '/pricing', icon: DollarSign, labelKey: 'pricing', roles: ['owner', 'superadmin'], plans: ['growth', 'pro'], branchTypes: ['accommodation'], requiredPlan: 'growth' },
     { href: '/cost', icon: PieChart, labelKey: 'cost', roles: ['owner', 'manager', 'superadmin'], plans: ['growth', 'pro'], branchTypes: ['fnb'], requiredPlan: 'growth' },
-    { href: '/labour', icon: Briefcase, labelKey: 'labour', roles: ['owner', 'manager', 'superadmin'], plans: ['pro'], requiredPlan: 'pro' },
+    { href: '/labour', icon: Briefcase, labelKey: 'labour', roles: ['owner', 'superadmin'], plans: ['pro'], requiredPlan: 'pro' },
     { href: '/help', icon: HelpCircle, labelKey: 'help', roles: ['owner', 'manager', 'staff', 'superadmin'] },
     { href: '/settings', icon: Settings, labelKey: 'settings', roles: ['owner', 'manager', 'staff', 'superadmin'] },
   ]
