@@ -63,6 +63,11 @@ export default function TeamPage() {
   const [actionError, setActionError] = useState<string | null>(null)
   const [actionNotice, setActionNotice] = useState<string | null>(null)
   const [removeId, setRemoveId] = useState<string | null>(null)
+  // Dedicated state for the resend button so each row can show its own
+  // loading + success treatment without polluting the global notice bar.
+  const [resendingId, setResendingId] = useState<string | null>(null)
+  const [resentId, setResentId] = useState<string | null>(null)
+  const [resendError, setResendError] = useState<string | null>(null)
 
   const orgId = organization?.id
 
@@ -231,24 +236,37 @@ export default function TeamPage() {
 
   async function handleResend(p: Pending) {
     if (!organization) return
-    setBusyId(p.id)
-    setActionError(null)
-    setActionNotice(null)
+    setResendingId(p.id)
+    setResendError(null)
     try {
       const res = await fetch('/api/team/resend-invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ organizationId: organization.id, invitationId: p.id }),
       })
-      const json = await res.json()
+      const json = await res.json().catch(() => ({}))
       if (!res.ok || !json.success) {
-        setActionError(json.error || t('updateError'))
+        setResendError(json.error || t('updateError'))
         return
       }
-      setActionNotice(t('resendSuccess'))
-      await reload()
+      // Local state bumps:
+      // - reset created_at so "Invited X ago" reads "just now" without a
+      //   server round trip (the server rotates token + expires_at on
+      //   resend; created_at is unchanged on the row).
+      // - mark this row as freshly resent so the button swaps to a
+      //   success pill for 4s.
+      const nowIso = new Date().toISOString()
+      setPending((prev) =>
+        prev.map((x) => (x.id === p.id ? { ...x, created_at: nowIso } : x)),
+      )
+      setResentId(p.id)
+      window.setTimeout(() => {
+        setResentId((current) => (current === p.id ? null : current))
+      }, 4000)
+    } catch (err) {
+      setResendError(err instanceof Error ? err.message : t('updateError'))
     } finally {
-      setBusyId(null)
+      setResendingId(null)
     }
   }
 
@@ -522,30 +540,54 @@ export default function TeamPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2" style={{ flexShrink: 0 }}>
-                  <button
-                    onClick={() => handleResend(p)}
-                    disabled={busyId === p.id}
-                    aria-label={t('resend')}
-                    className="touch-target flex items-center justify-center"
-                    style={{
-                      fontSize: 12,
-                      color: 'var(--color-accent-text, #534AB7)',
-                      background: 'none',
-                      border: '1px solid var(--color-border-strong)',
-                      borderRadius: 'var(--radius-md)',
-                      padding: '6px 10px',
-                      cursor: 'pointer',
-                      display: 'inline-flex',
-                      gap: 4,
-                      alignItems: 'center',
-                    }}
-                  >
-                    <RefreshCw size={12} />
-                    {t('resend')}
-                  </button>
+                  {resentId === p.id ? (
+                    // Success pill — auto-clears after 4s via setTimeout
+                    // in handleResend so the button returns to its idle
+                    // state without needing user input.
+                    <div
+                      role="status"
+                      style={{
+                        fontSize: 12,
+                        color: 'var(--color-green-text, #0F5132)',
+                        background: 'var(--color-green-light, #E6F4EE)',
+                        border: '1px solid #BFE3D2',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '6px 10px',
+                        display: 'inline-flex',
+                        gap: 4,
+                        alignItems: 'center',
+                        minHeight: 32,
+                      }}
+                    >
+                      ✓ {t('resendSuccess')}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleResend(p)}
+                      disabled={resendingId === p.id || busyId === p.id}
+                      aria-label={t('resend')}
+                      className="touch-target flex items-center justify-center"
+                      style={{
+                        fontSize: 12,
+                        color: resendingId === p.id ? 'var(--color-text-tertiary, #9b9b9b)' : 'var(--color-accent-text, #534AB7)',
+                        background: 'none',
+                        border: '1px solid',
+                        borderColor: resendingId === p.id ? 'var(--color-border, #e5e5e5)' : 'var(--color-border-strong)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '6px 10px',
+                        cursor: resendingId === p.id ? 'not-allowed' : 'pointer',
+                        display: 'inline-flex',
+                        gap: 4,
+                        alignItems: 'center',
+                      }}
+                    >
+                      <RefreshCw size={12} />
+                      {resendingId === p.id ? tCommon('saving') : t('resend')}
+                    </button>
+                  )}
                   <button
                     onClick={() => handleCancel(p)}
-                    disabled={busyId === p.id}
+                    disabled={busyId === p.id || resendingId === p.id}
                     aria-label={t('cancelInvite')}
                     className="touch-target flex items-center justify-center"
                     style={{
@@ -561,6 +603,45 @@ export default function TeamPage() {
               </div>
             ))
           )}
+        </div>
+      )}
+
+      {/* Resend-specific error banner. Placed right under the pending
+          list so the cause→effect is obvious; the global actionError
+          banner at the top of the page is reserved for member-level
+          actions (remove, suspend). */}
+      {resendError && (
+        <div
+          role="alert"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            fontSize: 'var(--font-size-sm)',
+            color: 'var(--color-red-text, #A32D2D)',
+            background: 'var(--color-red-light, #FBEAEA)',
+            padding: '8px 12px',
+            borderRadius: 'var(--radius-md)',
+          }}
+        >
+          <span>{resendError}</span>
+          <button
+            type="button"
+            onClick={() => setResendError(null)}
+            aria-label={tCommon('cancel')}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--color-red-text, #A32D2D)',
+              padding: 4,
+              display: 'flex',
+              alignItems: 'center',
+            }}
+          >
+            <X size={14} />
+          </button>
         </div>
       )}
 
