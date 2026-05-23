@@ -1,13 +1,17 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { createClient } from '@/lib/supabase/client'
 import { LocaleSwitcher } from '@/components/locale-switcher'
 
-export default function ForgotPasswordPage() {
-  const [email, setEmail] = useState('')
+function ForgotPasswordInner() {
+  const searchParams = useSearchParams()
+  // Pre-fill from ?email=... so /join can deep-link here with the
+  // invitee's address already in the box.
+  const [email, setEmail] = useState(searchParams.get('email') || '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [sent, setSent] = useState(false)
@@ -109,5 +113,13 @@ export default function ForgotPasswordPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function ForgotPasswordPage() {
+  return (
+    <Suspense fallback={null}>
+      <ForgotPasswordInner />
+    </Suspense>
   )
 }

@@ -610,6 +610,8 @@
     "errPasswordShort": "รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร",
     "errPasswordMismatch": "รหัสผ่านไม่ตรงกัน",
     "errEmailExists": "อีเมลนี้มีบัญชีอยู่แล้ว — กรุณาเข้าสู่ระบบ",
+    "infoExistingAccount": "อีเมลนี้มีบัญชี Aurasea OS อยู่แล้ว กรุณาเข้าสู่ระบบด้วยรหัสผ่านเดิม",
+    "infoReinvite": "คุณเคยเป็นสมาชิกของ {org} มาก่อน กรุณาเข้าสู่ระบบเพื่อรับคำเชิญใหม่",
     "errNoSession": "บัญชีถูกสร้างแล้ว แต่ Supabase ต้องการการยืนยันอีเมล กรุณาปิด Confirm email ใน Supabase หรือยืนยันอีเมลก่อนกลับมา",
     "errPasswordRequired": "กรุณากรอกรหัสผ่าน",
     "errInvalidCredentials": "อีเมลหรือรหัสผ่านไม่ถูกต้อง",

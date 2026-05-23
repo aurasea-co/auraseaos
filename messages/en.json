@@ -687,6 +687,8 @@
     "errPasswordShort": "Password must be at least 8 characters",
     "errPasswordMismatch": "Passwords do not match",
     "errEmailExists": "An account with this email already exists — please sign in",
+    "infoExistingAccount": "An Aurasea OS account with this email already exists. Sign in with your existing password.",
+    "infoReinvite": "You were previously a member of {org}. Sign in to accept the new invitation.",
     "errNoSession": "Account created, but Supabase requires email confirmation. Disable Confirm email in Supabase or verify your email before returning.",
     "errPasswordRequired": "Please enter your password",
     "errInvalidCredentials": "Invalid email or password",

@@ -13,6 +13,14 @@ import { authenticateOwner } from '../_lib'
 // This is destructive — the team page wraps it in an inline
 // confirmation. To temporarily disable access without deleting, use
 // PATCH /api/team/member-active instead.
+//
+// Note: We intentionally do NOT delete the Supabase auth account when
+// removing a team member. The user may be a member of multiple
+// organizations, and deleting their auth account would lock them out
+// everywhere. When re-invited later, the /join page detects the
+// existing auth account (via profiles.email + the lookup route's
+// hasExistingAccount flag) and shows the login form instead of the
+// signup form — so re-invites are friction-free for the user.
 
 interface Body {
   organizationId?: string

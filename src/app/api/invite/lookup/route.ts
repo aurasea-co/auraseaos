@@ -34,6 +34,21 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 })
   }
 
+  // Look up whether the invitee already has a Supabase auth account
+  // (mirrored on profiles.email by /api/invite/accept since migration
+  // 023). When true, the /join page skips the signup form and shows
+  // the login form directly — covers the "owner removed and re-invited
+  // me" case and any general re-invite scenario.
+  let hasExistingAccount = false
+  if (data.invitee_email) {
+    const { data: existingProfile } = await db
+      .from('profiles')
+      .select('user_id')
+      .eq('email', data.invitee_email)
+      .maybeSingle()
+    hasExistingAccount = !!existingProfile
+  }
+
   // organization_id + branch_id are needed by /join so the client can
   // check whether the currently logged-in user already has a membership
   // in this branch (the "alreadyMember" case). The token holder gets
@@ -47,5 +62,6 @@ export async function GET(req: NextRequest) {
     expiresAt: data.expires_at,
     organizationName: data.organizations?.name || '',
     branchName: data.branches?.name || null,
+    hasExistingAccount,
   })
 }

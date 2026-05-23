@@ -17,6 +17,7 @@ interface InvitationDetails {
   invitee_email: string
   accepted_at: string | null
   expires_at: string
+  has_existing_account: boolean
 }
 
 type Status =
@@ -42,6 +43,10 @@ function JoinPageInner() {
   const [status, setStatus] = useState<Status>('loading')
   const [submitting, setSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string>('')
+  // infoMessage is a non-error advisory (rendered in a blue/teal box,
+  // not red) for cases like "we routed you to the login form because
+  // your email already has an account".
+  const [infoMessage, setInfoMessage] = useState<string>('')
   const [invitation, setInvitation] = useState<InvitationDetails | null>(null)
   const [currentEmail, setCurrentEmail] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -77,6 +82,7 @@ function JoinPageInner() {
         invitee_email: data.inviteeEmail,
         accepted_at: data.acceptedAt,
         expires_at: data.expiresAt,
+        has_existing_account: !!data.hasExistingAccount,
       }
       setInvitation(inv)
 
@@ -110,9 +116,19 @@ function JoinPageInner() {
         return
       }
 
-      // Pending invitation, no session → signup form
+      // Pending invitation, no session:
+      //   • email already has an Aurasea account → skip the signup
+      //     form and drop straight into login with a friendly info
+      //     message (re-invite case after the owner removed them, or
+      //     a user invited under an email they already use here).
+      //   • otherwise → signup form.
       if (!sessionUser) {
-        setStatus('signup')
+        if (inv.has_existing_account) {
+          setInfoMessage(t('infoReinvite', { org: inv.organization_name }))
+          setStatus('login')
+        } else {
+          setStatus('signup')
+        }
         return
       }
 
@@ -146,7 +162,7 @@ function JoinPageInner() {
       setStatus('authedReady')
     }
     load()
-  }, [token, supabase, router])
+  }, [token, supabase, router, t])
 
   async function acceptInvitation(): Promise<{ ok: boolean; error?: string; alreadyAccepted?: boolean }> {
     const res = await fetch('/api/invite/accept', {
@@ -202,7 +218,9 @@ function JoinPageInner() {
       if (error) {
         const msg = error.message.toLowerCase()
         if (msg.includes('already registered') || msg.includes('already exists') || msg.includes('user already')) {
-          setErrorMessage(t('errEmailExists'))
+          // Existing account → calm advisory, not a red error.
+          setInfoMessage(t('infoExistingAccount'))
+          setErrorMessage('')
           setStatus('login')
           return
         }
@@ -213,7 +231,8 @@ function JoinPageInner() {
       // Supabase returns a user with empty identities[] when the email already
       // exists (this avoids leaking existence). Detect and bounce to login.
       if (data.user && (data.user.identities?.length ?? 0) === 0) {
-        setErrorMessage(t('errEmailExists'))
+        setInfoMessage(t('infoExistingAccount'))
+        setErrorMessage('')
         setStatus('login')
         return
       }
@@ -377,7 +396,10 @@ function JoinPageInner() {
           </Button>
 
           <div style={{ textAlign: 'center', marginTop: 2 }}>
-            <Link href="/forgot-password" style={{ fontSize: 13, color: PURPLE, textDecoration: 'none' }}>
+            <Link
+              href={`/forgot-password?email=${encodeURIComponent(invitation.invitee_email)}`}
+              style={{ fontSize: 13, color: PURPLE, textDecoration: 'none', fontWeight: 600 }}
+            >
               {t('forgotPassword')}
             </Link>
           </div>
@@ -521,6 +543,20 @@ function JoinPageInner() {
         </div>
       </div>
 
+      {infoMessage && (
+        <div style={{
+          marginTop: 16,
+          fontSize: 13,
+          color: '#0F5132',
+          background: '#E6F4EE',
+          border: '1px solid #BFE3D2',
+          padding: '10px 12px',
+          borderRadius: 6,
+        }}>
+          {infoMessage}
+        </div>
+      )}
+
       {errorMessage && (
         <div style={{ marginTop: 16, fontSize: 13, color: '#A32D2D', background: '#FBEAEA', padding: '8px 12px', borderRadius: 6 }}>
           {errorMessage}
@@ -579,7 +615,7 @@ function JoinPageInner() {
           </div>
           <button
             type="button"
-            onClick={() => { setErrorMessage(''); setStatus('login') }}
+            onClick={() => { setErrorMessage(''); setInfoMessage(''); setStatus('login') }}
             style={textButton}
           >
             {t('haveAccountToggle')}
@@ -617,12 +653,15 @@ function JoinPageInner() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
             <button
               type="button"
-              onClick={() => { setErrorMessage(''); setStatus('signup') }}
+              onClick={() => { setErrorMessage(''); setInfoMessage(''); setStatus('signup') }}
               style={textButton}
             >
               {t('noAccountToggle')}
             </button>
-            <Link href="/forgot-password" style={{ fontSize: 13, color: PURPLE, textDecoration: 'none' }}>
+            <Link
+              href={`/forgot-password?email=${encodeURIComponent(invitation.invitee_email)}`}
+              style={{ fontSize: 13, color: PURPLE, textDecoration: 'none', fontWeight: 600 }}
+            >
               {t('forgotPassword')}
             </Link>
           </div>
