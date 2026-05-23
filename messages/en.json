@@ -75,10 +75,15 @@
     "errorGeneric": "Something went wrong — please try again"
   },
   "accountSetup": {
-    "title": "We're setting up your account",
-    "message": "Your account isn't connected to any organization yet. Please ask your Owner to resend the invitation.",
+    "title": "Almost there",
+    "message": "Your account isn't connected to any organization yet.",
+    "contactOwner": "Ask the Owner to send you a new invitation.",
+    "yourEmail": "Your account: {email}",
     "contact": "Or contact hello@auraseaos.com",
-    "signOut": "Sign out"
+    "signOut": "Sign out",
+    "pendingTitle": "Pending invitation found",
+    "pendingBody": "You've been invited to join {org} as {role}.",
+    "acceptCta": "Accept invitation →"
   },
   "home": {
     "greeting": "Hello {name}",

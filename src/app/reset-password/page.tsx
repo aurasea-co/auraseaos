@@ -38,12 +38,30 @@ export default function ResetPasswordPage() {
       return
     }
 
+    // After a successful password reset Supabase keeps the user
+    // signed in. If their email has a pending invitation waiting,
+    // drop them straight into /join instead of /login — otherwise
+    // middleware sees a session with no membership and bounces them
+    // through /account-setup, which feels broken.
+    let nextPath = '/home'
+    try {
+      const res = await fetch('/api/invite/pending')
+      if (res.ok) {
+        const json = await res.json()
+        if (json?.pending?.token) {
+          nextPath = `/join?token=${encodeURIComponent(json.pending.token)}`
+        }
+      }
+    } catch {
+      // best-effort: fall back to /home if the lookup fails
+    }
+
     setDone(true)
     setLoading(false)
     setTimeout(() => {
-      router.push('/login')
+      router.push(nextPath)
       router.refresh()
-    }, 2000)
+    }, 1500)
   }
 
   return (
