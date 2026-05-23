@@ -378,6 +378,8 @@
     "minutesAgo": "{n} min ago",
     "hoursAgo": "{n}h ago",
     "daysAgo": "{n}d ago",
+    "removePrompt": "Remove {name} from the team?",
+    "removeSuccess": "Member removed",
     "managerLimitReached": "Manager seats are full — upgrade your plan to add more.",
     "staffLimitReached": "Staff seats are full — upgrade your plan to add more.",
     "bothLimitsReached": "Plan seat limit reached",

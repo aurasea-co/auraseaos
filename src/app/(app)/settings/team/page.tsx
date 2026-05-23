@@ -204,33 +204,26 @@ export default function TeamPage() {
     if (!organization || member.user_id === user.id || member.role === 'owner') return
     setBusyId(member.membership_id)
     setActionError(null)
+    setActionNotice(null)
     try {
-      // We keep the legacy delete behaviour for full removal — call DB
-      // directly via the team-list endpoint isn't exposed yet, so we
-      // delete via the existing pattern (toggle then delete by id).
-      // For now: directly hit Supabase via service through the toggle API
-      // is not available; do a soft-remove by setting inactive.
-      const res = await fetch('/api/team/member-active', {
-        method: 'PATCH',
+      const res = await fetch('/api/team/remove', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           organizationId: organization.id,
-          membershipId: member.membership_id,
-          source: member.source,
-          isActive: false,
+          userId: member.user_id,
         }),
       })
-      const json = await res.json()
+      const json = await res.json().catch(() => ({}))
       if (!res.ok || !json.success) {
         setActionError(json.error || t('updateError'))
         return
       }
-      setMembers((prev) =>
-        prev.map((m) =>
-          m.membership_id === member.membership_id ? { ...m, is_active: false } : m,
-        ),
-      )
+      setMembers((prev) => prev.filter((m) => m.user_id !== member.user_id))
+      setActionNotice(t('removeSuccess'))
       setRemoveId(null)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : t('updateError'))
     } finally {
       setBusyId(null)
     }
@@ -417,22 +410,58 @@ export default function TeamPage() {
                 </div>
 
                 {!isOwner && !isMe && (
-                  <div className="flex items-center gap-2" style={{ flexShrink: 0 }}>
-                    <Toggle
-                      checked={member.is_active}
-                      disabled={busyId === member.membership_id}
-                      onChange={() => handleToggleActive(member)}
-                      label={t('toggleActive')}
-                    />
-                    <button
-                      onClick={() => setRemoveId(removeId === member.membership_id ? null : member.membership_id)}
-                      aria-label="remove"
-                      className="touch-target flex items-center justify-center"
-                      style={{ color: 'var(--color-text-tertiary)', background: 'none', border: 'none', cursor: 'pointer' }}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
+                  removeId === member.membership_id ? (
+                    // Inline confirmation right where the user clicked —
+                    // far easier to spot than a separate banner below
+                    // the list (which is where the previous design put it).
+                    <div style={{
+                      flexShrink: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'flex-end',
+                      gap: 6,
+                      maxWidth: 220,
+                    }}>
+                      <span style={{ fontSize: 11, color: 'var(--color-red-text, #A32D2D)', textAlign: 'right', lineHeight: 1.4 }}>
+                        {t('removePrompt', { name: displayName(member) })}
+                      </span>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={() => handleRemove(member)}
+                          disabled={busyId === member.membership_id}
+                        >
+                          {busyId === member.membership_id ? tCommon('saving') : tCommon('confirm')}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => setRemoveId(null)}
+                          disabled={busyId === member.membership_id}
+                        >
+                          {tCommon('cancel')}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2" style={{ flexShrink: 0 }}>
+                      <Toggle
+                        checked={member.is_active}
+                        disabled={busyId === member.membership_id}
+                        onChange={() => handleToggleActive(member)}
+                        label={t('toggleActive')}
+                      />
+                      <button
+                        onClick={() => setRemoveId(member.membership_id)}
+                        aria-label="remove"
+                        className="touch-target flex items-center justify-center"
+                        style={{ color: 'var(--color-text-tertiary)', background: 'none', border: 'none', cursor: 'pointer' }}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  )
                 )}
               </div>
             )
@@ -442,28 +471,6 @@ export default function TeamPage() {
               {tCommon('noData')}
             </div>
           )}
-        </div>
-      )}
-
-      {/* Inline remove confirmation */}
-      {removeId && (
-        <div style={{ background: 'var(--color-red-light)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', padding: '12px 14px' }} className="flex items-center justify-between">
-          <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-red-text)' }}>{t('confirmRemove')}</span>
-          <div className="flex gap-2">
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => {
-                const m = members.find((m) => m.membership_id === removeId)
-                if (m) handleRemove(m)
-              }}
-            >
-              {tCommon('confirm')}
-            </Button>
-            <Button variant="secondary" size="sm" onClick={() => setRemoveId(null)}>
-              {tCommon('cancel')}
-            </Button>
-          </div>
         </div>
       )}
 
