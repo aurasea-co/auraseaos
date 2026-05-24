@@ -680,7 +680,9 @@
       "step3Body": "รับสรุปธุรกิจทุกเช้า 7.00 น. ทาง LINE กดด้านล่าง เพิ่ม LINE OA Aurasea แล้วกดปุ่มเชื่อมต่อ",
       "step3Cta": "เชื่อมต่อ LINE →",
       "step4Title": "Dashboard พร้อมใช้หลัง 7 วัน",
-      "step4Body": "เมื่อทีมกรอกข้อมูลครบ 7 วัน Portfolio และ Trends จะแสดงแนวโน้มและคำแนะนำที่มีความหมาย"
+      "step4Body": "เมื่อทีมกรอกข้อมูลครบ 7 วัน Portfolio และ Trends จะแสดงแนวโน้มและคำแนะนำที่มีความหมาย",
+      "allDoneTitle": "🎉 Aurasea OS พร้อมใช้งานแล้ว!",
+      "allDoneBody": "เริ่มต้นใช้งานครบทุกขั้นตอนแล้ว ขอบคุณที่ใช้งาน Aurasea OS"
     },
     "manager": {
       "title": "ยินดีต้อนรับสู่ Aurasea OS",

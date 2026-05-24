@@ -294,7 +294,9 @@
       "step3Body": "Get your daily business brief at 7:00 AM via LINE. Tap below, add Aurasea OA, then tap the connect button.",
       "step3Cta": "Connect LINE →",
       "step4Title": "Your dashboard is ready after 7 days",
-      "step4Body": "Once your team logs data for 7 days, Portfolio and Trends show meaningful patterns and recommendations."
+      "step4Body": "Once your team logs data for 7 days, Portfolio and Trends show meaningful patterns and recommendations.",
+      "allDoneTitle": "🎉 Aurasea OS is ready!",
+      "allDoneBody": "You've completed all setup steps. Thanks for using Aurasea OS."
     },
     "manager": {
       "title": "Welcome to Aurasea OS",
