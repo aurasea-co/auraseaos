@@ -7,6 +7,10 @@
     {
       "path": "/api/notifications/weekly-report",
       "schedule": "0 0 * * 0"
+    },
+    {
+      "path": "/api/notifications/trial-reminder",
+      "schedule": "0 1 * * *"
     }
   ]
 }

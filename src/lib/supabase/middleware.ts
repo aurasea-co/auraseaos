@@ -40,6 +40,7 @@ export async function updateSession(request: NextRequest) {
     '/welcome',
     '/register',
     '/suspended',
+    '/owner-setup',
   ]
   const isPublicPath = publicPaths.some((path) =>
     request.nextUrl.pathname.startsWith(path)

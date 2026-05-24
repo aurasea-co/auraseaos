@@ -6,6 +6,7 @@ import { TabBar } from '@/components/tab-bar'
 import { Sidebar } from '@/components/sidebar'
 import { ResponsiveHeader } from '@/components/responsive-header'
 import { LineConnectBanner } from '@/components/line-connect-banner'
+import { TrialBanner } from '@/components/trial-banner'
 
 export default async function AppLayout({
   children,
@@ -53,6 +54,7 @@ export default async function AppLayout({
         `}</style>
         <div className="app-content-area" style={{ marginLeft: 0, paddingBottom: 'calc(var(--bottomnav-height) + 16px)' }}>
           <ResponsiveHeader />
+          <TrialBanner />
           <LineConnectBanner />
           <main
             style={{
