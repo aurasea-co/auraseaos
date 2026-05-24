@@ -664,35 +664,37 @@
   "onboarding": {
     "stepsCount": "{n} ขั้นตอน",
     "progressLabel": "{done}/{total} ขั้นตอนเสร็จแล้ว",
+    "progressLabelPct": "{done}/{total} ขั้นตอนเสร็จแล้ว · {pct}%",
+    "doneBadge": "เสร็จแล้ว",
     "dismiss": "ปิด",
     "showGuide": "ดูคู่มือ",
     "owner": {
       "title": "เริ่มต้นใช้งาน Aurasea OS",
-      "step1Title": "ตั้งค่าสาขาและเป้าหมาย",
-      "step1Body": "ไปที่ Settings → Branches เพื่อยืนยันข้อมูลสาขา และ Settings → Targets เพื่อตั้ง ADR / Margin target",
-      "step1Cta": "ไปที่ Targets →",
+      "step1Title": "ตั้งเป้าหมายธุรกิจ",
+      "step1Body": "ตั้ง ADR target สำหรับโรงแรม หรือ Margin / Covers target สำหรับ F&B เพื่อให้ Aurasea รู้ว่าควรแจ้งเตือนเมื่อไหร่",
+      "step1Cta": "ตั้งเป้าหมาย →",
       "step2Title": "เชิญทีมงาน",
-      "step2Body": "เชิญ Manager และ Staff เพื่อช่วยกรอกข้อมูลประจำวัน ที่ Settings → Team",
+      "step2Body": "เชิญ Manager เพื่อดู KPI ประจำวัน และ Staff เพื่อกรอกข้อมูลรายวัน ใช้เวลาไม่ถึง 1 นาทีต่อคน",
       "step2Cta": "เชิญทีม →",
       "step3Title": "เชื่อมต่อ LINE",
-      "step3Body": "รับสรุปธุรกิจทุกเช้า 7.00 น. ทาง LINE เพิ่ม LINE OA Aurasea เป็นเพื่อน",
+      "step3Body": "รับสรุปธุรกิจทุกเช้า 7.00 น. ทาง LINE กดด้านล่าง เพิ่ม LINE OA Aurasea แล้วกดปุ่มเชื่อมต่อ",
       "step3Cta": "เชื่อมต่อ LINE →",
-      "step4Title": "ดูภาพรวมธุรกิจ",
-      "step4Body": "เมื่อทีมกรอกข้อมูลครบ 7 วัน Portfolio และ Trends จะแสดงผลที่มีความหมาย"
+      "step4Title": "Dashboard พร้อมใช้หลัง 7 วัน",
+      "step4Body": "เมื่อทีมกรอกข้อมูลครบ 7 วัน Portfolio และ Trends จะแสดงแนวโน้มและคำแนะนำที่มีความหมาย"
     },
     "manager": {
       "title": "ยินดีต้อนรับสู่ Aurasea OS",
-      "subtitle": "สิ่งที่คุณต้องทำในฐานะ Manager",
-      "step1Title": "เชื่อมต่อ LINE รับสรุปเช้า",
-      "step1Body": "เพิ่ม LINE OA @aurasea เป็นเพื่อน แล้วส่งอีเมลของคุณในแชท เพื่อรับสรุปธุรกิจทุกเช้า 7.00 น.",
+      "subtitle": "3 ขั้นตอนเริ่มต้นใช้งาน",
+      "step1Title": "เชื่อมต่อ LINE — รับสรุปเช้าทุกวัน",
+      "step1Body": "เพิ่ม LINE OA @aurasea เป็นเพื่อน กดปุ่มเชื่อมต่อที่ปรากฏในแชท แล้วรับสรุปธุรกิจทุกเช้า 7.00 น.",
       "step1Cta": "เชื่อมต่อ LINE →",
-      "step2Title": "ดู KPI ประจำวัน",
-      "step2Body": "หน้านี้คือ Home ดู Margin, Covers, ADR, Occupancy ล่าสุด และคำแนะนำประจำวัน",
-      "step3Title": "ดู Trends",
-      "step3Body": "ไปที่ Trends เพื่อดูแนวโน้ม 30 วัน และเปรียบเทียบกับเป้าหมาย",
+      "step2Title": "เช็ค KPI ทุกเช้า",
+      "step2Body": "หน้า Home แสดง Margin, Covers, ADR และ Occupancy ล่าสุด พร้อมคำแนะนำประจำวัน เช็คหลังรับสรุปเช้า",
+      "step3Title": "ติดตาม Trends รายสัปดาห์",
+      "step3Body": "เปิด Trends เพื่อดูแนวโน้ม 30 วัน สังเกตสัปดาห์ที่ Margin หรือ ADR ต่ำกว่าเป้าต่อเนื่อง",
       "step3Cta": "ดู Trends →"
     },
-    "staffEntryTip": "กรอกข้อมูลทุกวันหลังปิดร้าน ใช้เวลาไม่ถึง 2 นาที ข้อมูลที่กรอกจะช่วย Owner วิเคราะห์ธุรกิจ"
+    "staffEntryTip": "กรอกยอดขาย จำนวนลูกค้า และต้นทุนทุกวันหลังปิดร้าน ใช้เวลาไม่ถึง 2 นาที ถ้าไม่กรอก Owner จะไม่เห็นภาพรวมธุรกิจ"
   },
   "help": {
     "title": "คู่มือ",

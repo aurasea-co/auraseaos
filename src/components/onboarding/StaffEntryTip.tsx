@@ -7,9 +7,11 @@ import { useUser } from '@/providers/user-context'
 
 const DISMISSED_KEY = 'staff_entry_tip_dismissed'
 
-// Small teal info banner shown above the Entry form for staff.
-// One-time dismissal — no re-show flow (the message is short and the
-// page is the only place staff land regularly).
+// Info banner shown above the Entry form for staff. Teal left
+// accent + 💡 icon match the visual language of the Owner / Manager
+// Getting Started cards (teal accents = "first-run hint"). One-time
+// dismissal — no re-show flow since the page is the only place staff
+// land regularly.
 
 export function StaffEntryTip() {
   const t = useTranslations('onboarding')
@@ -43,18 +45,19 @@ export function StaffEntryTip() {
       style={{
         background: '#E6F4EE',
         border: '1px solid #BFE3D2',
+        borderLeft: '4px solid #1D9E75',
         color: '#0F5132',
         borderRadius: 10,
-        padding: '10px 14px',
+        padding: '12px 14px',
         marginBottom: 16,
         display: 'flex',
         alignItems: 'flex-start',
-        gap: 10,
+        gap: 12,
         fontSize: 13,
-        lineHeight: 1.5,
+        lineHeight: 1.55,
       }}
     >
-      <span aria-hidden style={{ fontSize: 18, lineHeight: 1, flexShrink: 0 }}>📝</span>
+      <span aria-hidden style={{ fontSize: 20, lineHeight: 1, flexShrink: 0 }}>💡</span>
       <span style={{ flex: 1 }}>{t('staffEntryTip')}</span>
       <button
         type="button"

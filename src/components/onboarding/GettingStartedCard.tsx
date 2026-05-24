@@ -5,9 +5,11 @@ import { X, Check } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 // Shared visual shell for the role-specific Getting Started cards.
-// Each step is { title, body, ctaLabel?, ctaHref?, done }. The card
-// renders a progress bar, optional badge with stepsCount, and a
-// dismiss (X) button that the caller wires to localStorage.
+// Each step is { title, body, ctaLabel?, ctaHref?, done }. Completed
+// steps collapse to a single line with a Done badge to reduce
+// clutter; pending steps render in full with a small CTA button.
+// Top border accent + filled CTA button = "this is an action card",
+// distinct from the rest of the page chrome.
 
 export interface OnboardingStep {
   title: string
@@ -16,6 +18,11 @@ export interface OnboardingStep {
   ctaHref?: string
   done: boolean
 }
+
+const TEAL = '#1D9E75'
+const TEAL_DARK = '#0F5132'
+const PURPLE = '#534AB7'
+const MUTED = '#9b9b9b'
 
 export function GettingStartedCard({
   title,
@@ -39,9 +46,8 @@ export function GettingStartedCard({
     <section
       style={{
         background: '#ffffff',
-        borderLeft: '4px solid #1D9E75',
         border: '1px solid var(--color-border, #e5e5e5)',
-        borderLeftWidth: 4,
+        borderTop: `3px solid ${TEAL}`,
         borderRadius: 10,
         padding: '16px 18px',
         marginBottom: 20,
@@ -81,7 +87,7 @@ export function GettingStartedCard({
             border: 'none',
             padding: 4,
             cursor: 'pointer',
-            color: '#9b9b9b',
+            color: MUTED,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -94,18 +100,36 @@ export function GettingStartedCard({
 
       {/* Progress */}
       <div style={{ marginTop: 12 }}>
-        <div style={{ fontSize: 11, color: '#9b9b9b', marginBottom: 6 }}>
-          {t('progressLabel', { done, total })}
+        <div style={{ fontSize: 11, color: MUTED, marginBottom: 6 }}>
+          {t('progressLabelPct', { done, total, pct: progressPct })}
         </div>
         <div style={{ width: '100%', height: 4, background: '#f0f0ee', borderRadius: 999, overflow: 'hidden' }}>
-          <div style={{ width: `${progressPct}%`, height: '100%', background: '#1D9E75', transition: 'width 200ms ease' }} />
+          <div
+            style={{
+              width: `${progressPct}%`,
+              height: '100%',
+              background: TEAL,
+              transition: 'width 280ms cubic-bezier(0.4, 0, 0.2, 1)',
+            }}
+          />
         </div>
       </div>
 
       {/* Steps */}
       <ol style={{ listStyle: 'none', padding: 0, margin: '16px 0 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {steps.map((step, idx) => (
-          <li key={idx} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+          <li
+            key={idx}
+            style={{
+              display: 'flex',
+              gap: 12,
+              alignItems: 'flex-start',
+              // Slightly fade completed rows; the title remains readable
+              // but they recede so the eye lands on the next action.
+              opacity: step.done ? 0.6 : 1,
+              transition: 'opacity 220ms ease',
+            }}
+          >
             <div
               aria-hidden
               style={{
@@ -113,44 +137,72 @@ export function GettingStartedCard({
                 width: 24,
                 height: 24,
                 borderRadius: '50%',
-                background: step.done ? '#1D9E75' : '#f0f0ee',
+                background: step.done ? TEAL : '#f0f0ee',
                 color: step.done ? '#ffffff' : '#6b6b6b',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 fontSize: 12,
                 fontWeight: 600,
+                transition: 'background 220ms ease',
               }}
             >
               {step.done ? <Check size={14} /> : idx + 1}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{
-                fontSize: 14,
-                fontWeight: 600,
-                color: step.done ? '#9b9b9b' : '#1a1a1a',
-                textDecoration: step.done ? 'line-through' : 'none',
-                lineHeight: 1.4,
-              }}>
-                {step.title}
-              </div>
-              <p style={{ fontSize: 13, color: '#6b6b6b', lineHeight: 1.55, margin: '4px 0 0' }}>
-                {step.body}
-              </p>
-              {step.ctaLabel && step.ctaHref && !step.done && (
-                <Link
-                  href={step.ctaHref}
-                  style={{
-                    display: 'inline-block',
-                    marginTop: 8,
-                    fontSize: 13,
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: step.done ? MUTED : '#1a1a1a',
+                  textDecoration: step.done ? 'line-through' : 'none',
+                  lineHeight: 1.4,
+                }}>
+                  {step.title}
+                </span>
+                {step.done && (
+                  <span style={{
+                    fontSize: 10,
                     fontWeight: 500,
-                    color: '#534AB7',
-                    textDecoration: 'none',
-                  }}
-                >
-                  {step.ctaLabel}
-                </Link>
+                    padding: '1px 8px',
+                    borderRadius: 999,
+                    background: 'var(--color-green-light, #E6F4EE)',
+                    color: TEAL_DARK,
+                  }}>
+                    {t('doneBadge')}
+                  </span>
+                )}
+              </div>
+
+              {/* Completed steps collapse — body + CTA hidden to reduce
+                  visual clutter. The strike-through title + Done badge
+                  is enough acknowledgement. */}
+              {!step.done && (
+                <>
+                  <p style={{ fontSize: 13, color: '#6b6b6b', lineHeight: 1.55, margin: '4px 0 0' }}>
+                    {step.body}
+                  </p>
+                  {step.ctaLabel && step.ctaHref && (
+                    <Link
+                      href={step.ctaHref}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        marginTop: 10,
+                        fontSize: 13,
+                        fontWeight: 500,
+                        color: '#ffffff',
+                        background: PURPLE,
+                        padding: '7px 14px',
+                        borderRadius: 6,
+                        textDecoration: 'none',
+                        gap: 4,
+                      }}
+                    >
+                      {step.ctaLabel}
+                    </Link>
+                  )}
+                </>
               )}
             </div>
           </li>

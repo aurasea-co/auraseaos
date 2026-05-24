@@ -278,35 +278,37 @@
   "onboarding": {
     "stepsCount": "{n} steps",
     "progressLabel": "{done}/{total} steps complete",
+    "progressLabelPct": "{done}/{total} steps complete · {pct}%",
+    "doneBadge": "Done",
     "dismiss": "Dismiss",
     "showGuide": "Show guide",
     "owner": {
       "title": "Getting started with Aurasea OS",
-      "step1Title": "Set up branches and targets",
-      "step1Body": "Confirm branch details under Settings → Branches, then set ADR / Margin targets under Settings → Targets.",
-      "step1Cta": "Go to Targets →",
+      "step1Title": "Set your targets",
+      "step1Body": "Set ADR target for hotels and Margin / Covers target for F&B. This is how Aurasea knows when to alert you.",
+      "step1Cta": "Set targets →",
       "step2Title": "Invite your team",
-      "step2Body": "Invite Managers and Staff to help capture daily data under Settings → Team.",
+      "step2Body": "Invite a Manager to review daily KPIs, and Staff to log daily data. Takes 1 minute per person.",
       "step2Cta": "Invite team →",
       "step3Title": "Connect LINE",
-      "step3Body": "Receive your daily business summary at 7:00 AM via LINE. Add the Aurasea LINE OA as a friend.",
+      "step3Body": "Get your daily business brief at 7:00 AM via LINE. Tap below, add Aurasea OA, then tap the connect button.",
       "step3Cta": "Connect LINE →",
-      "step4Title": "See the business at a glance",
-      "step4Body": "Once your team has logged 7 days of data, Portfolio and Trends start showing meaningful insights."
+      "step4Title": "Your dashboard is ready after 7 days",
+      "step4Body": "Once your team logs data for 7 days, Portfolio and Trends show meaningful patterns and recommendations."
     },
     "manager": {
       "title": "Welcome to Aurasea OS",
-      "subtitle": "What to do as a Manager",
-      "step1Title": "Connect LINE for the morning brief",
-      "step1Body": "Add the LINE OA @aurasea as a friend, then send your email in chat to receive the daily summary at 7:00 AM.",
+      "subtitle": "Your 3 steps to get started",
+      "step1Title": "Connect LINE — get your daily brief",
+      "step1Body": "Add LINE OA @aurasea as a friend. Tap the connect button that appears, and you'll receive a daily summary at 7:00 AM every morning.",
       "step1Cta": "Connect LINE →",
-      "step2Title": "Check daily KPIs",
-      "step2Body": "This Home page shows your latest Margin, Covers, ADR, Occupancy and a daily recommendation.",
-      "step3Title": "Review Trends",
-      "step3Body": "Open Trends for 30-day movement and comparison against targets.",
+      "step2Title": "Check your KPIs every morning",
+      "step2Body": "The Home page shows your latest Margin, Covers, ADR and Occupancy with a daily recommendation. Check it after your 7 AM brief.",
+      "step3Title": "Monitor trends weekly",
+      "step3Body": "Open Trends to see 30-day patterns. Look for weeks where Margin or ADR consistently misses target.",
       "step3Cta": "View Trends →"
     },
-    "staffEntryTip": "Log data every day after closing — under 2 minutes. Your entries help the Owner analyse the business."
+    "staffEntryTip": "Log sales, covers and costs every day after closing. Takes under 2 minutes. Without your data, the Owner can't see how the business is performing."
   },
   "help": {
     "title": "Help",
