@@ -78,15 +78,30 @@ async function handleMorningFlash(req: NextRequest) {
 
   for (const setting of settingsList) {
     // Role filter: morning flash is for owner + manager only.
-    const { data: membership } = await supabase
+    // Invited managers live in branch_members (organization_members is
+    // owner-only), so check both tables before skipping.
+    const { data: orgMembership } = await supabase
       .from('organization_members')
       .select('role')
       .eq('user_id', setting.user_id)
       .eq('organization_id', setting.organization_id)
       .maybeSingle()
 
-    if (membership?.role !== 'owner' && membership?.role !== 'manager') {
-      console.log(`[morning-flash] skip user=${setting.user_id} role=${membership?.role ?? 'none'}`)
+    const isOwner = orgMembership?.role === 'owner'
+
+    let isManager = orgMembership?.role === 'manager'
+    if (!isOwner && !isManager) {
+      const { data: branchMembership } = await supabase
+        .from('branch_members')
+        .select('role')
+        .eq('user_id', setting.user_id)
+        .maybeSingle()
+      isManager = branchMembership?.role === 'manager' ||
+        branchMembership?.role === 'branch_manager'
+    }
+
+    if (!isOwner && !isManager) {
+      console.log(`[morning-flash] skip user=${setting.user_id} role=${orgMembership?.role ?? 'none'}`)
       continue
     }
 

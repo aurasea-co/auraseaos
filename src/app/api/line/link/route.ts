@@ -29,19 +29,38 @@ export async function GET(req: NextRequest) {
 
   // Enable LINE notifications + stamp when the link happened. The
   // line_notify_connected_at column was added in migration 024.
+  //
+  // Invited managers exist only in branch_members (organization_members is
+  // owner-only — see comments in api/invite/accept). Fall back to
+  // branch_members → branches.organization_id so managers also get
+  // line_notify_enabled flipped on connect.
+  let orgId: string | null = null
   const { data: orgRow } = await serviceClient
     .from('organization_members')
     .select('organization_id')
     .eq('user_id', user.id)
     .limit(1)
-    .single()
+    .maybeSingle()
   if (orgRow?.organization_id) {
+    orgId = orgRow.organization_id
+  } else {
+    const { data: branchRow } = await serviceClient
+      .from('branch_members')
+      .select('branch_id, branches(organization_id)')
+      .eq('user_id', user.id)
+      .limit(1)
+      .maybeSingle()
+    const branches = (branchRow as { branches?: { organization_id?: string } | { organization_id?: string }[] } | null)?.branches
+    const branchOrg = Array.isArray(branches) ? branches[0]?.organization_id : branches?.organization_id
+    if (branchOrg) orgId = branchOrg
+  }
+  if (orgId) {
     await serviceClient
       .from('notification_settings')
       .upsert(
         {
           user_id: user.id,
-          organization_id: orgRow.organization_id,
+          organization_id: orgId,
           line_notify_enabled: true,
           line_notify_connected_at: new Date().toISOString(),
         },

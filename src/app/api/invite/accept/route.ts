@@ -162,6 +162,10 @@ export async function POST(req: NextRequest) {
   // /settings/notifications page hides the email + LINE toggles for
   // staff entirely, so leaving email_notifications=true would be a
   // setting they can't see or change.
+  // Drop ignoreDuplicates so the email_notifications value actually lands
+  // on existing rows — otherwise a row auto-created by a signup trigger
+  // would leave managers with email_notifications=false and they'd never
+  // get the morning flash email.
   const emailNotificationsDefault = role !== 'staff'
   const { error: notifErr } = await db.from('notification_settings').upsert(
     {
@@ -171,7 +175,7 @@ export async function POST(req: NextRequest) {
       line_notify_enabled: false,
       entry_reminder_enabled: false,
     },
-    { onConflict: 'user_id,organization_id', ignoreDuplicates: true },
+    { onConflict: 'user_id,organization_id' },
   )
   if (notifErr) return fail('notification_settings.upsert', notifErr)
 
