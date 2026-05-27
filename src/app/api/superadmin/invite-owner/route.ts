@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { sendEmail, EMAIL_SENDERS } from '@/lib/email/resend'
-import OwnerInvitationEmail from '@/lib/email/templates/ownerInvitationEmail'
+import OwnerInvitationEmail, { type OwnerInvitationTier } from '@/lib/email/templates/ownerInvitationEmail'
+import { PRICING } from '@/lib/config/pricing'
 import { authenticateSuperAdmin } from '../_lib'
 
 // POST /api/superadmin/invite-owner
@@ -93,18 +94,43 @@ export async function POST(req: NextRequest) {
     )
   }
 
+  // Tier-aware subject + badge. Inferred from promo code prefix so the
+  // /superadmin/invite-owner form stays the single source of truth — the
+  // admin picks a tier preset and the prefix carries through to here.
+  const codeUpper = (promoCode || '').toUpperCase()
+  const tier: OwnerInvitationTier = codeUpper.startsWith('FOUNDING')
+    ? 'founding'
+    : codeUpper.startsWith('EARLY')
+      ? 'early_adopter'
+      : 'standard'
+
+  const subject = tier === 'founding'
+    ? 'คุณได้รับเชิญเป็น Founding Partner ของ Aurasea OS'
+    : tier === 'early_adopter'
+      ? `คุณได้รับเชิญให้ลองใช้ Aurasea OS ก่อนใคร — ฟรี ${trialDays} วัน`
+      : 'คุณได้รับเชิญให้ลองใช้ Aurasea OS'
+
+  // Pull a monthly price for the trial offer box. Mixed only has 'pro',
+  // so for any other plan on mixed we fall back to accommodation pricing.
+  const priceSource = businessType === 'mixed'
+    ? (plan === 'pro' ? PRICING.mixed.pro : PRICING.accommodation[plan])
+    : PRICING[businessType][plan]
+  const planPrice = priceSource?.monthly
+
   const result = await sendEmail({
     to: email,
     from: EMAIL_SENDERS.notifications,
-    subject: 'คุณได้รับเชิญให้ลองใช้ Aurasea OS',
+    subject,
     react: OwnerInvitationEmail({
       ownerEmail: email,
       organizationName,
       businessType,
       trialDays,
       planName: plan,
+      planPrice,
       discountPct,
       promoCode: promoCode || undefined,
+      tier,
       token: invitation.token,
     }),
     // notification_log requires an organization_id, but at this point

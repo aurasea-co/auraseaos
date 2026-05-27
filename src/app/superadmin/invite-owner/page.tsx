@@ -26,17 +26,38 @@ const BUSINESS_OPTIONS: Array<{ value: 'accommodation' | 'fnb' | 'mixed'; label:
   { value: 'mixed', label: 'Both' },
 ]
 
+type Tier = 'founding' | 'early_adopter' | 'standard' | 'custom'
+
+// Tier presets drive trial / discount / promo prefix when an admin picks
+// one. The admin appends the member number (e.g. "FOUNDING-12") in the
+// promo label field — that number ends up in the email badge.
+const TIER_PRESETS: Record<Exclude<Tier, 'custom'>, { trialDays: number; discountPct: number; promoPrefix: string; label: string }> = {
+  founding: { trialDays: 90, discountPct: 50, promoPrefix: 'FOUNDING-', label: 'Founding Partner · 90d · 50% off' },
+  early_adopter: { trialDays: 60, discountPct: 30, promoPrefix: 'EARLY-', label: 'Early Adopter · 60d · 30% off' },
+  standard: { trialDays: 30, discountPct: 0, promoPrefix: '', label: 'Standard Trial · 30d · no discount' },
+}
+
 export default function InviteOwnerPage() {
   const supabase = createClient()
 
   const [email, setEmail] = useState('')
   const [orgName, setOrgName] = useState('')
   const [businessType, setBusinessType] = useState<'accommodation' | 'fnb' | 'mixed'>('mixed')
-  const [trialDays, setTrialDays] = useState(30)
+  const [tier, setTier] = useState<Tier>('early_adopter')
+  const [trialDays, setTrialDays] = useState(60)
   const [plan, setPlan] = useState<'starter' | 'growth' | 'pro'>('growth')
-  const [discountPct, setDiscountPct] = useState(0)
-  const [promoCode, setPromoCode] = useState('')
+  const [discountPct, setDiscountPct] = useState(30)
+  const [promoCode, setPromoCode] = useState('EARLY-')
   const [notes, setNotes] = useState('')
+
+  function applyTier(next: Tier) {
+    setTier(next)
+    if (next === 'custom') return
+    const preset = TIER_PRESETS[next]
+    setTrialDays(preset.trialDays)
+    setDiscountPct(preset.discountPct)
+    setPromoCode(preset.promoPrefix)
+  }
 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -86,7 +107,7 @@ export default function InviteOwnerPage() {
       setSuccess(`คำเชิญส่งไปที่ ${email.trim()} แล้ว ✓`)
       setEmail('')
       setOrgName('')
-      setPromoCode('')
+      setPromoCode(tier === 'custom' ? '' : TIER_PRESETS[tier].promoPrefix)
       setNotes('')
       await loadRecent()
     } catch (err) {
@@ -135,9 +156,22 @@ export default function InviteOwnerPage() {
           </select>
         </Field>
 
+        <Field label="Tier">
+          <select value={tier} onChange={(e) => applyTier(e.target.value as Tier)} style={inputStyle}>
+            <option value="founding">{TIER_PRESETS.founding.label}</option>
+            <option value="early_adopter">{TIER_PRESETS.early_adopter.label}</option>
+            <option value="standard">{TIER_PRESETS.standard.label}</option>
+            <option value="custom">Custom (set fields manually)</option>
+          </select>
+        </Field>
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <Field label="Trial period">
-            <select value={trialDays} onChange={(e) => setTrialDays(Number(e.target.value))} style={inputStyle}>
+            <select
+              value={trialDays}
+              onChange={(e) => { setTrialDays(Number(e.target.value)); setTier('custom') }}
+              style={inputStyle}
+            >
               {TRIAL_OPTIONS.map((d) => (
                 <option key={d} value={d}>{d} days</option>
               ))}
@@ -153,7 +187,11 @@ export default function InviteOwnerPage() {
         </div>
 
         <Field label="First month discount">
-          <select value={discountPct} onChange={(e) => setDiscountPct(Number(e.target.value))} style={inputStyle}>
+          <select
+            value={discountPct}
+            onChange={(e) => { setDiscountPct(Number(e.target.value)); setTier('custom') }}
+            style={inputStyle}
+          >
             {DISCOUNT_OPTIONS.map((d) => (
               <option key={d} value={d}>{d === 0 ? 'No discount' : `${d}% off`}</option>
             ))}
@@ -161,7 +199,16 @@ export default function InviteOwnerPage() {
         </Field>
 
         <Field label="Promo label">
-          <input type="text" value={promoCode} onChange={(e) => setPromoCode(e.target.value)} style={inputStyle} placeholder="Early Adopter #47" />
+          <input
+            type="text"
+            value={promoCode}
+            onChange={(e) => setPromoCode(e.target.value)}
+            style={inputStyle}
+            placeholder={tier === 'founding' ? 'FOUNDING-12' : tier === 'early_adopter' ? 'EARLY-47' : 'Optional label'}
+          />
+          <span style={{ fontSize: 11, color: '#9b9b9b', marginTop: 2, display: 'block' }}>
+            Append the member number — e.g. <code>FOUNDING-12</code> or <code>EARLY-47</code>. Used for the email badge.
+          </span>
         </Field>
 
         <Field label="Internal notes">
