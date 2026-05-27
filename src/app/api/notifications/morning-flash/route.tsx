@@ -148,8 +148,38 @@ async function handleMorningFlash(req: NextRequest) {
     const { data: org } = await supabase.from('organizations').select('*').eq('id', setting.organization_id).single()
     if (!org) continue
 
-    // Get branches for this org
-    const { data: branches } = await supabase.from('branches').select('*').eq('organization_id', setting.organization_id)
+    // Get branches for this user. Owners see every branch in the org;
+    // managers see only the branches they're assigned to in branch_members,
+    // so a manager attached to Crystal Resort doesn't get Crystal Cafe
+    // data lumped into their summary.
+    let branches: { id: string; name: string; business_type: string; monthly_fixed_cost: number; total_rooms: number | null }[] = []
+
+    if (isOwner) {
+      const { data: allBranches } = await supabase
+        .from('branches')
+        .select('*')
+        .eq('organization_id', setting.organization_id)
+      branches = allBranches || []
+    } else {
+      const { data: memberBranches } = await supabase
+        .from('branch_members')
+        .select('branch_id')
+        .eq('user_id', setting.user_id)
+        .in('role', ['manager', 'branch_manager'])
+
+      const assignedBranchIds = (memberBranches || []).map((m: { branch_id: string }) => m.branch_id)
+
+      if (assignedBranchIds.length === 0) {
+        console.log(`[morning-flash] user=${setting.user_id} has no assigned branches — skipping`)
+        continue
+      }
+
+      const { data: assignedBranches } = await supabase
+        .from('branches')
+        .select('*')
+        .in('id', assignedBranchIds)
+      branches = assignedBranches || []
+    }
 
     // Collect per-branch data once; the same data feeds both the combined
     // LINE message (one push) and the combined email (one render).
