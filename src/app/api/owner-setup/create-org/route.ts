@@ -32,10 +32,15 @@ export async function POST(req: NextRequest) {
 
   const token = body.token
   const organizationName = body.organizationName?.trim() || ''
-  const businessType = body.businessType || 'mixed'
   if (!token || !organizationName) {
     return NextResponse.json({ error: 'token + organizationName required' }, { status: 400 })
   }
+  // businessType is collected from the form for the branch-creation step
+  // below, but no longer written onto organizations directly here. The
+  // org-level vertical_type column was missing from the schema until
+  // migration 026, which broke org creation entirely. Branches store
+  // their own business_type, which is the source of truth — the
+  // org-level value, when it exists, is derived from / informational.
 
   // Caller must be signed in (signUp in step 1 establishes a session).
   const userClient = await createClient()
@@ -78,7 +83,6 @@ export async function POST(req: NextRequest) {
     .from('organizations')
     .insert({
       name: organizationName,
-      vertical_type: businessType,
       plan: invitation.plan || 'growth',
       is_trial: true,
       trial_started_at: now.toISOString(),
