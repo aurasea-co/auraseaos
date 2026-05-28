@@ -25,25 +25,29 @@ export default function SuperadminDashboard() {
 
   useEffect(() => {
     async function load() {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const db = supabase as any
-      const [orgResult, branchResult] = await Promise.all([
-        db.from('organizations').select('*').order('created_at', { ascending: false }),
-        db.from('branches').select('id', { count: 'exact', head: true }),
-      ])
-      const organizations = orgResult.data || []
-      setOrgs(organizations)
-      const now = new Date().toISOString()
-      setStats({
-        companies: organizations.length,
-        branches: branchResult.count || 0,
-        users: 0, // Would need admin API
-        activeTrials: organizations.filter((o: OrgRow) => o.plan_expires_at && o.plan_expires_at > now).length,
-      })
-      setLoading(false)
+      // Previously this page read from the user-bound Supabase client,
+      // which is RLS-scoped. The super admin only saw orgs they were a
+      // member of (Crystal Resort) and new owner signups were invisible.
+      // Now we fetch from /api/superadmin/dashboard, which authn's the
+      // super-admin role and uses the service-role client server-side.
+      try {
+        const res = await fetch('/api/superadmin/dashboard', { cache: 'no-store' })
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}))
+          console.error('[superadmin] dashboard fetch failed:', errBody?.error || res.statusText)
+          setOrgs([])
+          setStats({ companies: 0, branches: 0, users: 0, activeTrials: 0 })
+          return
+        }
+        const json: { organizations?: OrgRow[]; stats?: typeof stats } = await res.json()
+        setOrgs(json.organizations || [])
+        if (json.stats) setStats(json.stats)
+      } finally {
+        setLoading(false)
+      }
     }
     load()
-  }, [supabase])
+  }, [])
 
   const [pendingChange, setPendingChange] = useState<{ orgId: string; orgName: string; fromPlan: string; toPlan: string } | null>(null)
 

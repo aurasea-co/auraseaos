@@ -28,6 +28,7 @@ import {
 import Link from 'next/link'
 import { ArrowRight } from 'lucide-react'
 import { ManagerGettingStarted } from '@/components/onboarding/ManagerGettingStarted'
+import { OwnerGettingStarted } from '@/components/onboarding/OwnerGettingStarted'
 
 export function HomeDashboard() {
   const { user, role, activeBranch, plan } = useUser()
@@ -46,6 +47,12 @@ export function HomeDashboard() {
   }>({ adr_target: 0, cogs_target: 32, occupancy_target: 80, labour_target: 0, covers_target: 0, avg_spend_target: 0, operating_days: 26 })
   const [loading, setLoading] = useState(true)
   const [lastFetched, setLastFetched] = useState<Date | null>(null)
+  // Owner's display name for the greeting. Sourced from
+  // profiles.display_name (set during owner-setup or invite-accept) so
+  // we don't fall back to the email prefix — "Hello investors" for an
+  // investors@aurasea.ai login was a real complaint. UserContext
+  // doesn't carry display_name yet, so we read it directly.
+  const [displayName, setDisplayName] = useState<string | null>(null)
   const supabase = createClient()
 
   const isHotel = activeBranch?.business_type === 'accommodation'
@@ -92,6 +99,29 @@ export function HomeDashboard() {
   }, [activeBranch, supabase])
 
   useEffect(() => { loadMetrics() }, [loadMetrics])
+
+  // One-shot fetch of the owner's display name for the greeting.
+  // Falls back to null (→ email prefix) only if profiles row is
+  // missing the field. The user's own profile row is readable under
+  // the existing RLS policy ("users_manage_own_profile" — see
+  // migration 011), so this works with the user-bound client.
+  useEffect(() => {
+    let cancelled = false
+    async function loadDisplayName() {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const db = supabase as any
+      const { data } = await db
+        .from('profiles')
+        .select('display_name')
+        .eq('user_id', user.id)
+        .maybeSingle()
+      if (cancelled) return
+      const name = data?.display_name?.trim()
+      setDisplayName(name && name.length > 0 ? name : null)
+    }
+    loadDisplayName()
+    return () => { cancelled = true }
+  }, [user.id, supabase])
   const handleRefresh = useCallback(async () => { await loadMetrics() }, [loadMetrics])
 
   if (!activeBranch) {
@@ -412,11 +442,18 @@ export function HomeDashboard() {
   return (
     <PullToRefresh onRefresh={handleRefresh}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        {/* Onboarding checklist for first-time owners. The component
+            auto-detects state (targets / team / LINE / 7 days of data)
+            and self-dismisses once all four are done. Previously it
+            only appeared on /portfolio, which meant a brand-new owner
+            landing on /home saw blank KPI cards with no guidance. */}
+        <OwnerGettingStarted />
+
         {/* Greeting — text only, no card */}
         <div className="flex items-start justify-between">
           <div>
             <h2 style={{ fontSize: 18, fontWeight: 500, color: 'var(--color-text-primary)', lineHeight: 'var(--line-height-tight)' }}>
-              {t('greeting', { name: user.email.split('@')[0] })}
+              {t('greeting', { name: displayName || user.email.split('@')[0] })}
             </h2>
             {latest && (
               <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-tertiary)', marginTop: 3 }}>
