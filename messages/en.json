@@ -27,7 +27,12 @@
     "totalRoomsHint": "Used to calculate occupancy rate",
     "totalSeats": "Seating capacity (optional)",
     "totalSeatsHint": "Used for staff and table planning",
-    "step3Continue": "Continue →"
+    "step3Continue": "Continue →",
+    "errorExpired": "This invitation link has expired. Please contact the Aurasea team for a new one.",
+    "errorNameTaken": "This company name is already in use. Please contact the Aurasea team.",
+    "errorEmailMismatch": "Please sign in with the email address the invitation was sent to.",
+    "errorUnauth": "Please sign in to continue.",
+    "errorGeneric": "Something went wrong. Please try again, or contact the Aurasea team if it keeps failing."
   },
   "common": {
     "save": "Save",

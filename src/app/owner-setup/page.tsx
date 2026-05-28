@@ -168,12 +168,18 @@ function OwnerSetupInner() {
           businessType: invitation.businessType,
         }),
       })
-      const json = await res.json().catch(() => ({}))
+      const json: { success?: boolean; organizationId?: string; trialEndsAt?: string; error?: string; code?: string } =
+        await res.json().catch(() => ({}))
       if (!res.ok || !json.success) {
-        return setError(json.error || 'สร้างบริษัทไม่สำเร็จ')
+        // Map the server's error code to a friendly TH/EN message.
+        // Falls back to a generic message for anything unmapped so we
+        // never surface raw Postgres errors like "duplicate key value
+        // violates unique constraint" to the owner.
+        const friendly = mapCreateOrgError(json.code, tSetup)
+        return setError(friendly)
       }
-      setOrgId(json.organizationId)
-      setTrialEndsAt(json.trialEndsAt)
+      setOrgId(json.organizationId || '')
+      setTrialEndsAt(json.trialEndsAt || '')
       setStep(3)
     } finally {
       setSubmitting(false)
@@ -638,6 +644,30 @@ function PrimaryButton({ onClick, type = 'button', disabled, children }: { onCli
       {children}
     </button>
   )
+}
+
+// Server-error → user-facing copy. Codes mirror the ErrorCode union in
+// /api/owner-setup/create-org. Anything not in the map (or a raw
+// string from an older client cache) falls through to the generic
+// retry message, so we never paint a Postgres "duplicate key" error
+// at the owner.
+function mapCreateOrgError(
+  code: string | undefined,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  t: any,
+): string {
+  switch (code) {
+    case 'invitation_expired':
+      return t('errorExpired')
+    case 'name_taken':
+      return t('errorNameTaken')
+    case 'email_mismatch':
+      return t('errorEmailMismatch')
+    case 'unauthenticated':
+      return t('errorUnauth')
+    default:
+      return t('errorGeneric')
+  }
 }
 
 function ErrorBox({ text }: { text: string }) {
