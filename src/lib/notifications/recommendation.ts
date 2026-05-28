@@ -47,23 +47,31 @@ export interface FnbRecommendationData {
 }
 
 /**
- * Deterministically picks one variant from an array using the current
- * Bangkok date as a seed. Same data + same day = same pick (idempotent
- * for retries), but different day = different pick.
+ * Deterministically picks one variant from an array seeded by the given
+ * date interpreted in Bangkok time. Same date + same variants = same
+ * pick (idempotent for retries); adjacent dates with N variants are
+ * guaranteed to differ because (dayOfYear % N) maps consecutive days to
+ * consecutive indices.
  *
- * With N variants, consecutive days are guaranteed to differ because we
- * use (dayOfYear % N) — adjacent days map to adjacent indices.
+ * Exported so tests can advance the date without mocking the clock.
+ * Production callers go through `pick()` which seeds with `new Date()`.
  */
-function pick(variants: string[]): string {
-  const now = new Date()
-  // Bangkok offset UTC+7
-  const bkkMs = now.getTime() + 7 * 60 * 60 * 1000
-  const bkkDate = new Date(bkkMs)
-  const dayOfYear = Math.floor(
-    (bkkDate.getTime() - new Date(bkkDate.getFullYear(), 0, 0).getTime()) /
-    86400000
-  )
+export function pickVariantForDate(variants: string[], date: Date): string {
+  // Shift the instant into Bangkok wall time (UTC+7), then read every
+  // calendar part *as UTC* so the computation doesn't depend on the host
+  // machine's timezone. The previous version anchored on
+  // `new Date(year, 0, 0)` which is interpreted in the host's local TZ —
+  // on a dev box set to Asia/Bangkok the year-start drifted 7 h east,
+  // and the day-of-year flipped early in the day.
+  const bkkMs = date.getTime() + 7 * 60 * 60 * 1000
+  const year = new Date(bkkMs).getUTCFullYear()
+  const startOfYearUTC = Date.UTC(year, 0, 1)
+  const dayOfYear = Math.floor((bkkMs - startOfYearUTC) / 86400000)
   return variants[dayOfYear % variants.length]
+}
+
+function pick(variants: string[]): string {
+  return pickVariantForDate(variants, new Date())
 }
 
 export function generateHotelRecommendation(data: HotelRecommendationData): string {
