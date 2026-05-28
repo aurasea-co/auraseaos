@@ -1,4 +1,24 @@
 {
+  "ownerSetup": {
+    "step2Title": "2. Confirm your plan",
+    "notice": "Your plan details were set by the Aurasea team. They can't be changed here.",
+    "yourPlan": "Your plan",
+    "organizationName": "Company name",
+    "businessType": "Business type",
+    "businessTypeAccommodation": "Hotel / Resort",
+    "businessTypeFnb": "Restaurant / Café",
+    "businessTypeMixed": "Hotel + F&B",
+    "plan": "Plan",
+    "perMonth": "month",
+    "trial": "Trial",
+    "trialDaysValue": "{days} days",
+    "discount": "Discount",
+    "discountValue": "{pct}% first month",
+    "addBranchesLater": "You can add more branches after setup is complete.",
+    "confirm": "Confirm and continue →",
+    "saving": "Saving...",
+    "missingOrgName": "Your invitation is missing a company name. Please contact the Aurasea team."
+  },
   "common": {
     "save": "Save",
     "cancel": "Cancel",

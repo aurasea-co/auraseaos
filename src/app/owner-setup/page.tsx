@@ -2,10 +2,12 @@
 
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import Link from 'next/link'
-import { Check } from 'lucide-react'
+import { Check, Lock, Info } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { LocaleSwitcher } from '@/components/locale-switcher'
+import { PRICING, formatPrice } from '@/lib/config/pricing'
 
 // /owner-setup is the landing page from the owner invitation email.
 // It walks the new owner through four steps:
@@ -52,13 +54,13 @@ function OwnerSetupInner() {
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
 
-  // Step 2
-  const [orgName, setOrgName] = useState('')
-  const [bizType, setBizType] = useState<'accommodation' | 'fnb' | 'mixed'>('mixed')
-  // branchCount is captured but not used to create extra rows in this
-  // wizard — the owner adds branches 2+ later from Settings. We still
-  // collect it so we know how to size their plan recommendations.
-  const [branchCount, setBranchCount] = useState<'1' | '2' | '3+'>('1')
+  // Step 2 fields are read-only now: org name + business type are
+  // locked to the invitation row the super-admin created. The page
+  // used to expose them as editable inputs, which let the owner
+  // accidentally override the admin's intent. The values still flow
+  // through to the create-org POST below — just sourced from the
+  // invitation, not from local state.
+  const tSetup = useTranslations('ownerSetup')
 
   // Step 3
   const [branchName, setBranchName] = useState('')
@@ -94,8 +96,6 @@ function OwnerSetupInner() {
         acceptedAt: data.acceptedAt,
       }
       setInvitation(inv)
-      setOrgName(inv.organizationName)
-      setBizType(inv.businessType)
       setBranchBizType(inv.businessType === 'fnb' ? 'fnb' : 'accommodation')
 
       if (inv.acceptedAt) setLoadStatus('accepted')
@@ -149,7 +149,14 @@ function OwnerSetupInner() {
     e.preventDefault()
     if (!invitation || submitting) return
     setError('')
-    if (!orgName.trim()) return setError('กรุณากรอกชื่อบริษัท/ร้าน')
+    // Org name and business type are sourced from the invitation row
+    // the super-admin created — Step 2 no longer accepts user input
+    // for these. If the admin somehow created an invitation with an
+    // empty org name, surface a clear error rather than silently
+    // POSTing an empty string.
+    if (!invitation.organizationName.trim()) {
+      return setError(tSetup('missingOrgName'))
+    }
     setSubmitting(true)
     try {
       const res = await fetch('/api/owner-setup/create-org', {
@@ -157,8 +164,8 @@ function OwnerSetupInner() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           token,
-          organizationName: orgName.trim(),
-          businessType: bizType,
+          organizationName: invitation.organizationName.trim(),
+          businessType: invitation.businessType,
         }),
       })
       const json = await res.json().catch(() => ({}))
@@ -270,26 +277,34 @@ function OwnerSetupInner() {
 
       {step === 2 && (
         <form onSubmit={handleStep2} style={formStyle}>
-          <h2 style={stepHeading}>2. ข้อมูลบริษัท</h2>
-          <Field label="ชื่อบริษัท / ร้าน">
-            <input type="text" value={orgName} onChange={(e) => setOrgName(e.target.value)} autoFocus required style={inputStyle} />
-          </Field>
-          <Field label="ประเภทธุรกิจ">
-            <select value={bizType} onChange={(e) => setBizType(e.target.value as typeof bizType)} style={inputStyle}>
-              <option value="accommodation">โรงแรม / รีสอร์ท</option>
-              <option value="fnb">คาเฟ่ / ร้านอาหาร</option>
-              <option value="mixed">ทั้งสองประเภท</option>
-            </select>
-          </Field>
-          <Field label="จำนวนสาขา">
-            <select value={branchCount} onChange={(e) => setBranchCount(e.target.value as typeof branchCount)} style={inputStyle}>
-              <option value="1">1 สาขา</option>
-              <option value="2">2 สาขา</option>
-              <option value="3+">3 สาขาขึ้นไป</option>
-            </select>
-          </Field>
+          <h2 style={stepHeading}>{tSetup('step2Title')}</h2>
+
+          {/* Notice banner — locked at the invitation level by the
+              super-admin. Amber tone matches the trial-ending banner
+              on /settings/billing so users associate amber with
+              "informational, can't change here". */}
+          <div style={{
+            background: '#FFF4E0',
+            border: '1px solid #FCD9A0',
+            color: '#8A5A00',
+            borderRadius: 8,
+            padding: '10px 12px',
+            fontSize: 12,
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 8,
+            lineHeight: 1.55,
+          }}>
+            <Info size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+            <span>{tSetup('notice')}</span>
+          </div>
+
+          <PlanSummary invitation={invitation} t={tSetup} />
+
           {error && <ErrorBox text={error} />}
-          <PrimaryButton type="submit" disabled={submitting}>{submitting ? 'กำลังบันทึก...' : 'ต่อไป →'}</PrimaryButton>
+          <PrimaryButton type="submit" disabled={submitting}>
+            {submitting ? tSetup('saving') : tSetup('confirm')}
+          </PrimaryButton>
         </form>
       )}
 
@@ -336,7 +351,7 @@ function OwnerSetupInner() {
           </div>
           <h2 style={{ ...stepHeading, marginTop: 16, textAlign: 'center' }}>เสร็จสิ้น 🎉</h2>
           <div style={{ background: '#f7f7f5', padding: '14px 16px', borderRadius: 8, fontSize: 13, color: '#1a1a1a', lineHeight: 1.7, textAlign: 'left' }}>
-            <div>บริษัท: <strong>{orgName}</strong></div>
+            <div>บริษัท: <strong>{invitation.organizationName}</strong></div>
             <div>สาขา: <strong>{branchName}</strong></div>
             <div>แผน: <strong>{invitation.plan[0].toUpperCase() + invitation.plan.slice(1)}</strong></div>
             <div>ทดลองใช้: <strong>{invitation.trialDays} วัน</strong>{trialEndsAt && ` (สิ้นสุด ${formatDate(trialEndsAt)})`}</div>
@@ -405,6 +420,106 @@ function InviteSummary({ invitation }: { invitation: Invitation }) {
           ลด {invitation.discountPct}% เดือนแรกหากต่ออายุภายใน 7 วันหลังหมดทดลอง
         </div>
       )}
+    </div>
+  )
+}
+
+// Read-only Step 2 summary card. Every row is locked — the values come
+// from the invitation row the super-admin created, and the owner can't
+// override them here. The lock icon next to each label is the visual
+// affordance; the amber notice banner above the card carries the copy.
+function PlanSummary({
+  invitation,
+  t,
+}: {
+  invitation: Invitation
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  t: any
+}) {
+  const businessTypeLabel =
+    invitation.businessType === 'accommodation'
+      ? t('businessTypeAccommodation')
+      : invitation.businessType === 'fnb'
+        ? t('businessTypeFnb')
+        : t('businessTypeMixed')
+
+  // Mirror the price-lookup logic from /api/superadmin/invite-owner so
+  // the owner sees the same monthly figure that drove the invitation
+  // email's offer box. Mixed only has 'pro' — fall back to
+  // accommodation pricing for the rare starter/growth + mixed combo.
+  const priceSource =
+    invitation.businessType === 'mixed'
+      ? invitation.plan === 'pro'
+        ? PRICING.mixed.pro
+        : PRICING.accommodation[invitation.plan]
+      : PRICING[invitation.businessType][invitation.plan]
+  const planLabel = invitation.plan[0].toUpperCase() + invitation.plan.slice(1)
+  const planValue = `${planLabel} · ${formatPrice(priceSource.monthly)}/${t('perMonth')}`
+
+  const rows: Array<{ label: string; value: string }> = [
+    { label: t('organizationName'), value: invitation.organizationName || '—' },
+    { label: t('businessType'), value: businessTypeLabel },
+    { label: t('plan'), value: planValue },
+    { label: t('trial'), value: t('trialDaysValue', { days: invitation.trialDays }) },
+  ]
+  if (invitation.discountPct > 0) {
+    rows.push({
+      label: t('discount'),
+      value: t('discountValue', { pct: invitation.discountPct }),
+    })
+  }
+
+  return (
+    <div>
+      <div style={{
+        fontSize: 11,
+        fontWeight: 600,
+        color: '#6b6b6b',
+        marginBottom: 8,
+        textTransform: 'uppercase',
+        letterSpacing: '0.04em',
+      }}>
+        {t('yourPlan')}
+      </div>
+      <div style={{
+        background: '#ffffff',
+        border: '1px solid #e5e5e5',
+        borderRadius: 10,
+        overflow: 'hidden',
+      }}>
+        {rows.map((r, i) => (
+          <LockedRow
+            key={r.label}
+            label={r.label}
+            value={r.value}
+            isFirst={i === 0}
+          />
+        ))}
+      </div>
+      <p style={{ fontSize: 11, color: '#9b9b9b', marginTop: 8, lineHeight: 1.5 }}>
+        {t('addBranchesLater')}
+      </p>
+    </div>
+  )
+}
+
+function LockedRow({ label, value, isFirst }: { label: string; value: string; isFirst: boolean }) {
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '12px 14px',
+      borderTop: isFirst ? 'none' : '1px solid #ececec',
+      gap: 12,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#6b6b6b' }}>
+        <Lock size={12} style={{ color: '#9b9b9b', flexShrink: 0 }} aria-hidden />
+        <span style={{ fontSize: 13 }}>{label}</span>
+      </div>
+      <span style={{ fontSize: 14, fontWeight: 500, color: '#1a1a1a', textAlign: 'right' }}>
+        {value}
+      </span>
     </div>
   )
 }

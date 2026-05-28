@@ -1,4 +1,24 @@
 {
+  "ownerSetup": {
+    "step2Title": "2. ยืนยันแผนของคุณ",
+    "notice": "รายละเอียดแผนถูกกำหนดโดยทีมงาน Aurasea ไม่สามารถเปลี่ยนแปลงได้ที่นี่",
+    "yourPlan": "แผนของคุณ",
+    "organizationName": "ชื่อบริษัท / ร้าน",
+    "businessType": "ประเภทธุรกิจ",
+    "businessTypeAccommodation": "โรงแรม / รีสอร์ท",
+    "businessTypeFnb": "คาเฟ่ / ร้านอาหาร",
+    "businessTypeMixed": "ทั้งโรงแรมและ F&B",
+    "plan": "แผน",
+    "perMonth": "เดือน",
+    "trial": "ทดลองใช้งาน",
+    "trialDaysValue": "{days} วัน",
+    "discount": "ส่วนลด",
+    "discountValue": "{pct}% เดือนแรก",
+    "addBranchesLater": "คุณสามารถเพิ่มสาขาเพิ่มเติมได้หลังจากตั้งค่าเสร็จ",
+    "confirm": "ยืนยันและดำเนินการต่อ →",
+    "saving": "กำลังบันทึก...",
+    "missingOrgName": "คำเชิญของคุณไม่มีชื่อบริษัท กรุณาติดต่อทีม Aurasea"
+  },
   "common": {
     "save": "บันทึก",
     "cancel": "ยกเลิก",
