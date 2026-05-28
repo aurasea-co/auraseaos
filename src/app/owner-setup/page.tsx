@@ -310,27 +310,109 @@ function OwnerSetupInner() {
 
       {step === 3 && (
         <form onSubmit={handleStep3} style={formStyle}>
-          <h2 style={stepHeading}>3. ตั้งค่าสาขาแรก</h2>
-          <Field label="ชื่อสาขา">
-            <input type="text" value={branchName} onChange={(e) => setBranchName(e.target.value)} placeholder="เช่น Crystal Resort Korat" autoFocus required style={inputStyle} />
+          <h2 style={stepHeading}>{tSetup('step3Title')}</h2>
+
+          <Field label={tSetup('branchName')}>
+            <input
+              type="text"
+              value={branchName}
+              onChange={(e) => setBranchName(e.target.value)}
+              placeholder={tSetup('branchNamePlaceholder')}
+              autoFocus
+              required
+              style={inputStyle}
+            />
           </Field>
-          <Field label="ประเภทสาขา">
-            <select value={branchBizType} onChange={(e) => setBranchBizType(e.target.value as typeof branchBizType)} style={inputStyle}>
-              <option value="accommodation">โรงแรม / รีสอร์ท</option>
-              <option value="fnb">คาเฟ่ / ร้านอาหาร / เบเกอรี่</option>
-            </select>
-          </Field>
+
+          {/* Branch type is locked to the invitation when the invitation
+              targets a single vertical (accommodation or fnb). Only the
+              'mixed' invitation case leaves the dropdown editable —
+              those owners legitimately need to choose which type their
+              first branch is, since they have both. The same notice
+              banner appears as on Step 2 (amber tone) explaining why
+              the field can't be edited. */}
+          {invitation.businessType === 'mixed' ? (
+            <>
+              <div style={{
+                background: '#FFF4E0',
+                border: '1px solid #FCD9A0',
+                color: '#8A5A00',
+                borderRadius: 8,
+                padding: '10px 12px',
+                fontSize: 12,
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 8,
+                lineHeight: 1.55,
+              }}>
+                <Info size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+                <span>{tSetup('branchTypeNoticeMixed')}</span>
+              </div>
+              <Field label={tSetup('branchType')}>
+                <select
+                  value={branchBizType}
+                  onChange={(e) => setBranchBizType(e.target.value as typeof branchBizType)}
+                  style={inputStyle}
+                >
+                  <option value="accommodation">{tSetup('businessTypeAccommodation')}</option>
+                  <option value="fnb">{tSetup('businessTypeFnb')}</option>
+                </select>
+              </Field>
+            </>
+          ) : (
+            <div style={{
+              background: '#ffffff',
+              border: '1px solid #e5e5e5',
+              borderRadius: 10,
+              overflow: 'hidden',
+            }}>
+              <LockedRow
+                label={tSetup('branchType')}
+                value={
+                  branchBizType === 'accommodation'
+                    ? tSetup('businessTypeAccommodation')
+                    : tSetup('businessTypeFnb')
+                }
+                isFirst
+              />
+            </div>
+          )}
+
           {branchBizType === 'accommodation' ? (
-            <Field label="จำนวนห้องทั้งหมด">
-              <input type="number" inputMode="numeric" value={totalRooms} onChange={(e) => setTotalRooms(e.target.value)} required style={inputStyle} />
+            <Field label={tSetup('totalRooms')}>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                value={totalRooms}
+                onChange={(e) => setTotalRooms(e.target.value)}
+                required
+                style={inputStyle}
+              />
+              <span style={{ fontSize: 11, color: '#9b9b9b', marginTop: 2, display: 'block' }}>
+                {tSetup('totalRoomsHint')}
+              </span>
             </Field>
           ) : (
-            <Field label="จำนวนที่นั่ง (ไม่บังคับ)">
-              <input type="number" inputMode="numeric" value={totalSeats} onChange={(e) => setTotalSeats(e.target.value)} style={inputStyle} />
+            <Field label={tSetup('totalSeats')}>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                value={totalSeats}
+                onChange={(e) => setTotalSeats(e.target.value)}
+                style={inputStyle}
+              />
+              <span style={{ fontSize: 11, color: '#9b9b9b', marginTop: 2, display: 'block' }}>
+                {tSetup('totalSeatsHint')}
+              </span>
             </Field>
           )}
+
           {error && <ErrorBox text={error} />}
-          <PrimaryButton type="submit" disabled={submitting}>{submitting ? 'กำลังบันทึก...' : 'ต่อไป →'}</PrimaryButton>
+          <PrimaryButton type="submit" disabled={submitting}>
+            {submitting ? tSetup('saving') : tSetup('step3Continue')}
+          </PrimaryButton>
         </form>
       )}
 

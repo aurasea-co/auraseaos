@@ -17,7 +17,17 @@
     "addBranchesLater": "คุณสามารถเพิ่มสาขาเพิ่มเติมได้หลังจากตั้งค่าเสร็จ",
     "confirm": "ยืนยันและดำเนินการต่อ →",
     "saving": "กำลังบันทึก...",
-    "missingOrgName": "คำเชิญของคุณไม่มีชื่อบริษัท กรุณาติดต่อทีม Aurasea"
+    "missingOrgName": "คำเชิญของคุณไม่มีชื่อบริษัท กรุณาติดต่อทีม Aurasea",
+    "step3Title": "3. ตั้งค่าสาขาแรก",
+    "branchName": "ชื่อสาขา",
+    "branchNamePlaceholder": "เช่น Crystal Resort Korat",
+    "branchType": "ประเภทสาขา",
+    "branchTypeNoticeMixed": "คำเชิญของคุณครอบคลุมทั้งโรงแรมและ F&B เลือกประเภทสำหรับสาขาแรกนี้ก่อน — เพิ่มสาขาประเภทอื่นได้ภายหลังจากหน้า Settings",
+    "totalRooms": "จำนวนห้องทั้งหมด",
+    "totalRoomsHint": "ใช้คำนวณอัตราการเข้าพัก",
+    "totalSeats": "จำนวนที่นั่ง (ไม่บังคับ)",
+    "totalSeatsHint": "ใช้สำหรับวางแผนพนักงานและโต๊ะ",
+    "step3Continue": "ต่อไป →"
   },
   "common": {
     "save": "บันทึก",

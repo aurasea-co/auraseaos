@@ -17,7 +17,17 @@
     "addBranchesLater": "You can add more branches after setup is complete.",
     "confirm": "Confirm and continue →",
     "saving": "Saving...",
-    "missingOrgName": "Your invitation is missing a company name. Please contact the Aurasea team."
+    "missingOrgName": "Your invitation is missing a company name. Please contact the Aurasea team.",
+    "step3Title": "3. Set up your first branch",
+    "branchName": "Branch name",
+    "branchNamePlaceholder": "e.g. Resort A — Bangkok",
+    "branchType": "Branch type",
+    "branchTypeNoticeMixed": "Your invitation covers both hotels and F&B. Pick the type for this first branch — you can add more from Settings later.",
+    "totalRooms": "Total rooms",
+    "totalRoomsHint": "Used to calculate occupancy rate",
+    "totalSeats": "Seating capacity (optional)",
+    "totalSeatsHint": "Used for staff and table planning",
+    "step3Continue": "Continue →"
   },
   "common": {
     "save": "Save",
