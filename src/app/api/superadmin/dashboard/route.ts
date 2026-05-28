@@ -81,12 +81,18 @@ export async function GET() {
     }).length,
   }
 
-  // Member count via a separate aggregate; cheaper than a join and
-  // doesn't require materialising every row.
-  const { count: memberCount } = await db
-    .from('organization_members')
-    .select('user_id', { count: 'exact', head: true })
-  if (memberCount != null) stats.users = memberCount
+  // Distinct user count across both membership tables. organization_members
+  // holds owners; branch_members holds invited managers / staff. A user
+  // can theoretically appear in both (owner of org A, manager of a
+  // branch in org B), so we dedupe by user_id before counting.
+  const [orgMembersRes, branchMembersRes] = await Promise.all([
+    db.from('organization_members').select('user_id'),
+    db.from('branch_members').select('user_id'),
+  ])
+  const userIds = new Set<string>()
+  for (const m of orgMembersRes.data || []) userIds.add(m.user_id)
+  for (const m of branchMembersRes.data || []) userIds.add(m.user_id)
+  stats.users = userIds.size
 
   return NextResponse.json({ organizations, stats })
 }
