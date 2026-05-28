@@ -359,7 +359,11 @@
       "data_q": "อัปเกรดแล้วข้อมูลเดิมหายไหม?",
       "data_a": "ไม่หาย ข้อมูลทั้งหมดยังคงอยู่ครบถ้วน",
       "annual_q": "มีส่วนลดสำหรับการชำระรายปีไหม?",
-      "annual_a": "มี ชำระรายปีประหยัด 2 เดือน (เทียบเท่าลด 17%)"
+      "annual_a": "มี ชำระรายปีประหยัด 2 เดือน (เทียบเท่าลด 17%)",
+      "ratedesk_q": "RateDesk และ MenuDesk คืออะไร?",
+      "ratedesk_a": "RateDesk คือระบบจัดการรายได้สำหรับโรงแรม (฿590/สาขา/เดือน) MenuDesk คือระบบวิเคราะห์การดำเนินงาน F&B (฿390/สาขา/เดือน) ทั้งสองรวม Aurasea OS ฟรี",
+      "integrations_q": "Integration เชื่อมต่อ PMS/POS ฟรีจริงไหม?",
+      "integrations_a": "ฟรีทุก integration หลัก ได้แก่ Easyfo, Cloudbeds, FoodStory, Loyverse, StoreHub สิ่งที่มีค่าใช้จ่ายคือ automation เช่น auto rate push (฿290/สาขา) ที่ช่วยประหยัดเวลา 30-60 นาทีต่อวัน"
     },
     "creditCardComingSoon": "ชำระด้วยบัตรเครดิต (เร็วๆ นี้)",
     "emailBodyTemplate": "สวัสดีครับ/ค่ะ ทีมงาน Aurasea\n\nฉันต้องการอัปเกรดเป็นแผน {targetPlan}\nบริษัท: {org}\nอีเมล: {email}\nแผนปัจจุบัน: {currentPlan}\nแผนที่ต้องการ: {targetPlan}\n\nกรุณาติดต่อกลับเพื่อดำเนินการต่อครับ/ค่ะ",
@@ -372,18 +376,97 @@
     "mostPopular": "ยอดนิยม",
     "currentPlan": "แพลนปัจจุบัน",
     "planDisplayFormat": "{plan}",
-    "mixedHeadline": "มีทั้งโรงแรมและร้านอาหาร?",
+    "mixedHeadline": "มีทั้งโรงแรมและ F&B? สมัคร RateDesk + MenuDesk — Aurasea OS รวมอยู่ฟรีในทั้งสองแผน",
     "mixedLabel": "Pro Mixed",
     "mixedPriceNote": "{price}/เดือน · รวมทุกฟีเจอร์สำหรับทั้งสองประเภท",
+    "upgradeCtaTitle": "อัปเกรดแผน",
+    "upgradeCtaBody": "ทีมงานจะติดต่อกลับภายใน 1 วันทำการ ไม่ต้องใส่บัตรเครดิต",
+    "addonsTitle": "เพิ่มประสิทธิภาพด้วย RateDesk และ MenuDesk",
+    "ratedeskTitle": "RateDesk",
+    "ratedeskSubtitle": "สำหรับโรงแรมและรีสอร์ท",
+    "ratedeskPrice": "฿590/สาขา/เดือน",
+    "ratedeskFeatures": [
+      "คำแนะนำราคาห้องพัก",
+      "ติดตามราคาคู่แข่ง",
+      "เชื่อมต่อ PMS ทุกระบบ ฟรี",
+      "+ Auto rate push ฿290/สาขา/เดือน"
+    ],
+    "ratedeskCta": "เพิ่ม RateDesk →",
+    "menudeskTitle": "MenuDesk",
+    "menudeskSubtitle": "สำหรับคาเฟ่ ร้านอาหาร เบเกอรี่",
+    "menudeskPrice": "฿390/สาขา/เดือน",
+    "menudeskFeatures": [
+      "Menu engineering",
+      "ติดตามต้นทุนวัตถุดิบ",
+      "เชื่อมต่อ POS ทุกระบบ ฟรี",
+      "+ Auto purchase order ฿190/สาขา/เดือน (เร็วๆ นี้)"
+    ],
+    "menudeskCta": "เพิ่ม MenuDesk →",
+    "bundleTitle": "ซื้อ Bundle ประหยัดกว่า",
+    "bundleSubtitle": "Aurasea OS รวมอยู่ใน RateDesk และ MenuDesk ฟรี",
+    "bundleHotelLabel": "Hotel bundle",
+    "bundleHotelPrice": "฿590/สาขา (รวม OS ฟรี)",
+    "bundleFnbLabel": "F&B bundle",
+    "bundleFnbPrice": "฿390/สาขา (รวม OS ฟรี)",
+    "bundleFullLabel": "Full bundle (1 hotel + 1 cafe)",
+    "bundleFullPrice": "฿980/เดือน",
     "featuresAccommodation": {
-      "starter": ["1 สาขา", "1 manager · 2 staff", "1 คำแนะนำ/วัน", "Dashboard หลัก", "Morning flash email"],
-      "growth": ["2 สาขา", "2 managers · 5 staff", "3 คำแนะนำ/วัน", "Trends tab", "Pricing scenarios", "Channel breakdown", "Labour alert"],
-      "pro": ["3 สาขา", "ทีมไม่จำกัด", "คำแนะนำไม่จำกัด", "Labour cost tab", "Channel mix & OTA commission", "Demand calendar", "Portfolio tab", "Weekly PDF report"]
+      "starter": [
+        "1 สาขา",
+        "1 manager · 2 staff",
+        "สรุปธุรกิจทุกเช้า 7.00 น. ทาง LINE",
+        "Home dashboard + Trends",
+        "แจ้งเตือน COGS และ Labour",
+        "เชื่อมต่อ Easyfo & Loyverse ฟรี",
+        "Morning flash email (opt-in)"
+      ],
+      "growth": [
+        "สูงสุด 3 สาขา",
+        "2 manager · 5 staff",
+        "ทุกอย่างใน Starter",
+        "Sync ข้อมูล PMS/POS แบบ real-time",
+        "เชื่อมต่อ FoodStory & Cloudbeds ฟรี",
+        "Cost tab + Labour tab",
+        "รายงานรายสัปดาห์ PDF (เฉพาะ Owner)"
+      ],
+      "pro": [
+        "สูงสุด 5 สาขา",
+        "Manager และ Staff ไม่จำกัด",
+        "ทุกอย่างใน Growth",
+        "เชื่อมต่อ StoreHub & Little Hotelier ฟรี",
+        "Portfolio overview",
+        "Benchmarking ขั้นสูง",
+        "ประวัติข้อมูลย้อนหลัง 90 วัน"
+      ]
     },
     "featuresFnb": {
-      "starter": ["1 สาขา", "1 manager · 2 staff", "1 คำแนะนำ/วัน", "Dashboard หลัก", "Closing summary email"],
-      "growth": ["2 สาขา", "2 managers · 5 staff", "3 คำแนะนำ/วัน", "Trends tab", "Cost tab", "Food/non-food split", "COGS & Labour alert"],
-      "pro": ["3 สาขา", "ทีมไม่จำกัด", "คำแนะนำไม่จำกัด", "Labour cost tab", "Monthly P&L", "Portfolio tab", "Weekly PDF report"]
+      "starter": [
+        "1 สาขา",
+        "1 manager · 2 staff",
+        "สรุปธุรกิจทุกเช้า 7.00 น. ทาง LINE",
+        "Home dashboard + Trends",
+        "แจ้งเตือน COGS และ Labour",
+        "เชื่อมต่อ Easyfo & Loyverse ฟรี",
+        "Morning flash email (opt-in)"
+      ],
+      "growth": [
+        "สูงสุด 3 สาขา",
+        "2 manager · 5 staff",
+        "ทุกอย่างใน Starter",
+        "Sync ข้อมูล PMS/POS แบบ real-time",
+        "เชื่อมต่อ FoodStory & Cloudbeds ฟรี",
+        "Cost tab + Labour tab",
+        "รายงานรายสัปดาห์ PDF (เฉพาะ Owner)"
+      ],
+      "pro": [
+        "สูงสุด 5 สาขา",
+        "Manager และ Staff ไม่จำกัด",
+        "ทุกอย่างใน Growth",
+        "เชื่อมต่อ StoreHub & Little Hotelier ฟรี",
+        "Portfolio overview",
+        "Benchmarking ขั้นสูง",
+        "ประวัติข้อมูลย้อนหลัง 90 วัน"
+      ]
     }
   },
   "settingsExport": {

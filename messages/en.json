@@ -440,7 +440,11 @@
       "data_q": "Will I lose my data when I upgrade?",
       "data_a": "No. All your data stays intact when you change plans.",
       "annual_q": "Is there a discount for annual billing?",
-      "annual_a": "Yes — annual billing saves 2 months (about 17% off)."
+      "annual_a": "Yes — annual billing saves 2 months (about 17% off).",
+      "ratedesk_q": "What are RateDesk and MenuDesk?",
+      "ratedesk_a": "RateDesk is a revenue-management system for hotels (฿590/branch/month). MenuDesk is an operations-analytics system for F&B (฿390/branch/month). Both include Aurasea OS free.",
+      "integrations_q": "Are PMS/POS integrations really free?",
+      "integrations_a": "Yes — all main integrations are free: Easyfo, Cloudbeds, FoodStory, Loyverse, StoreHub. The paid layer is automation, e.g. auto rate push (฿290/branch), which saves 30-60 minutes per day."
     },
     "creditCardComingSoon": "Credit card payment (coming soon)",
     "emailBodyTemplate": "Hi Aurasea team,\n\nI'd like to upgrade to the {targetPlan} plan.\nCompany: {org}\nEmail: {email}\nCurrent plan: {currentPlan}\nTarget plan: {targetPlan}\n\nPlease get in touch to proceed. Thanks!",
@@ -453,18 +457,97 @@
     "mostPopular": "Most popular",
     "currentPlan": "Current plan",
     "planDisplayFormat": "{plan} Plan",
-    "mixedHeadline": "Running both accommodation and F&B?",
+    "mixedHeadline": "Running both hotel and F&B? Subscribe to RateDesk + MenuDesk. Aurasea OS is included free in both.",
     "mixedLabel": "Pro Mixed",
     "mixedPriceNote": "{price}/month · All features for both business types",
+    "upgradeCtaTitle": "Upgrade your plan",
+    "upgradeCtaBody": "The team will reply within 1 business day. No credit card required.",
+    "addonsTitle": "Power up with RateDesk and MenuDesk",
+    "ratedeskTitle": "RateDesk",
+    "ratedeskSubtitle": "For hotels and resorts",
+    "ratedeskPrice": "฿590/branch/month",
+    "ratedeskFeatures": [
+      "Rate recommendations",
+      "Competitor rate monitoring",
+      "All PMS integrations FREE",
+      "+ Auto rate push ฿290/branch/mo"
+    ],
+    "ratedeskCta": "Add RateDesk →",
+    "menudeskTitle": "MenuDesk",
+    "menudeskSubtitle": "For cafes, restaurants, bakeries",
+    "menudeskPrice": "฿390/branch/month",
+    "menudeskFeatures": [
+      "Menu engineering",
+      "Food cost tracking",
+      "All POS integrations FREE",
+      "+ Auto purchase order ฿190/branch/mo (coming soon)"
+    ],
+    "menudeskCta": "Add MenuDesk →",
+    "bundleTitle": "Bundle and save",
+    "bundleSubtitle": "Aurasea OS is included free with RateDesk and MenuDesk",
+    "bundleHotelLabel": "Hotel bundle",
+    "bundleHotelPrice": "฿590/branch (OS free)",
+    "bundleFnbLabel": "F&B bundle",
+    "bundleFnbPrice": "฿390/branch (OS free)",
+    "bundleFullLabel": "Full bundle (1 hotel + 1 cafe)",
+    "bundleFullPrice": "฿980/month",
     "featuresAccommodation": {
-      "starter": ["1 branch", "1 manager · 2 staff", "1 recommendation/day", "Main dashboard", "Morning flash email"],
-      "growth": ["2 branches", "2 managers · 5 staff", "3 recommendations/day", "Trends tab", "Pricing scenarios", "Channel breakdown", "Labour alert"],
-      "pro": ["3 branches", "Unlimited team", "Unlimited recommendations", "Labour cost tab", "Channel mix & OTA commission", "Demand calendar", "Portfolio tab", "Weekly PDF report"]
+      "starter": [
+        "1 branch",
+        "1 manager · 2 staff",
+        "Daily LINE brief at 7:00 AM",
+        "Home dashboard + Trends",
+        "COGS & labour alerts",
+        "Easyfo & Loyverse integration (free)",
+        "Morning flash email (opt-in)"
+      ],
+      "growth": [
+        "Up to 3 branches",
+        "2 managers · 5 staff",
+        "Everything in Starter",
+        "Real-time PMS/POS sync",
+        "FoodStory & Cloudbeds integration (free)",
+        "Cost tab + Labour tab",
+        "Weekly PDF report (owner)"
+      ],
+      "pro": [
+        "Up to 5 branches",
+        "Unlimited managers & staff",
+        "Everything in Growth",
+        "StoreHub & Little Hotelier (free)",
+        "Portfolio overview",
+        "Advanced benchmarking",
+        "90-day data history"
+      ]
     },
     "featuresFnb": {
-      "starter": ["1 branch", "1 manager · 2 staff", "1 recommendation/day", "Main dashboard", "Closing summary email"],
-      "growth": ["2 branches", "2 managers · 5 staff", "3 recommendations/day", "Trends tab", "Cost tab", "Food/non-food split", "COGS & Labour alert"],
-      "pro": ["3 branches", "Unlimited team", "Unlimited recommendations", "Labour cost tab", "Monthly P&L", "Portfolio tab", "Weekly PDF report"]
+      "starter": [
+        "1 branch",
+        "1 manager · 2 staff",
+        "Daily LINE brief at 7:00 AM",
+        "Home dashboard + Trends",
+        "COGS & labour alerts",
+        "Easyfo & Loyverse integration (free)",
+        "Morning flash email (opt-in)"
+      ],
+      "growth": [
+        "Up to 3 branches",
+        "2 managers · 5 staff",
+        "Everything in Starter",
+        "Real-time PMS/POS sync",
+        "FoodStory & Cloudbeds integration (free)",
+        "Cost tab + Labour tab",
+        "Weekly PDF report (owner)"
+      ],
+      "pro": [
+        "Up to 5 branches",
+        "Unlimited managers & staff",
+        "Everything in Growth",
+        "StoreHub & Little Hotelier (free)",
+        "Portfolio overview",
+        "Advanced benchmarking",
+        "90-day data history"
+      ]
     }
   },
   "settingsExport": {

@@ -415,12 +415,135 @@ export default function BillingPage() {
         })}
       </div>
 
-      {/* Mixed portfolio note */}
+      {/* Mixed portfolio note — points users running both hotel + F&B at
+          RateDesk + MenuDesk (Aurasea OS is bundled free). The longer
+          sentence lives in the translation key directly. */}
       <div style={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', padding: '12px 16px' }}>
-        <p style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-          {t('mixedHeadline')} <strong>{t('mixedLabel')} {t('mixedPriceNote', { price: formatPrice(PRICING.mixed.pro.monthly) })}</strong>
+        <p style={{ fontSize: 12, color: 'var(--color-text-secondary)', margin: 0, lineHeight: 1.6 }}>
+          {t('mixedHeadline')}
         </p>
       </div>
+
+      {/* RateDesk / MenuDesk add-on cards. Sit between the OS plan
+          comparison and the bundle callout. CTA links open the LINE OA
+          — same shortlink the upgrade modal uses — so the team can
+          finalize the add-on subscription manually until self-serve
+          billing lands. */}
+      <h3 style={{
+        fontSize: 15,
+        fontWeight: 600,
+        color: 'var(--color-text-primary)',
+        margin: '8px 0 4px',
+      }}>
+        {t('addonsTitle')}
+      </h3>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+        <AddonCard
+          tone="teal"
+          title={t('ratedeskTitle')}
+          subtitle={t('ratedeskSubtitle')}
+          price={t('ratedeskPrice')}
+          features={t.raw('ratedeskFeatures') as string[]}
+          ctaLabel={t('ratedeskCta')}
+          ctaHref={LINE_CONTACT_URL}
+        />
+        <AddonCard
+          tone="amber"
+          title={t('menudeskTitle')}
+          subtitle={t('menudeskSubtitle')}
+          price={t('menudeskPrice')}
+          features={t.raw('menudeskFeatures') as string[]}
+          ctaLabel={t('menudeskCta')}
+          ctaHref={LINE_CONTACT_URL}
+        />
+      </div>
+
+      {/* Bundle savings callout. Light teal background; mirrors the
+          add-on price points but reframes them as "OS free when you
+          subscribe to a vertical add-on". */}
+      <section style={{
+        background: 'var(--color-teal-light, #E6F4EF)',
+        border: '1px solid var(--color-teal-border, #BBE0D0)',
+        borderRadius: 'var(--radius-lg)',
+        padding: '14px 16px',
+      }}>
+        <h4 style={{ fontSize: 14, fontWeight: 700, color: 'var(--color-teal, #1D9E75)', margin: '0 0 4px' }}>
+          {t('bundleTitle')}
+        </h4>
+        <p style={{ fontSize: 12, color: 'var(--color-text-secondary)', margin: '0 0 10px', lineHeight: 1.55 }}>
+          {t('bundleSubtitle')}
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <BundleRow label={t('bundleHotelLabel')} price={t('bundleHotelPrice')} />
+          <BundleRow label={t('bundleFnbLabel')} price={t('bundleFnbPrice')} />
+          <BundleRow label={t('bundleFullLabel')} price={t('bundleFullPrice')} />
+        </div>
+      </section>
+
+      {/* Standalone upgrade CTA. Hidden on Pro since there's nothing to
+          upgrade to. Routes through the same LINE / email funnel as the
+          per-card upgrade modal; recommendedUpgrade selects the next
+          tier (starter → growth, growth → pro). */}
+      {plan !== 'pro' && recommendedUpgrade && (
+        <section style={{
+          background: '#ffffff',
+          border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius-lg)',
+          padding: '16px 18px',
+        }}>
+          <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-text-primary)', margin: '0 0 4px' }}>
+            {t('upgradeCtaTitle')}
+          </h3>
+          <p style={{ fontSize: 12, color: 'var(--color-text-secondary)', margin: '0 0 12px', lineHeight: 1.55 }}>
+            {t('upgradeCtaBody')}
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <a
+              href={LINE_CONTACT_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                padding: '11px 12px',
+                background: '#06C755',
+                color: '#fff',
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 600,
+                textDecoration: 'none',
+                minHeight: 44,
+                boxSizing: 'border-box',
+              }}
+            >
+              {t('contactViaLine')} →
+            </a>
+            <a
+              href={buildEmailHref(recommendedUpgrade)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                padding: '11px 12px',
+                background: '#ffffff',
+                color: '#534AB7',
+                border: '1px solid #534AB7',
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 600,
+                textDecoration: 'none',
+                minHeight: 44,
+                boxSizing: 'border-box',
+              }}
+            >
+              {t('contactViaEmail')} →
+            </a>
+          </div>
+        </section>
+      )}
 
       {/* FAQ */}
       <section style={{
@@ -441,7 +564,7 @@ export default function BillingPage() {
         }}>
           {t('faqTitle')}
         </h3>
-        {(['payment', 'cancel', 'data', 'annual'] as const).map((key, i) => {
+        {(['payment', 'cancel', 'data', 'annual', 'ratedesk', 'integrations'] as const).map((key, i) => {
           const expanded = expandedFaqs.has(key)
           return (
             <div key={key} style={{ borderTop: i > 0 ? '1px solid var(--color-border)' : 'none' }}>
@@ -711,6 +834,113 @@ function UpgradeModal({
           {tCommon('cancel')}
         </button>
       </div>
+    </div>
+  )
+}
+
+// Add-on card (RateDesk teal / MenuDesk amber). External link target —
+// _blank — so the LINE OA opens in a new tab without losing context on
+// the billing page.
+function AddonCard({
+  tone,
+  title,
+  subtitle,
+  price,
+  features,
+  ctaLabel,
+  ctaHref,
+}: {
+  tone: 'teal' | 'amber'
+  title: string
+  subtitle: string
+  price: string
+  features: string[]
+  ctaLabel: string
+  ctaHref: string
+}) {
+  const palette = tone === 'teal'
+    ? { border: 'var(--color-teal, #1D9E75)', tint: 'var(--color-teal-light, #E6F4EF)', accent: 'var(--color-teal, #1D9E75)' }
+    : { border: 'var(--color-amber-border, #FCD9A0)', tint: 'var(--color-amber-light, #FFF4E0)', accent: 'var(--color-amber-text, #8A5A00)' }
+
+  return (
+    <div style={{
+      background: '#ffffff',
+      border: `2px solid ${palette.border}`,
+      borderRadius: 'var(--radius-lg)',
+      padding: 16,
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10,
+    }}>
+      <div>
+        <span style={{
+          display: 'inline-block',
+          fontSize: 10,
+          fontWeight: 600,
+          padding: '2px 8px',
+          borderRadius: 999,
+          background: palette.tint,
+          color: palette.accent,
+          marginBottom: 8,
+          letterSpacing: '0.03em',
+          textTransform: 'uppercase',
+        }}>
+          Add-on
+        </span>
+        <h4 style={{ fontSize: 16, fontWeight: 700, color: 'var(--color-text-primary)', margin: '0 0 2px' }}>
+          {title}
+        </h4>
+        <p style={{ fontSize: 12, color: 'var(--color-text-tertiary)', margin: 0 }}>{subtitle}</p>
+      </div>
+      <p style={{ fontSize: 18, fontWeight: 700, color: palette.accent, margin: 0 }}>{price}</p>
+      <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {features.map((f, i) => (
+          <li key={i} style={{ fontSize: 12, color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+            <Check size={12} style={{ color: palette.accent, flexShrink: 0, marginTop: 2 }} />
+            <span>{f}</span>
+          </li>
+        ))}
+      </ul>
+      <a
+        href={ctaHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{
+          marginTop: 'auto',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '10px 12px',
+          background: palette.accent,
+          color: '#ffffff',
+          borderRadius: 8,
+          fontSize: 13,
+          fontWeight: 600,
+          textDecoration: 'none',
+          minHeight: 44,
+          boxSizing: 'border-box',
+        }}
+      >
+        {ctaLabel}
+      </a>
+    </div>
+  )
+}
+
+// One row of the bundle savings callout. Keeps the table-like markup
+// out of the main render so the section stays scannable.
+function BundleRow({ label, price }: { label: string; price: string }) {
+  return (
+    <div style={{
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'baseline',
+      gap: 12,
+      fontSize: 13,
+      color: 'var(--color-text-primary)',
+    }}>
+      <span>{label}</span>
+      <strong style={{ color: 'var(--color-teal, #1D9E75)' }}>{price}</strong>
     </div>
   )
 }
