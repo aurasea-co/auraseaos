@@ -40,10 +40,12 @@ type Tier = 'founding' | 'early_adopter' | 'standard' | 'custom'
 // Tier presets drive trial / discount / promo prefix when an admin picks
 // one. The admin appends the member number (e.g. "FOUNDING-12") in the
 // promo label field — that number ends up in the email badge.
-const TIER_PRESETS: Record<Exclude<Tier, 'custom'>, { trialDays: number; discountPct: number; promoPrefix: string; label: string }> = {
-  founding: { trialDays: 90, discountPct: 50, promoPrefix: 'FOUNDING-', label: 'Founding Partner · 90d · 50% off' },
-  early_adopter: { trialDays: 60, discountPct: 30, promoPrefix: 'EARLY-', label: 'Early Adopter · 60d · 30% off' },
-  standard: { trialDays: 30, discountPct: 0, promoPrefix: '', label: 'Standard Trial · 30d · no discount' },
+type PlanKey = 'starter' | 'growth' | 'pro'
+
+const TIER_PRESETS: Record<Exclude<Tier, 'custom'>, { trialDays: number; discountPct: number; plan: PlanKey; promoPrefix: string; label: string }> = {
+  founding: { trialDays: 90, discountPct: 50, plan: 'growth', promoPrefix: 'FOUNDING-', label: 'Founding Partner · 90d · 50% off · Growth' },
+  early_adopter: { trialDays: 60, discountPct: 30, plan: 'growth', promoPrefix: 'EARLY-', label: 'Early Adopter · 60d · 30% off · Growth' },
+  standard: { trialDays: 30, discountPct: 0, plan: 'starter', promoPrefix: '', label: 'Standard Trial · 30d · no discount · Starter' },
 }
 
 export default function InviteOwnerPage() {
@@ -59,14 +61,31 @@ export default function InviteOwnerPage() {
   const [promoCode, setPromoCode] = useState('EARLY-')
   const [notes, setNotes] = useState('')
 
+  // lastPresetTier tracks the most recent preset the admin actively
+  // picked from the dropdown. Tier-controlled fields (trial days,
+  // discount, plan) compare against this preset to surface
+  // "Custom override" warnings. Picking "Custom" from the dropdown
+  // clears it — at that point there's no preset to deviate from.
+  const [lastPresetTier, setLastPresetTier] = useState<Exclude<Tier, 'custom'> | null>('early_adopter')
+
   function applyTier(next: Tier) {
     setTier(next)
-    if (next === 'custom') return
+    if (next === 'custom') {
+      setLastPresetTier(null)
+      return
+    }
     const preset = TIER_PRESETS[next]
+    setLastPresetTier(next)
     setTrialDays(preset.trialDays)
     setDiscountPct(preset.discountPct)
+    setPlan(preset.plan)
     setPromoCode(preset.promoPrefix)
   }
+
+  const activePreset = lastPresetTier ? TIER_PRESETS[lastPresetTier] : null
+  const trialOverridden = !!activePreset && tier === 'custom' && trialDays !== activePreset.trialDays
+  const discountOverridden = !!activePreset && tier === 'custom' && discountPct !== activePreset.discountPct
+  const planOverridden = !!activePreset && tier === 'custom' && plan !== activePreset.plan
 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -198,13 +217,23 @@ export default function InviteOwnerPage() {
                 <option key={d} value={d}>{d} days</option>
               ))}
             </select>
+            {trialOverridden && activePreset && (
+              <OverrideHint defaultValue={`${activePreset.trialDays}d`} />
+            )}
           </Field>
           <Field label="Starting plan">
-            <select value={plan} onChange={(e) => setPlan(e.target.value as typeof plan)} style={inputStyle}>
+            <select
+              value={plan}
+              onChange={(e) => { setPlan(e.target.value as typeof plan); setTier('custom') }}
+              style={inputStyle}
+            >
               {PLAN_OPTIONS.map((p) => (
                 <option key={p} value={p}>{p[0].toUpperCase() + p.slice(1)}</option>
               ))}
             </select>
+            {planOverridden && activePreset && (
+              <OverrideHint defaultValue={activePreset.plan[0].toUpperCase() + activePreset.plan.slice(1)} />
+            )}
           </Field>
         </div>
 
@@ -218,6 +247,9 @@ export default function InviteOwnerPage() {
               <option key={d} value={d}>{d === 0 ? 'No discount' : `${d}% off`}</option>
             ))}
           </select>
+          {discountOverridden && activePreset && (
+            <OverrideHint defaultValue={activePreset.discountPct === 0 ? 'No discount' : `${activePreset.discountPct}% off`} />
+          )}
         </Field>
 
         <Field label="Promo label">
@@ -358,12 +390,43 @@ export default function InviteOwnerPage() {
                       value={`${r.plan[0].toUpperCase()}${r.plan.slice(1)} · ${r.trial_days}d trial${r.discount_pct ? ` · ${r.discount_pct}% off first month` : ' · no discount'}`}
                     />
                     <DetailRow label="Promo label" value={r.promo_code || '—'} />
-                    <DetailRow
-                      label="Internal notes"
-                      value={r.notes || '—'}
-                      muted={!r.notes}
-                      hint="NEVER_EMAIL — super-admin only"
-                    />
+
+                    {/* Internal notes — amber card so the boundary
+                        between super-admin-only context and what the
+                        owner actually receives is unmistakable. The
+                        NEVER_EMAIL invariant is enforced upstream by
+                        the email template's prop surface; this card
+                        is the editorial reminder. */}
+                    <div style={{
+                      marginTop: 4,
+                      background: '#FFFBEB',
+                      border: '1px solid #FCD34D',
+                      borderRadius: 6,
+                      padding: '8px 12px',
+                    }}>
+                      <div style={{
+                        fontSize: 10,
+                        fontWeight: 600,
+                        color: '#8A5A00',
+                        letterSpacing: '0.04em',
+                        textTransform: 'uppercase',
+                        marginBottom: 4,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                      }}>
+                        📋 บันทึกภายใน · Internal notes (super admin only)
+                      </div>
+                      <div style={{
+                        fontSize: 12,
+                        color: r.notes ? '#3a3a3a' : '#9b9b9b',
+                        whiteSpace: 'pre-wrap',
+                        lineHeight: 1.55,
+                        fontStyle: r.notes ? 'normal' : 'italic',
+                      }}>
+                        {r.notes || 'ไม่มีบันทึกภายใน · No internal notes for this invitation'}
+                      </div>
+                    </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
                       <span style={{ width: 110, color: '#6b6b6b', flexShrink: 0 }}>Invitation link</span>
                       <code style={{
@@ -415,6 +478,23 @@ export default function InviteOwnerPage() {
         )}
       </section>
     </div>
+  )
+}
+
+function OverrideHint({ defaultValue }: { defaultValue: string }) {
+  return (
+    <span style={{
+      display: 'inline-block',
+      marginTop: 4,
+      fontSize: 11,
+      fontWeight: 500,
+      color: '#8A5A00',
+      background: '#FFF4E0',
+      padding: '2px 8px',
+      borderRadius: 6,
+    }}>
+      ⚠ Custom override · tier default: {defaultValue}
+    </span>
   )
 }
 

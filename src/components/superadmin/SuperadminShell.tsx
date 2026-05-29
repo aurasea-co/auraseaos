@@ -3,12 +3,16 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { LayoutDashboard, Building2, Users, ScrollText, LogOut } from 'lucide-react'
+import { LayoutDashboard, Building2, Users, ScrollText, LogOut, MailPlus } from 'lucide-react'
 
 const navItems = [
   { href: '/superadmin', icon: LayoutDashboard, label: 'ภาพรวม' },
   { href: '/superadmin/companies', icon: Building2, label: 'บริษัทและสาขา' },
   { href: '/superadmin/users', icon: Users, label: 'ผู้ใช้งาน' },
+  // Lands on the invite form, which also lists every previously-sent
+  // invitation in an expandable detail panel — internal notes live
+  // there (super-admin only, never reaches the owner's email).
+  { href: '/superadmin/invite-owner', icon: MailPlus, label: 'คำเชิญ' },
   { href: '/superadmin/audit', icon: ScrollText, label: 'Audit log' },
 ]
 
