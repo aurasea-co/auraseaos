@@ -2,13 +2,15 @@
 
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
+import { useRouter } from 'next/navigation'
 import { useUser } from '@/providers/user-context'
 import { createClient } from '@/lib/supabase/client'
 import { BranchTypeBadge } from '@/components/ui/BranchTypeBadge'
 import { Button } from '@/components/ui/Button'
-import { ArrowLeft, Pencil, Plus } from 'lucide-react'
+import { ArrowLeft, Pencil, Plus, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { SEAT_LIMITS } from '@/lib/config/pricing'
+import { DeleteBranchModal } from '@/components/branches/DeleteBranchModal'
 
 const planBranchLimits = { starter: SEAT_LIMITS.starter.branches, growth: SEAT_LIMITS.growth.branches, pro: SEAT_LIMITS.pro.branches }
 
@@ -24,6 +26,48 @@ export default function BranchesPage() {
   const [editSeats, setEditSeats] = useState('')
   const [editCutoff, setEditCutoff] = useState('05:00')
   const [saving, setSaving] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string; dataRows: number } | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
+  const router = useRouter()
+
+  const isLastBranch = branches.length <= 1
+
+  async function openDeleteModal(branchId: string, name: string) {
+    // Probe usage so the modal knows whether to demand typed
+    // confirmation. The route is service-role-backed but checks
+    // ownership against the caller — we don't pass anything but the
+    // cookie session.
+    try {
+      const res = await fetch(`/api/branches/${branchId}/usage`)
+      if (!res.ok) {
+        setToast(t('deleteFailed'))
+        return
+      }
+      const json: { dataRows: number; isLastBranch: boolean } = await res.json()
+      // Defensive double-check; UI already hides the trigger on the
+      // last branch, but the server returns this too so we honour it.
+      if (json.isLastBranch) return
+      setDeleteTarget({ id: branchId, name, dataRows: json.dataRows })
+    } catch {
+      setToast(t('deleteFailed'))
+    }
+  }
+
+  async function handleDeleteConfirm() {
+    if (!deleteTarget) return
+    const res = await fetch(`/api/branches/${deleteTarget.id}`, { method: 'DELETE' })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body?.error || t('deleteFailed'))
+    }
+    setDeleteTarget(null)
+    setToast(t('deleteSuccess'))
+    // router.refresh() re-runs the (app)/layout server component
+    // so getUserContext re-fetches branches and the page re-renders
+    // without the deleted row.
+    router.refresh()
+    window.setTimeout(() => setToast(null), 3500)
+  }
 
   if (role !== 'owner') return null
 
@@ -82,9 +126,26 @@ export default function BranchesPage() {
                 )}
               </div>
               {!isEditing && (
-                <button onClick={() => startEdit(branch)} className="p-1 text-slate-400 hover:text-slate-600 touch-target">
-                  <Pencil size={14} />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => startEdit(branch)} className="p-1 text-slate-400 hover:text-slate-600 touch-target" aria-label="Edit">
+                    <Pencil size={14} />
+                  </button>
+                  <button
+                    onClick={() => openDeleteModal(branch.id, branch.name)}
+                    disabled={isLastBranch}
+                    title={isLastBranch ? t('deleteDisabledLast') : t('deleteBranch')}
+                    aria-label={t('deleteBranch')}
+                    className="p-1 touch-target"
+                    style={{
+                      color: isLastBranch ? '#cfcfcf' : '#A32D2D',
+                      cursor: isLastBranch ? 'not-allowed' : 'pointer',
+                      background: 'transparent',
+                      border: 'none',
+                    }}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               )}
             </div>
 
@@ -148,6 +209,37 @@ export default function BranchesPage() {
           <Link href="/settings/billing" className="text-blue-600 hover:text-blue-700 ml-1">
             {t('upgrade')}
           </Link>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <DeleteBranchModal
+          branchName={deleteTarget.name}
+          dataRows={deleteTarget.dataRows}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={handleDeleteConfirm}
+        />
+      )}
+
+      {toast && (
+        <div
+          role="status"
+          style={{
+            position: 'fixed',
+            bottom: 24,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: '#1a1a1a',
+            color: '#ffffff',
+            padding: '10px 18px',
+            borderRadius: 999,
+            fontSize: 13,
+            fontWeight: 500,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            zIndex: 220,
+          }}
+        >
+          {toast}
         </div>
       )}
     </div>

@@ -284,7 +284,18 @@
     "cutoffHint": "Entries submitted before this time count as the previous day",
     "cutoffHintAccommodation": "Entries before 14:00 = last night's data.\nEntries after 14:00 = tonight's data.\nIdeal for hotels that enter data in the morning.",
     "cutoffHintFnb": "Entries before 05:00 = yesterday's data.\nEntries after 05:00 = today's data.\nIdeal for late-night venues entering data before bed.",
-    "notSet": "Not set"
+    "notSet": "Not set",
+    "deleteBranch": "Delete branch",
+    "deleteDisabledLast": "Can't delete — you need at least one branch",
+    "deleteModalTitle": "Delete this branch?",
+    "deleteModalBody": "Branch {name} will be permanently deleted. This cannot be undone.",
+    "deleteModalDataWarning": "⚠️ This branch has {rows} recorded entries. Deleting it will permanently remove all its data too.",
+    "deleteModalTypeToConfirm": "Type the branch name to confirm",
+    "deleteCta": "Delete branch",
+    "deleteCtaWithData": "Delete branch and all data",
+    "deleting": "Deleting…",
+    "deleteSuccess": "Branch deleted",
+    "deleteFailed": "Couldn't delete that branch. Please try again."
   },
   "settingsTargets": {
     "title": "Targets",

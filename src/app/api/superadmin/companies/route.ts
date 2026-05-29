@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
+import { findDuplicateBranchIds } from '@/lib/branches/duplicates'
 import { authenticateSuperAdmin } from '../_lib'
 
 // GET /api/superadmin/companies
@@ -26,6 +27,10 @@ interface BranchRow {
   branchName: string
   branchType: string
   branchCreatedAt: string
+  // true when another branch in the same org normalises to the same
+  // name — UI shows an amber "Possible duplicate" pill so the admin
+  // can spot leftover artefacts from the old double-submission bug.
+  isPossibleDuplicate: boolean
 }
 
 interface Response {
@@ -154,8 +159,15 @@ export async function GET() {
         branchName: b.name,
         branchType: b.business_type,
         branchCreatedAt: b.created_at,
+        isPossibleDuplicate: false, // filled in below
       })
     }
+  }
+
+  // Second pass: flag duplicates once we have the full rows list.
+  const duplicateIds = findDuplicateBranchIds(rows)
+  for (const r of rows) {
+    if (duplicateIds.has(r.branchId)) r.isPossibleDuplicate = true
   }
 
   const body: Response = {

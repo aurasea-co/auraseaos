@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Search } from 'lucide-react'
+import { Search, Trash2, AlertTriangle, X } from 'lucide-react'
 import { BranchTypeBadge } from '@/components/ui/BranchTypeBadge'
 
 // Companies & Branches tab — flat row per branch with the parent org
@@ -23,6 +23,7 @@ interface BranchRow {
   branchName: string
   branchType: string
   branchCreatedAt: string
+  isPossibleDuplicate: boolean
 }
 
 interface BranchlessOrg {
@@ -42,26 +43,68 @@ export default function CompaniesPage() {
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<BranchRow | null>(null)
+  const [deleteUsage, setDeleteUsage] = useState<{ dataRows: number } | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
+
+  async function reload() {
+    const res = await fetch('/api/superadmin/companies', { cache: 'no-store' })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      setError(body?.error || res.statusText)
+      return
+    }
+    const json: { rows: BranchRow[]; branchlessOrgs: BranchlessOrg[]; counts: { companies: number; branches: number } } =
+      await res.json()
+    setRows(json.rows || [])
+    setBranchlessOrgs(json.branchlessOrgs || [])
+    setCounts(json.counts || { companies: 0, branches: 0 })
+  }
+
+  async function openDeleteModal(row: BranchRow) {
+    setDeleteTarget(row)
+    setDeleteUsage(null)
+    try {
+      const res = await fetch(`/api/superadmin/branches/${row.branchId}`)
+      if (res.ok) {
+        const j: { dataRows: number } = await res.json()
+        setDeleteUsage({ dataRows: j.dataRows })
+      } else {
+        setDeleteUsage({ dataRows: 0 })
+      }
+    } catch {
+      setDeleteUsage({ dataRows: 0 })
+    }
+  }
+
+  async function confirmAdminDelete() {
+    if (!deleteTarget) return
+    const res = await fetch(`/api/superadmin/branches/${deleteTarget.branchId}`, {
+      method: 'DELETE',
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body?.error || 'Delete failed')
+    }
+    setDeleteTarget(null)
+    setDeleteUsage(null)
+    setToast(`Branch "${deleteTarget.branchName}" deleted`)
+    window.setTimeout(() => setToast(null), 3500)
+    await reload()
+  }
 
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch('/api/superadmin/companies', { cache: 'no-store' })
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}))
-          setError(body?.error || res.statusText)
-          return
-        }
-        const json: { rows: BranchRow[]; branchlessOrgs: BranchlessOrg[]; counts: { companies: number; branches: number } } =
-          await res.json()
-        setRows(json.rows || [])
-        setBranchlessOrgs(json.branchlessOrgs || [])
-        setCounts(json.counts || { companies: 0, branches: 0 })
+        await reload()
       } finally {
         setLoading(false)
       }
     }
     load()
+    // reload is intentionally stable across renders — it closes over
+    // state setters which React guarantees never change identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Client-side filter — keeps the search snappy without re-hitting
@@ -140,6 +183,7 @@ export default function CompaniesPage() {
               <th style={th}>Plan</th>
               <th style={th}>Status</th>
               <th style={th}>Created</th>
+              <th style={th}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -169,7 +213,31 @@ export default function CompaniesPage() {
                   <td style={{ ...td, color: 'var(--color-text-tertiary)' }}>
                     {newOrg ? r.ownerEmail || '—' : ''}
                   </td>
-                  <td style={td}>{r.branchName}</td>
+                  <td style={td}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span>{r.branchName}</span>
+                      {r.isPossibleDuplicate && (
+                        <span
+                          title="Another branch in this org normalises to the same name"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            fontSize: 10,
+                            fontWeight: 600,
+                            padding: '2px 8px',
+                            borderRadius: 999,
+                            background: '#FFF4E0',
+                            color: '#8A5A00',
+                            border: '1px solid #FCD9A0',
+                          }}
+                        >
+                          <AlertTriangle size={10} aria-hidden />
+                          Possible duplicate
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td style={td}>
                     <BranchTypeBadge type={r.branchType} />
                   </td>
@@ -181,6 +249,24 @@ export default function CompaniesPage() {
                   </td>
                   <td style={{ ...td, color: 'var(--color-text-tertiary)' }}>
                     {formatThaiDate(r.organizationCreatedAt)}
+                  </td>
+                  <td style={td}>
+                    <button
+                      onClick={() => openDeleteModal(r)}
+                      aria-label={`Delete branch ${r.branchName}`}
+                      title="Delete branch"
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: '#A32D2D',
+                        padding: 4,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
                   </td>
                 </tr>
               )
@@ -209,11 +295,12 @@ export default function CompaniesPage() {
                 <td style={{ ...td, color: 'var(--color-text-tertiary)' }}>
                   {formatThaiDate(o.organizationCreatedAt)}
                 </td>
+                <td style={td} />
               </tr>
             ))}
             {filteredRows.length === 0 && filteredBranchless.length === 0 && (
               <tr>
-                <td colSpan={7} style={{ padding: 24, fontSize: 13, color: 'var(--color-text-tertiary)', textAlign: 'center' }}>
+                <td colSpan={8} style={{ padding: 24, fontSize: 13, color: 'var(--color-text-tertiary)', textAlign: 'center' }}>
                   {search ? 'ไม่พบผลลัพธ์' : 'ยังไม่มีบริษัท'}
                 </td>
               </tr>
@@ -227,6 +314,204 @@ export default function CompaniesPage() {
           background: var(--color-bg-surface, #fafafa);
         }
       `}</style>
+
+      {deleteTarget && (
+        <AdminDeleteBranchModal
+          row={deleteTarget}
+          dataRows={deleteUsage?.dataRows ?? null}
+          onCancel={() => { setDeleteTarget(null); setDeleteUsage(null) }}
+          onConfirm={confirmAdminDelete}
+        />
+      )}
+
+      {toast && (
+        <div
+          role="status"
+          style={{
+            position: 'fixed',
+            bottom: 24,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: '#1a1a1a',
+            color: '#ffffff',
+            padding: '10px 18px',
+            borderRadius: 999,
+            fontSize: 13,
+            fontWeight: 500,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            zIndex: 220,
+          }}
+        >
+          {toast}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Admin override delete modal. Different flow from the owner modal:
+//   - no last-branch guard
+//   - shows org name + branch name + data row count
+//   - delete requires a single explicit checkbox (no name typing —
+//     the admin already knows what they're doing; we just want a
+//     forced "yes I read this" moment)
+function AdminDeleteBranchModal({
+  row,
+  dataRows,
+  onCancel,
+  onConfirm,
+}: {
+  row: BranchRow
+  dataRows: number | null
+  onCancel: () => void
+  onConfirm: () => Promise<void>
+}) {
+  const [acknowledged, setAcknowledged] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onCancel()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
+
+  async function handleConfirm() {
+    if (!acknowledged || deleting) return
+    setDeleting(true)
+    setError(null)
+    try {
+      await onConfirm()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Delete failed')
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="admin-delete-title"
+      onClick={onCancel}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.5)',
+        zIndex: 200,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 16,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: '#ffffff',
+          borderRadius: 12,
+          padding: 24,
+          maxWidth: 480,
+          width: '100%',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 14 }}>
+          <h3 id="admin-delete-title" style={{ fontSize: 17, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>
+            Delete branch (admin)
+          </h3>
+          <button
+            type="button"
+            onClick={onCancel}
+            aria-label="Close"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              padding: 4,
+              cursor: 'pointer',
+              color: '#9b9b9b',
+              display: 'flex',
+              alignItems: 'center',
+            }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div style={{ background: '#f7f7f5', borderRadius: 8, padding: '12px 14px', fontSize: 13, lineHeight: 1.7, color: '#1a1a1a', marginBottom: 14 }}>
+          <div>Company: <strong>{row.organizationName}</strong></div>
+          <div>Branch: <strong>{row.branchName}</strong></div>
+          <div>Type: <strong>{row.branchType}</strong></div>
+          <div>Created: <strong>{formatThaiDate(row.branchCreatedAt)}</strong></div>
+          <div style={{ marginTop: 6 }}>
+            Data rows: <strong>{dataRows == null ? '…' : dataRows.toLocaleString()}</strong>
+          </div>
+        </div>
+
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, color: '#3a3a3a', marginBottom: 14, lineHeight: 1.5, cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={acknowledged}
+            onChange={(e) => setAcknowledged(e.target.checked)}
+            style={{ marginTop: 2 }}
+          />
+          <span>
+            I understand all data in this branch (including {dataRows ?? 0} recorded entries) will be permanently deleted.
+          </span>
+        </label>
+
+        {error && (
+          <div style={{
+            fontSize: 12,
+            color: '#A32D2D',
+            background: '#FBEAEA',
+            padding: '8px 12px',
+            borderRadius: 6,
+            marginBottom: 12,
+          }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={deleting}
+            style={{
+              padding: '9px 16px',
+              fontSize: 13,
+              fontWeight: 500,
+              border: '1px solid #d4d4d4',
+              borderRadius: 8,
+              background: 'transparent',
+              color: '#3a3a3a',
+              cursor: deleting ? 'not-allowed' : 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleConfirm}
+            disabled={!acknowledged || deleting}
+            style={{
+              padding: '9px 16px',
+              fontSize: 13,
+              fontWeight: 600,
+              border: 'none',
+              borderRadius: 8,
+              background: acknowledged && !deleting ? '#A32D2D' : '#dca6a6',
+              color: '#ffffff',
+              cursor: acknowledged && !deleting ? 'pointer' : 'not-allowed',
+            }}
+          >
+            {deleting ? 'Deleting…' : 'Delete branch'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
