@@ -1,7 +1,8 @@
 'use client'
 
+import { useEffect } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { useUser } from '@/providers/user-context'
 import {
@@ -29,11 +30,25 @@ const allSections = [
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const router = useRouter()
   const { role } = useUser()
   const t = useTranslations('settingsNav')
 
   const sections = allSections.filter((s) => s.roles.includes(role))
   const isSubPage = pathname !== '/settings'
+
+  // Direct-URL guard. The sidebar already filters allSections by role
+  // so non-owners never see the link, but a manager typing
+  // /settings/billing into the URL would still render the page.
+  // Redirect them to /settings/profile (the one section every role
+  // can access) before any owner-only content paints. Uses
+  // router.replace so the back button doesn't trap them in a loop.
+  const currentSection = allSections.find((s) => s.href === pathname)
+  const allowed = !currentSection || currentSection.roles.includes(role)
+  useEffect(() => {
+    if (!allowed) router.replace('/settings/profile')
+  }, [allowed, router])
+  if (!allowed) return null
 
   return (
     <div className="flex gap-0">

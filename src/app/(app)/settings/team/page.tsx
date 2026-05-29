@@ -337,8 +337,12 @@ export default function TeamPage() {
       <div className="flex items-center justify-between">
         <h2 className="hidden lg:block" style={{ fontSize: 'var(--font-size-lg)', fontWeight: 500, color: 'var(--color-text-primary)' }}>{t('title')}</h2>
         <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-tertiary)' }}>
-          <span style={{ marginRight: 12 }}>Manager: {managerCount}/{limits.manager === 999 ? '∞' : limits.manager}</span>
-          <span>Staff: {staffCount}/{limits.staff === 999 ? '∞' : limits.staff}</span>
+          <span style={{ marginRight: 12, color: seatColor(managerCount, limits.manager) }}>
+            Manager: {managerCount}/{limits.manager === 999 ? '∞' : limits.manager}
+          </span>
+          <span style={{ color: seatColor(staffCount, limits.staff) }}>
+            Staff: {staffCount}/{limits.staff === 999 ? '∞' : limits.staff}
+          </span>
         </div>
       </div>
 
@@ -823,4 +827,15 @@ function Toggle({
       />
     </button>
   )
+}
+
+// Color the seat-count badge by how close it is to the plan cap.
+// Pro's cap is encoded as 999 (≡ Infinity) — that case renders muted
+// since there's no point flashing red. Starter and Growth get red when
+// at the cap and amber within one of it.
+function seatColor(current: number, max: number): string {
+  if (max === 999) return 'var(--color-text-tertiary)'
+  if (current >= max) return '#A32D2D' // at cap
+  if (current >= max - 1) return '#8A5A00' // one slot left
+  return 'var(--color-text-tertiary)'
 }
