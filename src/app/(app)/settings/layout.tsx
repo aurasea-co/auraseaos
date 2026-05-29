@@ -14,6 +14,7 @@ import {
   Users,
   CreditCard,
   Download,
+  Upload,
   ChevronRight,
 } from 'lucide-react'
 
@@ -25,6 +26,7 @@ const allSections = [
   { href: '/settings/targets', icon: Target, labelKey: 'targets' as const, roles: ['owner'] },
   { href: '/settings/team', icon: Users, labelKey: 'team' as const, roles: ['owner'] },
   { href: '/settings/billing', icon: CreditCard, labelKey: 'billing' as const, roles: ['owner'] },
+  { href: '/settings/import', icon: Upload, labelKey: 'importCsv' as const, roles: ['owner'] },
   { href: '/settings/export', icon: Download, labelKey: 'exportData' as const, roles: ['owner'] },
 ]
 
