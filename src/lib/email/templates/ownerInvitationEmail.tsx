@@ -93,15 +93,23 @@ export default function OwnerInvitationEmail({
       ? 'คุณได้รับสิทธิ์ทดลองใช้ Aurasea OS ก่อนใคร'
       : 'คุณได้รับเชิญให้ลองใช้ Aurasea OS'
 
+  // Standard-tier invitations with a non-empty promo code used to
+  // render no badge at all — only FOUNDING/EARLY prefixes produced
+  // one. Fall back to a neutral "PROMO · {code}" pill so super
+  // admins typing arbitrary labels (SETT2026, PARTNER-XYZ, etc.)
+  // still see their promo carried through to the owner's inbox.
+  const trimmedPromo = (promoCode || '').trim()
   const badgeLabel = isFounding
     ? `Founding Partner${memberNumber ? ` #${memberNumber}` : ''}`
     : isEarly
       ? `Early Adopter${memberNumber ? ` #${memberNumber}` : ''}`
-      : null
+      : trimmedPromo
+        ? `Promo · ${trimmedPromo}`
+        : null
 
-  const badgeBg = isFounding ? COLORS.goldBg : COLORS.tealBg
-  const badgeFg = isFounding ? COLORS.gold : COLORS.teal
-  const badgeBorder = isFounding ? COLORS.goldBorder : COLORS.tealBorder
+  const badgeBg = isFounding ? COLORS.goldBg : isEarly ? COLORS.tealBg : COLORS.rowBg
+  const badgeFg = isFounding ? COLORS.gold : isEarly ? COLORS.teal : COLORS.subtle
+  const badgeBorder = isFounding ? COLORS.goldBorder : isEarly ? COLORS.tealBorder : COLORS.border
 
   const orgDisplay = organizationName || 'ธุรกิจของคุณ'
   const priceLine = planPrice

@@ -9,9 +9,18 @@ interface RecentInvite {
   id: string
   email: string
   organization_name: string | null
+  business_type: string | null
   plan: string
   trial_days: number
   discount_pct: number
+  promo_code: string | null
+  // NEVER_EMAIL — internal_notes / notes is super-admin-only context
+  // and must not reach the owner's inbox. The email template's prop
+  // surface omits it; the unit test in
+  // src/lib/email/templates/ownerInvitationEmail.test.tsx pins that
+  // a CONFIDENTIAL_OPS_NOTE_42 string passed through doesn't render.
+  notes: string | null
+  token: string
   accepted_at: string | null
   created_at: string
   expires_at: string
@@ -64,13 +73,26 @@ export default function InviteOwnerPage() {
   const [success, setSuccess] = useState<string | null>(null)
 
   const [recent, setRecent] = useState<RecentInvite[]>([])
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [copiedToken, setCopiedToken] = useState<string | null>(null)
+
+  async function copyInviteLink(token: string) {
+    const url = `${window.location.origin}/owner-setup?token=${token}`
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopiedToken(token)
+      window.setTimeout(() => setCopiedToken((curr) => (curr === token ? null : curr)), 1800)
+    } catch {
+      // ignore — fall back to manual select
+    }
+  }
 
   const loadRecent = useCallback(async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db = supabase as any
     const { data } = await db
       .from('owner_invitations')
-      .select('id, email, organization_name, plan, trial_days, discount_pct, accepted_at, created_at, expires_at')
+      .select('id, email, organization_name, business_type, plan, trial_days, discount_pct, promo_code, notes, token, accepted_at, created_at, expires_at')
       .order('created_at', { ascending: false })
       .limit(20)
     setRecent((data || []) as RecentInvite[])
@@ -273,37 +295,151 @@ export default function InviteOwnerPage() {
             const statusLabel = accepted ? 'Accepted' : expired ? 'Expired' : 'Pending'
             const statusBg = accepted ? '#E6F4EE' : expired ? '#F4F4F2' : '#FFF4E0'
             const statusFg = accepted ? '#0F5132' : expired ? '#9b9b9b' : '#8A5A00'
+            const isExpanded = expandedId === r.id
+            const inviteUrl = typeof window !== 'undefined'
+              ? `${window.location.origin}/owner-setup?token=${r.token}`
+              : `/owner-setup?token=${r.token}`
             return (
               <div
                 key={r.id}
                 style={{
-                  padding: '10px 16px',
                   borderTop: i > 0 ? '1px solid #f0f0ee' : 'none',
                   fontSize: 13,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 4,
                 }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-                  <strong style={{ color: '#1a1a1a' }}>{r.email}</strong>
-                  <span style={{
-                    fontSize: 10,
-                    fontWeight: 500,
-                    padding: '1px 8px',
-                    borderRadius: 999,
-                    background: statusBg,
-                    color: statusFg,
-                  }}>{statusLabel}</span>
-                </div>
-                <div style={{ color: '#6b6b6b', fontSize: 12 }}>
-                  {r.organization_name || '—'} · {r.plan} · {r.trial_days}d trial{r.discount_pct ? ` · ${r.discount_pct}% off` : ''}
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setExpandedId(isExpanded ? null : r.id)}
+                  aria-expanded={isExpanded}
+                  style={{
+                    width: '100%',
+                    background: 'transparent',
+                    border: 'none',
+                    padding: '10px 16px',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 4,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                    <strong style={{ color: '#1a1a1a' }}>{r.email}</strong>
+                    <span style={{
+                      fontSize: 10,
+                      fontWeight: 500,
+                      padding: '1px 8px',
+                      borderRadius: 999,
+                      background: statusBg,
+                      color: statusFg,
+                    }}>{statusLabel}</span>
+                  </div>
+                  <div style={{ color: '#6b6b6b', fontSize: 12 }}>
+                    {r.organization_name || '—'} · {r.plan} · {r.trial_days}d trial{r.discount_pct ? ` · ${r.discount_pct}% off` : ''}{r.promo_code ? ` · ${r.promo_code}` : ''}
+                  </div>
+                </button>
+
+                {isExpanded && (
+                  <div style={{
+                    padding: '8px 16px 14px',
+                    background: '#fafafa',
+                    borderTop: '1px solid #f0f0ee',
+                    fontSize: 12,
+                    color: '#3a3a3a',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                  }}>
+                    <DetailRow label="Email" value={r.email} />
+                    <DetailRow label="Company" value={r.organization_name || '—'} />
+                    <DetailRow label="Business type" value={r.business_type || '—'} />
+                    <DetailRow
+                      label="Plan"
+                      value={`${r.plan[0].toUpperCase()}${r.plan.slice(1)} · ${r.trial_days}d trial${r.discount_pct ? ` · ${r.discount_pct}% off first month` : ' · no discount'}`}
+                    />
+                    <DetailRow label="Promo label" value={r.promo_code || '—'} />
+                    <DetailRow
+                      label="Internal notes"
+                      value={r.notes || '—'}
+                      muted={!r.notes}
+                      hint="NEVER_EMAIL — super-admin only"
+                    />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                      <span style={{ width: 110, color: '#6b6b6b', flexShrink: 0 }}>Invitation link</span>
+                      <code style={{
+                        flex: 1,
+                        fontSize: 11,
+                        background: '#ffffff',
+                        border: '1px solid #e5e5e5',
+                        borderRadius: 6,
+                        padding: '4px 8px',
+                        overflowX: 'auto',
+                        whiteSpace: 'nowrap',
+                        color: '#1a1a1a',
+                      }}>{inviteUrl}</code>
+                      <button
+                        type="button"
+                        onClick={() => copyInviteLink(r.token)}
+                        style={{
+                          padding: '4px 10px',
+                          fontSize: 11,
+                          fontWeight: 500,
+                          border: '1px solid #d4d4d4',
+                          borderRadius: 6,
+                          background: '#ffffff',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {copiedToken === r.token ? 'Copied ✓' : 'Copy'}
+                      </button>
+                    </div>
+                    <DetailRow
+                      label="Status"
+                      value={
+                        accepted && r.accepted_at
+                          ? `Accepted on ${new Date(r.accepted_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })}`
+                          : expired
+                            ? 'Expired'
+                            : 'Pending'
+                      }
+                    />
+                    <DetailRow
+                      label="Expires"
+                      value={new Date(r.expires_at).toLocaleString('th-TH', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    />
+                  </div>
+                )}
               </div>
             )
           })
         )}
       </section>
+    </div>
+  )
+}
+
+function DetailRow({
+  label,
+  value,
+  muted = false,
+  hint,
+}: {
+  label: string
+  value: string
+  muted?: boolean
+  hint?: string
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+      <span style={{ width: 110, color: '#6b6b6b', flexShrink: 0 }}>{label}</span>
+      <span style={{ flex: 1, color: muted ? '#9b9b9b' : '#1a1a1a', wordBreak: 'break-word' }}>
+        {value}
+        {hint && (
+          <span style={{ fontSize: 10, color: '#9b9b9b', marginLeft: 8, fontStyle: 'italic' }}>
+            {hint}
+          </span>
+        )}
+      </span>
     </div>
   )
 }
