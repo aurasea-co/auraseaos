@@ -76,13 +76,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: branchErr?.message || 'Failed to create branch' }, { status: 500 })
   }
 
-  // Default notification settings — owners get the morning summary
-  // by email until they connect LINE.
+  // Default notification settings — every channel starts opted out so
+  // a freshly-onboarded owner isn't immediately ambushed by emails
+  // they never consented to. The owner can flip individual toggles
+  // from /settings/notifications, and the LINE-link route (POST
+  // /api/line/link) sets line_notify_enabled=true automatically the
+  // moment they bind the LINE account. Migration 028 mirrors this
+  // default at the column level so unrelated insert paths also
+  // start opted out.
   await db.from('notification_settings').upsert(
     {
       user_id: user.id,
       organization_id: organizationId,
-      email_notifications: true,
+      email_notifications: false,
       line_notify_enabled: false,
       entry_reminder_enabled: false,
     },

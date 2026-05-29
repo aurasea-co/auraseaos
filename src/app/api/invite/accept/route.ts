@@ -152,26 +152,30 @@ export async function POST(req: NextRequest) {
   // so they don't get pinged at 10:00 PM the same day they join (annoying
   // first impression). They can opt in from /settings/notifications.
   //
-  // Note: if entry_reminder_enabled still defaults to true at the DB
-  // level, run:
-  //   ALTER TABLE notification_settings
-  //     ALTER COLUMN entry_reminder_enabled SET DEFAULT false;
-  // …so any other code path that inserts without specifying this column
-  // also opts new users out.
-  // Staff don't receive email notifications by default — the
-  // /settings/notifications page hides the email + LINE toggles for
-  // staff entirely, so leaving email_notifications=true would be a
-  // setting they can't see or change.
-  // Drop ignoreDuplicates so the email_notifications value actually lands
-  // on existing rows — otherwise a row auto-created by a signup trigger
-  // would leave managers with email_notifications=false and they'd never
-  // get the morning flash email.
-  const emailNotificationsDefault = role !== 'staff'
+  // Every email + LINE channel starts OFF for invited members
+  // regardless of role. Earlier versions seeded managers with
+  // email_notifications=true so they'd get the morning flash by
+  // default, but that contradicts the "no email until the user
+  // explicitly opts in" rule the team wants. Managers (and owners,
+  // via the parallel create-branch route) now have to flip the
+  // toggle from /settings/notifications, and the LINE-link route
+  // sets line_notify_enabled=true automatically once they bind
+  // their LINE account.
+  //
+  // entry_reminder_enabled stays explicitly false so a freshly-
+  // joined member doesn't get pinged at 10:00 PM the same day they
+  // accept. Migration 022 already mirrors that at the column level;
+  // migration 028 does the same for email_notifications.
+  //
+  // We drop ignoreDuplicates so the values actually land on existing
+  // rows — without it a row auto-created by a signup trigger would
+  // leave the column at whatever it was inserted with, defeating
+  // the opt-out default.
   const { error: notifErr } = await db.from('notification_settings').upsert(
     {
       user_id: user.id,
       organization_id,
-      email_notifications: emailNotificationsDefault,
+      email_notifications: false,
       line_notify_enabled: false,
       entry_reminder_enabled: false,
     },
