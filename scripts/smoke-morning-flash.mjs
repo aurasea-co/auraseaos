@@ -147,9 +147,20 @@ console.log('──────────────────────�
 console.log(' DB verification — notification_log')
 console.log('───────────────────────────────────────────')
 
-const today = new Date(
-  new Date().toLocaleString('en-US', { timeZone: 'Asia/Bangkok' }),
-).toISOString().slice(0, 10)
+// Intl.DateTimeFormat with timeZone=Asia/Bangkok produces the calendar
+// date in BKK regardless of the host's local timezone. The earlier
+// implementation round-tripped via toLocaleString → new Date() →
+// toISOString, which double-shifts on a host already running in BKK
+// (toLocaleString stamps BKK wall time, new Date() reinterprets it as
+// local — also BKK — and toISOString rolls it back to UTC, landing on
+// yesterday). Same flavour of bug as commit f5acdca's fix in
+// src/lib/notifications/recommendation.ts.
+const today = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Bangkok',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+}).format(new Date())
 
 const restUrl = new URL(`${SUPABASE_URL}/rest/v1/notification_log`)
 restUrl.searchParams.set('notification_type', 'eq.morning_flash')
