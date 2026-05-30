@@ -26,6 +26,44 @@ interface ApiResponse {
   daysParsed: number
   warnings: Array<{ row: number; code: string; messageTh: string; messageEn: string }>
   errors: Array<{ row: number; code: string; messageTh: string; messageEn: string }>
+  // Present when the server bails before parsing (auth, missing csv,
+  // binary file, etc.). Older responses or network errors may
+  // produce a missing/undefined value here, which is why the render
+  // path below treats every array field with `?? []`.
+  routeError?: { code: string; messageTh: string; messageEn: string }
+}
+
+// Normalise any HTTP response payload into a safe ApiResponse so the
+// render path never sees undefined arrays. The server side now
+// always returns a full envelope, but old deployments / proxy errors
+// / malformed JSON could still land here.
+function normaliseApiResponse(raw: unknown, httpStatus: number, statusText: string): ApiResponse {
+  const empty: ApiResponse = {
+    success: false,
+    daysWritten: 0,
+    daysParsed: 0,
+    warnings: [],
+    errors: [],
+  }
+  if (!raw || typeof raw !== 'object') {
+    return {
+      ...empty,
+      routeError: {
+        code: 'invalid_response',
+        messageTh: `เซิร์ฟเวอร์ตอบกลับไม่ถูกต้อง (HTTP ${httpStatus})`,
+        messageEn: `Server returned an invalid response (HTTP ${httpStatus} ${statusText})`,
+      },
+    }
+  }
+  const r = raw as Partial<ApiResponse>
+  return {
+    success: r.success ?? false,
+    daysWritten: r.daysWritten ?? 0,
+    daysParsed: r.daysParsed ?? 0,
+    warnings: Array.isArray(r.warnings) ? r.warnings : [],
+    errors: Array.isArray(r.errors) ? r.errors : [],
+    routeError: r.routeError,
+  }
 }
 
 export default function ImportPage() {
@@ -130,13 +168,39 @@ export default function ImportPage() {
     if (!csv || !selectedBranchId || submitting) return
     setSubmitting(true)
     try {
-      const res = await fetch(`/api/branches/${selectedBranchId}/import-hotel`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csv }),
-      })
-      const json: ApiResponse = await res.json()
-      setResult(json)
+      let res: Response
+      try {
+        res = await fetch(`/api/branches/${selectedBranchId}/import-hotel`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ csv }),
+        })
+      } catch (err) {
+        // Network failure / fetch threw — synth a routeError envelope
+        // so the rest of the render path stays uniform.
+        console.error('[import] fetch failed:', err)
+        setResult({
+          success: false,
+          daysWritten: 0,
+          daysParsed: 0,
+          warnings: [],
+          errors: [],
+          routeError: {
+            code: 'network_error',
+            messageTh: 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่',
+            messageEn: 'Could not reach the server. Please check your connection and try again.',
+          },
+        })
+        return
+      }
+
+      let raw: unknown = null
+      try {
+        raw = await res.json()
+      } catch {
+        /* fall through — normaliseApiResponse handles null */
+      }
+      setResult(normaliseApiResponse(raw, res.status, res.statusText))
     } finally {
       setSubmitting(false)
     }
@@ -356,9 +420,30 @@ export default function ImportPage() {
           )}
 
           {/* Result */}
-          {result && (
+          {result && (() => {
+            // Defensive copies — normaliseApiResponse already ensures
+            // these are arrays, but a second guard here means the
+            // render never crashes on a bad payload that somehow
+            // bypassed the normaliser (older deployments, devtools
+            // editing state, etc.).
+            const resultWarnings = result.warnings ?? []
+            const resultErrors = result.errors ?? []
+            return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {result.success ? (
+              {result.routeError ? (
+                // Top-level HTTP / auth / validation failure — distinct
+                // from parser-level errors. Shows the bilingual message
+                // the server provided.
+                <div style={errorBox}>
+                  <XCircle size={16} style={{ flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontWeight: 500 }}>{result.routeError.messageTh}</div>
+                    <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
+                      {result.routeError.messageEn}
+                    </div>
+                  </div>
+                </div>
+              ) : result.success ? (
                 <div style={successBox}>
                   <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
                   <span>{t('successWritten', { n: result.daysWritten })}</span>
@@ -369,22 +454,22 @@ export default function ImportPage() {
                   <span>{t('failed')}</span>
                 </div>
               )}
-              {result.warnings.length > 0 && (
+              {resultWarnings.length > 0 && (
                 <div style={warningBox}>
                   <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
                   <ul style={{ margin: 0, paddingLeft: 16 }}>
-                    {result.warnings.slice(0, 8).map((w, i) => (
+                    {resultWarnings.slice(0, 8).map((w, i) => (
                       <li key={i}>{w.messageTh}</li>
                     ))}
-                    {result.warnings.length > 8 && <li>… +{result.warnings.length - 8}</li>}
+                    {resultWarnings.length > 8 && <li>… +{resultWarnings.length - 8}</li>}
                   </ul>
                 </div>
               )}
-              {result.errors.length > 0 && (
+              {resultErrors.length > 0 && (
                 <div style={errorBox}>
                   <XCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
                   <ul style={{ margin: 0, paddingLeft: 16 }}>
-                    {result.errors.slice(0, 8).map((e, i) => (
+                    {resultErrors.slice(0, 8).map((e, i) => (
                       <li key={i}>{e.messageTh}</li>
                     ))}
                   </ul>
@@ -402,7 +487,8 @@ export default function ImportPage() {
                 </Link>
               </div>
             </div>
-          )}
+            )
+          })()}
         </>
       )}
     </div>

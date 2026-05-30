@@ -27,6 +27,30 @@ interface ImportResponse {
   daysParsed: number
   warnings: ReturnType<typeof parseHotelCsv>['warnings']
   errors: ReturnType<typeof parseHotelCsv>['errors']
+  // Top-level error block for HTTP / auth / validation failures the
+  // parser doesn't emit (invalid_json, csv_required, unauthenticated,
+  // branch_not_found, wrong_business_type, upsert_failed,
+  // binary_file_detected). Lets the client render a consistent
+  // friendly message without crashing on missing array fields.
+  routeError?: { code: string; messageTh: string; messageEn: string }
+}
+
+// Empty envelope used by every early-bail path. Guarantees
+// `warnings` and `errors` are always arrays so the client can call
+// .length without checking.
+function envelopeError(
+  code: string,
+  messageTh: string,
+  messageEn: string,
+): ImportResponse {
+  return {
+    success: false,
+    daysWritten: 0,
+    daysParsed: 0,
+    warnings: [],
+    errors: [],
+    routeError: { code, messageTh, messageEn },
+  }
 }
 
 export async function POST(
@@ -39,10 +63,24 @@ export async function POST(
   try {
     body = await req.json()
   } catch {
-    return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
+    return NextResponse.json(
+      envelopeError(
+        'invalid_json',
+        'ข้อมูลที่ส่งมาไม่ถูกต้อง',
+        'Request body could not be read as JSON.',
+      ),
+      { status: 400 },
+    )
   }
   if (typeof body.csv !== 'string' || body.csv.trim().length === 0) {
-    return NextResponse.json({ error: 'csv_required' }, { status: 400 })
+    return NextResponse.json(
+      envelopeError(
+        'csv_required',
+        'ไม่พบเนื้อหา CSV — กรุณาเลือกไฟล์ก่อน',
+        'CSV content is required — please choose a file first.',
+      ),
+      { status: 400 },
+    )
   }
 
   // Defense in depth — if the client check is bypassed and a binary
@@ -52,11 +90,11 @@ export async function POST(
   // produce "missing column 'date'" — a useless error for the owner.
   if (body.csv.length >= 2 && body.csv.charCodeAt(0) === 0x50 && body.csv.charCodeAt(1) === 0x4b) {
     return NextResponse.json(
-      {
-        error: 'binary_file_detected',
-        messageTh: 'ไฟล์นี้ดูเหมือนเป็น .numbers หรือ .xlsx — กรุณา Export เป็น CSV ก่อน',
-        messageEn: 'This looks like a .numbers or .xlsx file — please export to CSV first.',
-      },
+      envelopeError(
+        'binary_file_detected',
+        'ไฟล์นี้ดูเหมือนเป็น .numbers หรือ .xlsx — กรุณา Export เป็น CSV ก่อน',
+        'This looks like a .numbers or .xlsx file — please export to CSV first.',
+      ),
       { status: 400 },
     )
   }
@@ -66,7 +104,16 @@ export async function POST(
   const userClient = await createClient()
   const { data: userRes } = await userClient.auth.getUser()
   const user = userRes?.user
-  if (!user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+  if (!user) {
+    return NextResponse.json(
+      envelopeError(
+        'unauthenticated',
+        'กรุณาเข้าสู่ระบบใหม่อีกครั้ง',
+        'Your session has expired — please sign in again.',
+      ),
+      { status: 401 },
+    )
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ub = userClient as any
@@ -77,14 +124,22 @@ export async function POST(
     .maybeSingle()
   if (!branch) {
     // RLS hid it, or it doesn't exist. Both shapes → 404.
-    return NextResponse.json({ error: 'branch_not_found' }, { status: 404 })
+    return NextResponse.json(
+      envelopeError(
+        'branch_not_found',
+        'ไม่พบสาขา หรือคุณไม่มีสิทธิ์เข้าถึงสาขานี้',
+        'Branch not found, or you do not have access to it.',
+      ),
+      { status: 404 },
+    )
   }
   if (branch.business_type !== 'accommodation') {
     return NextResponse.json(
-      {
-        error: 'wrong_business_type',
-        message: 'Hotel CSV import is only available for accommodation branches.',
-      },
+      envelopeError(
+        'wrong_business_type',
+        'การนำเข้านี้ใช้ได้เฉพาะสาขาประเภทโรงแรม / รีสอร์ทเท่านั้น',
+        'Hotel CSV import is only available for accommodation branches.',
+      ),
       { status: 400 },
     )
   }
@@ -143,15 +198,18 @@ export async function POST(
     .upsert(rows, { onConflict: 'branch_id,metric_date' })
 
   if (upsertErr) {
-    return NextResponse.json(
-      {
-        error: 'upsert_failed',
-        message: upsertErr.message,
-        warnings: parsed.warnings,
-        daysParsed: parsed.days.length,
-      },
-      { status: 500 },
-    )
+    const response: ImportResponse = {
+      ...envelopeError(
+        'upsert_failed',
+        'บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง',
+        'Failed to save the imported data. Please try again.',
+      ),
+      // Surface the parser's warnings even though the write failed —
+      // they may still be useful context for the owner.
+      warnings: parsed.warnings,
+      daysParsed: parsed.days.length,
+    }
+    return NextResponse.json(response, { status: 500 })
   }
 
   const response: ImportResponse = {
