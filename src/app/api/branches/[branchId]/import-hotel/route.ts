@@ -186,7 +186,14 @@ export async function POST(
     return {
       branch_id: branchId,
       metric_date: d.date,
-      total_rooms: totalRooms,
+      // The canonical column on accommodation_daily_metrics is
+      // `rooms_available` (matches AccommodationEntryForm.tsx, which
+      // writes the same field via the entry route, and the
+      // morning-flash reader which consumes `latest.rooms_available`).
+      // `total_rooms` lives on the `branches` table — the branch
+      // inventory — not on the per-day metric. Mixing them up here
+      // produced PGRST204 "column not found in schema cache".
+      rooms_available: totalRooms,
       rooms_sold: roomsSold,
       revenue: d.totalRevenueThb,
       room_type_breakdown: d.roomTypeBreakdown,
