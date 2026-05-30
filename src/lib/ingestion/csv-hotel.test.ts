@@ -91,11 +91,68 @@ describe('parseHotelCsv', () => {
     expect(errors.some((e) => e.code === 'missing_column')).toBe(true)
   })
 
-  it('errors when the date format is invalid', () => {
+  it('errors when the date format is genuinely unparseable', () => {
     const csv = `${HEADER}
-01/05/2026,Standard,10,5,1500`
+not-a-date,Standard,10,5,1500`
     const { errors } = parseHotelCsv(csv)
     expect(errors[0].code).toBe('invalid_date')
+    expect(errors[0].messageTh).toContain('not-a-date')
+  })
+
+  it('errors on a calendar-invalid date like 2026-02-30', () => {
+    const csv = `${HEADER}
+2026-02-30,Standard,10,5,1500`
+    const { errors } = parseHotelCsv(csv)
+    expect(errors[0].code).toBe('invalid_date')
+  })
+
+  it('accepts a Numbers/Excel datetime export ("YYYY-MM-DD HH:MM:SS")', () => {
+    // Apple Numbers exports dates as a datetime even when only the
+    // date is meaningful — strip the time silently so the import
+    // doesn't fail at the first row.
+    const csv = `${HEADER}
+2026-05-27 00:00:00,Standard,10,5,1500`
+    const { days, errors } = parseHotelCsv(csv)
+    expect(errors).toHaveLength(0)
+    expect(days).toHaveLength(1)
+    expect(days[0].date).toBe('2026-05-27')
+  })
+
+  it('accepts a full ISO timestamp with Z suffix', () => {
+    const csv = `${HEADER}
+2026-05-27T00:00:00Z,Standard,10,5,1500`
+    const { days, errors } = parseHotelCsv(csv)
+    expect(errors).toHaveLength(0)
+    expect(days[0].date).toBe('2026-05-27')
+  })
+
+  it('accepts Thai DMY slash format ("DD/MM/YYYY")', () => {
+    // 27/05/2026 → 2026-05-27. Day=27 disambiguates as DMY because
+    // 27 > 12 so it can't be a month.
+    const csv = `${HEADER}
+27/05/2026,Standard,10,5,1500`
+    const { days, errors } = parseHotelCsv(csv)
+    expect(errors).toHaveLength(0)
+    expect(days[0].date).toBe('2026-05-27')
+  })
+
+  it('disambiguates US MDY when the first component is > 12', () => {
+    // 05/27/2026 → first=5 (month), second=27 (day, must be day
+    // because >12) → 2026-05-27.
+    const csv = `${HEADER}
+05/27/2026,Standard,10,5,1500`
+    const { days, errors } = parseHotelCsv(csv)
+    expect(errors).toHaveLength(0)
+    expect(days[0].date).toBe('2026-05-27')
+  })
+
+  it('defaults ambiguous slash dates to DMY (Thai convention)', () => {
+    // 5/7/2026 → both components ≤ 12 → DMY → 2026-07-05.
+    const csv = `${HEADER}
+5/7/2026,Standard,10,5,1500`
+    const { days, errors } = parseHotelCsv(csv)
+    expect(errors).toHaveLength(0)
+    expect(days[0].date).toBe('2026-07-05')
   })
 
   it('errors on an empty or header-only file', () => {

@@ -45,6 +45,22 @@ export async function POST(
     return NextResponse.json({ error: 'csv_required' }, { status: 400 })
   }
 
+  // Defense in depth — if the client check is bypassed and a binary
+  // file (.numbers / .xlsx, which are ZIP archives) gets here, the
+  // string will start with the ZIP magic 'PK\x03\x04' (decoded as
+  // 'PK' followed by control bytes). The parser would otherwise
+  // produce "missing column 'date'" — a useless error for the owner.
+  if (body.csv.length >= 2 && body.csv.charCodeAt(0) === 0x50 && body.csv.charCodeAt(1) === 0x4b) {
+    return NextResponse.json(
+      {
+        error: 'binary_file_detected',
+        messageTh: 'ไฟล์นี้ดูเหมือนเป็น .numbers หรือ .xlsx — กรุณา Export เป็น CSV ก่อน',
+        messageEn: 'This looks like a .numbers or .xlsx file — please export to CSV first.',
+      },
+      { status: 400 },
+    )
+  }
+
   // Auth + branch ownership check via the user-bound client so RLS
   // confirms membership before we let the service client write.
   const userClient = await createClient()

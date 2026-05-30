@@ -77,13 +77,14 @@ export function parseHotelCsv(input: string): IngestionParseResult {
     const rowNum = i + 1
     const cells = splitCsvLine(lines[i])
 
-    const date = (cells[colIndex.date!] || '').trim()
-    if (!isIsoDate(date)) {
+    const rawDate = (cells[colIndex.date!] || '').trim()
+    const date = normaliseDate(rawDate)
+    if (!date) {
       errors.push({
         row: rowNum,
         code: 'invalid_date',
-        messageTh: `บรรทัด ${rowNum}: รูปแบบวันที่ไม่ถูกต้อง (ต้องเป็น YYYY-MM-DD)`,
-        messageEn: `Row ${rowNum}: invalid date format (expected YYYY-MM-DD)`,
+        messageTh: `บรรทัด ${rowNum}: รูปแบบวันที่ไม่ถูกต้อง "${rawDate}" — ใช้รูปแบบ YYYY-MM-DD เช่น 2026-05-27`,
+        messageEn: `Row ${rowNum}: invalid date format "${rawDate}" — use YYYY-MM-DD (e.g. 2026-05-27)`,
       })
       continue
     }
@@ -256,10 +257,62 @@ function splitCsvLine(line: string): string[] {
   return out
 }
 
-function isIsoDate(s: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false
-  const d = new Date(s + 'T00:00:00Z')
-  return !Number.isNaN(d.getTime())
+// Returns YYYY-MM-DD when the input parses to a real calendar date,
+// or null when it doesn't. Accepts:
+//   "2026-05-27"             — canonical ISO
+//   "2026-05-27 00:00:00"    — Apple Numbers / Excel datetime export
+//   "2026-05-27T00:00:00Z"   — full ISO timestamp
+//   "27/05/2026"             — Thai DD/MM/YYYY (treated as DMY when day > 12)
+//   "5/27/2026"              — US MM/DD/YYYY (treated as MDY when day > 12)
+// Ambiguous slash dates like "5/7/2026" default to DMY because that's
+// what Thai owners type. The actual calendar validity check uses a
+// round-trip through new Date(YYYY-MM-DD) so invalid days (2026-02-30,
+// 2026-13-01) get caught.
+export function normaliseDate(raw: string): string | null {
+  const s = raw.trim()
+  if (!s) return null
+
+  // Strip optional time suffix: " HH:MM[:SS]" or "THH:MM[:SS][Z]".
+  // Anchor on a leading YYYY-MM-DD so the strip only fires when the
+  // date prefix is canonical.
+  const isoWithTime = s.match(/^(\d{4}-\d{2}-\d{2})(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})?)?$/)
+  if (isoWithTime) {
+    return validateCalendarDate(isoWithTime[1])
+  }
+
+  // Slash dates — DMY or MDY. Disambiguate by which component exceeds 12.
+  const slash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (slash) {
+    const a = parseInt(slash[1], 10)
+    const b = parseInt(slash[2], 10)
+    const y = slash[3]
+    let day: number
+    let month: number
+    if (a > 12) {
+      day = a
+      month = b
+    } else if (b > 12) {
+      month = a
+      day = b
+    } else {
+      // Ambiguous — default DMY (Thai convention).
+      day = a
+      month = b
+    }
+    const candidate = `${y}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    return validateCalendarDate(candidate)
+  }
+
+  return null
+}
+
+function validateCalendarDate(yyyyMmDd: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(yyyyMmDd)) return null
+  const d = new Date(yyyyMmDd + 'T00:00:00Z')
+  if (Number.isNaN(d.getTime())) return null
+  // Round-trip check — catches 2026-02-30, 2026-13-01, etc.
+  const roundTripped = d.toISOString().slice(0, 10)
+  return roundTripped === yyyyMmDd ? yyyyMmDd : null
 }
 
 function toNonNegativeNumber(raw: string): number | null {

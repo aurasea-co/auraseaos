@@ -71,6 +71,34 @@ export default function ImportPage() {
     setPreviewDays([])
     setFilename(file.name)
     try {
+      // Friendly rejection for binary formats we can't parse as CSV.
+      // .numbers (Apple) and .xlsx (Excel) are ZIP archives; reading
+      // them as .text() and feeding to the parser produces garbage
+      // headers ("ไม่พบคอลัมน์ date" is what users were hitting). We
+      // also sniff the ZIP magic bytes (PK\x03\x04) so a renamed
+      // file (foo.csv that's actually a .numbers export) still gets
+      // caught.
+      const lower = file.name.toLowerCase()
+      if (lower.endsWith('.numbers')) {
+        setPreviewError(
+          'ไฟล์ .numbers ไม่รองรับโดยตรง — เปิดไฟล์ใน Numbers แล้ว File → Export To → CSV ก่อน',
+        )
+        return
+      }
+      if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
+        setPreviewError(
+          'ไฟล์ Excel ไม่รองรับโดยตรง — บันทึกเป็น CSV ก่อน (File → Save As → CSV)',
+        )
+        return
+      }
+      const firstBytes = new Uint8Array(await file.slice(0, 4).arrayBuffer())
+      if (firstBytes[0] === 0x50 && firstBytes[1] === 0x4b && firstBytes[2] === 0x03 && firstBytes[3] === 0x04) {
+        setPreviewError(
+          'ไฟล์นี้ดูเหมือนเป็นไฟล์บีบอัด (.numbers/.xlsx) ไม่ใช่ CSV — กรุณา Export เป็น CSV ก่อน',
+        )
+        return
+      }
+
       const text = await file.text()
       setCsv(text)
       // Quick preview parse — we don't post yet, just preview locally.
