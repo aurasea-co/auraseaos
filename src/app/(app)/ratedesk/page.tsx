@@ -2,11 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { useTranslations } from 'next-intl'
+import { useTranslations, useLocale } from 'next-intl'
 import { useUser } from '@/providers/user-context'
 import { createClient } from '@/lib/supabase/client'
 import { ArrowRight, Upload, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 import { SparklineChart } from '@/components/sparkline-chart'
+import {
+  generateDailyRecommendations,
+  toRecommendationInputs,
+  type HotelRecommendation,
+} from '@/lib/recommendations/hotel/engine'
 
 // RateDesk — hotel-specific dashboard.
 //
@@ -112,6 +117,16 @@ export default function RateDeskPage() {
     }
   }, [activeRows, activePriorRows])
 
+  // Run the rate-recommendation engine client-side against the same
+  // dedupe-and-filter output the KPIs use. Pure / synchronous / cheap;
+  // no need for a nightly cron + persisted table for the in-app view.
+  // (If we add a LINE delivery channel later, that flow can persist
+  //  via /api/notifications/morning-flash — separate ticket.)
+  const recommendations = useMemo(
+    () => generateDailyRecommendations(toRecommendationInputs(activeRows)),
+    [activeRows],
+  )
+
   // Active branch isn't a hotel → friendly redirect-ish notice.
   if (activeBranch && activeBranch.business_type !== 'accommodation') {
     return (
@@ -190,6 +205,16 @@ export default function RateDeskPage() {
           })}
         </div>
       </div>
+
+      {/* Recommendations — runs the rate-optimisation engine on the
+          fetched window. Empty state nudges the owner to import more
+          history. Shown above the KPIs so it's the first thing the
+          owner sees on the page. */}
+      <RecommendationsSection
+        recs={recommendations}
+        dayCount={activeRows.length}
+        t={t}
+      />
 
       {/* KPI cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
@@ -385,6 +410,102 @@ function pct(curr: number, prior: number): { value: number; direction: 'up' | 'd
   const delta = ((curr - prior) / prior) * 100
   const direction = delta > 0.5 ? 'up' : delta < -0.5 ? 'down' : 'flat'
   return { value: Math.abs(delta), direction }
+}
+
+function RecommendationsSection({
+  recs,
+  dayCount,
+  t,
+}: {
+  recs: HotelRecommendation[]
+  dayCount: number
+  t: ReturnType<typeof useTranslations>
+}) {
+  const locale = useLocale()
+  const isThai = locale === 'th'
+  // Empty state when we don't have enough data yet — explicit about
+  // the threshold (3 days) so the owner knows how many imports they
+  // need before signals start firing.
+  if (recs.length === 0) {
+    return (
+      <section style={{
+        background: 'var(--color-bg-surface, #f7f7f5)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-lg)',
+        padding: '12px 16px',
+        fontSize: 13,
+        color: 'var(--color-text-secondary)',
+      }}>
+        {t('recsEmpty', { days: dayCount })}
+      </section>
+    )
+  }
+  return (
+    <section style={card}>
+      <h3 style={cardTitle}>{t('recsTitle')}</h3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>
+        {recs.map((r, i) => (
+          <div
+            key={`${r.type}-${i}`}
+            style={{
+              display: 'flex',
+              gap: 12,
+              padding: '10px 0',
+              borderBottom: i < recs.length - 1 ? '1px solid var(--color-border)' : 'none',
+            }}
+          >
+            <UrgencyPill urgency={r.urgency} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, color: 'var(--color-text-primary)', lineHeight: 1.55 }}>
+                {isThai ? r.messageTh : r.messageEn}
+              </div>
+              {r.suggestedRateThb !== undefined && (
+                <div style={{ fontSize: 12, color: 'var(--color-accent, #534AB7)', fontWeight: 500, marginTop: 2 }}>
+                  {t('recsSuggestedRate')}: ฿{r.suggestedRateThb.toLocaleString('th-TH')}
+                  {r.currentRateThb !== undefined && (
+                    <span style={{ color: 'var(--color-text-tertiary)', fontWeight: 400 }}>
+                      {' '}({t('recsCurrentRate')}: ฿{r.currentRateThb.toLocaleString('th-TH')})
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+const URGENCY_STYLE: Record<HotelRecommendation['urgency'], { bg: string; fg: string; symbol: string }> = {
+  high: { bg: '#FBEAEA', fg: '#A32D2D', symbol: '●' },
+  medium: { bg: '#FFF4E0', fg: '#8A5A00', symbol: '◐' },
+  low: { bg: '#F4F4F2', fg: '#6b6b6b', symbol: '○' },
+}
+
+function UrgencyPill({ urgency }: { urgency: HotelRecommendation['urgency'] }) {
+  const s = URGENCY_STYLE[urgency]
+  return (
+    <span
+      aria-label={urgency}
+      style={{
+        flexShrink: 0,
+        width: 22,
+        height: 22,
+        borderRadius: 999,
+        background: s.bg,
+        color: s.fg,
+        fontSize: 12,
+        fontWeight: 600,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 1,
+      }}
+    >
+      {s.symbol}
+    </span>
+  )
 }
 
 function KpiCard({ label, value, delta }: { label: string; value: string; delta: { value: number; direction: 'up' | 'down' | 'flat' } }) {
