@@ -15,6 +15,7 @@ import {
   CreditCard,
   Download,
   Upload,
+  BedDouble,
   ChevronRight,
 } from 'lucide-react'
 
@@ -23,6 +24,11 @@ const allSections = [
   { href: '/settings/notifications', icon: Bell, labelKey: 'notifications' as const, roles: ['owner', 'manager'] },
   { href: '/settings/company', icon: Building2, labelKey: 'company' as const, roles: ['owner'] },
   { href: '/settings/branches', icon: MapPin, labelKey: 'branches' as const, roles: ['owner'] },
+  // Room-types inventory + bad-import cleanup. Only useful on
+  // hotel branches; the page itself early-returns when the active
+  // branch is F&B so the link is harmless if surfaced for a mixed
+  // owner who's currently on an F&B branch.
+  { href: '/settings/rooms', icon: BedDouble, labelKey: 'rooms' as const, roles: ['owner'] },
   { href: '/settings/targets', icon: Target, labelKey: 'targets' as const, roles: ['owner'] },
   { href: '/settings/team', icon: Users, labelKey: 'team' as const, roles: ['owner'] },
   { href: '/settings/billing', icon: CreditCard, labelKey: 'billing' as const, roles: ['owner'] },
