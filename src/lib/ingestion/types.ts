@@ -43,6 +43,7 @@ export interface IngestionWarning {
     | 'zero_total_rooms'
     | 'future_date'
     | 'duplicate_room_type'
+    | 'incomplete_row'
   messageTh: string
   messageEn: string
 }
