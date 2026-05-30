@@ -1,9 +1,34 @@
 'use client'
 
+// RateDesk Dashboard — Role-based rendering
+//
+//   Owner     · Occupancy + ADR + RevPAR + Total Revenue
+//   Manager   · Occupancy + ADR + RevPAR  (no Total Revenue — P&L-sensitive)
+//   Staff     · Silently redirected to /home — no RateDesk surface
+//   Superadmin· Mirrors owner (support / debugging)
+//
+// Rationale:
+//   - Total Revenue is P&L-sensitive; the owner sees it, the manager
+//     doesn't need it to make rate decisions.
+//   - ADR / RevPAR / Occupancy are the operational metrics the manager
+//     uses every day, so they stay visible.
+//   - Auto Push approval ('rate_approval') is pre-declared in
+//     ratedesk-permissions.ts so the wiring is ready the day that
+//     feature ships; nothing renders against it yet.
+//
+// All access decisions go through canAccessRateDesk / canSeeElement
+// in src/lib/auth/ratedesk-permissions.ts — single source of truth.
+
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useTranslations, useLocale } from 'next-intl'
 import { useUser } from '@/providers/user-context'
+import {
+  canAccessRateDesk,
+  canSeeElement,
+  type RateDeskRole,
+} from '@/lib/auth/ratedesk-permissions'
 import { createClient } from '@/lib/supabase/client'
 import { ArrowRight, Upload, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 import { SparklineChart } from '@/components/sparkline-chart'
@@ -48,7 +73,20 @@ const WINDOWS = [30, 60, 90] as const
 type Window = (typeof WINDOWS)[number]
 
 export default function RateDeskPage() {
-  const { activeBranch } = useUser()
+  const { activeBranch, role } = useUser()
+  const rdRole = role as RateDeskRole
+  const router = useRouter()
+
+  // Silent staff redirect — if the user lands here via direct URL and
+  // their role doesn't carry dashboard access, route them back to
+  // /home before any of the data fetching kicks off. router.replace
+  // (not push) so the back button doesn't trap them in a loop.
+  const isAllowed = canAccessRateDesk(rdRole, 'ratedesk_dashboard')
+  useEffect(() => {
+    if (!isAllowed) router.replace('/home')
+  }, [isAllowed, router])
+
+  const showRevenue = canSeeElement(rdRole, 'total_revenue')
   const t = useTranslations('ratedesk')
   const [window, setWindow] = useState<Window>(30)
   const [rows, setRows] = useState<MetricRow[]>([])
@@ -135,6 +173,10 @@ export default function RateDeskPage() {
       </div>
     )
   }
+
+  // Staff lands in the useEffect redirect above; return null so we
+  // don't briefly paint a forbidden surface on the way out.
+  if (!isAllowed) return null
 
   if (loading) {
     return <div style={{ padding: 40, color: 'var(--color-text-tertiary)' }}>{t('loading')}</div>
@@ -233,11 +275,17 @@ export default function RateDeskPage() {
           value={`฿${Math.round(stats.current.revpar).toLocaleString('th-TH')}`}
           delta={pct(stats.current.revpar, stats.prior.revpar)}
         />
-        <KpiCard
-          label={t('totalRevenue')}
-          value={`฿${Math.round(stats.current.totalRevenue).toLocaleString('th-TH')}`}
-          delta={pct(stats.current.totalRevenue, stats.prior.totalRevenue)}
-        />
+        {/* Total Revenue — owner only. Managers see the 3 operational
+            cards above; the 4th slot is fully omitted rather than
+            placeholdered to avoid the "what am I missing?" curiosity
+            that a blurred card would create. */}
+        {showRevenue && (
+          <KpiCard
+            label={t('totalRevenue')}
+            value={`฿${Math.round(stats.current.totalRevenue).toLocaleString('th-TH')}`}
+            delta={pct(stats.current.totalRevenue, stats.prior.totalRevenue)}
+          />
+        )}
       </div>
 
       {/* Sparkline */}
