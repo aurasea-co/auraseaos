@@ -27,10 +27,13 @@ interface ApiResponse {
   warnings: Array<{ row: number; code: string; messageTh: string; messageEn: string }>
   errors: Array<{ row: number; code: string; messageTh: string; messageEn: string }>
   // Present when the server bails before parsing (auth, missing csv,
-  // binary file, etc.). Older responses or network errors may
-  // produce a missing/undefined value here, which is why the render
-  // path below treats every array field with `?? []`.
-  routeError?: { code: string; messageTh: string; messageEn: string }
+  // binary file, etc.) or when the database write fails. Older
+  // responses or network errors may produce a missing/undefined
+  // value here, which is why the render path below treats every
+  // array field with `?? []`. `detail` carries the raw Postgres
+  // message on upsert_failed so the operator can diagnose schema
+  // issues from the browser without digging through Vercel logs.
+  routeError?: { code: string; messageTh: string; messageEn: string; detail?: string }
 }
 
 // Normalise any HTTP response payload into a safe ApiResponse so the
@@ -431,9 +434,11 @@ export default function ImportPage() {
             return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {result.routeError ? (
-                // Top-level HTTP / auth / validation failure — distinct
-                // from parser-level errors. Shows the bilingual message
-                // the server provided.
+                // Top-level HTTP / auth / validation / DB failure —
+                // distinct from parser-level errors. Shows the
+                // bilingual message + the Postgres error detail when
+                // present so the operator can spot schema problems
+                // (missing column, RLS) without leaving the page.
                 <div style={errorBox}>
                   <XCircle size={16} style={{ flexShrink: 0 }} />
                   <div>
@@ -441,6 +446,19 @@ export default function ImportPage() {
                     <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
                       {result.routeError.messageEn}
                     </div>
+                    {result.routeError.detail && (
+                      <div style={{
+                        fontSize: 11,
+                        marginTop: 6,
+                        padding: '4px 8px',
+                        background: 'rgba(0,0,0,0.05)',
+                        borderRadius: 4,
+                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                        wordBreak: 'break-word',
+                      }}>
+                        {result.routeError.code}: {result.routeError.detail}
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : result.success ? (

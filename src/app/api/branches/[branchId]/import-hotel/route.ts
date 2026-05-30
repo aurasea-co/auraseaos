@@ -198,16 +198,41 @@ export async function POST(
     .upsert(rows, { onConflict: 'branch_id,metric_date' })
 
   if (upsertErr) {
+    // Log the full Supabase / Postgres error to Vercel server logs.
+    // Without this the operator was stuck at "500 Internal Server
+    // Error" with no signal as to whether the cause was a missing
+    // table, missing column, RLS, NOT NULL, or constraint mismatch.
+    console.error('[import-hotel] upsert failed', {
+      code: upsertErr.code,
+      message: upsertErr.message,
+      details: upsertErr.details,
+      hint: upsertErr.hint,
+      branchId,
+      daysAttempted: rows.length,
+    })
+
+    // Map common Postgres error classes to a human-actionable hint.
+    // We surface the raw code/message in the response too so the
+    // operator can debug from the browser's Network tab without
+    // having to dig into Vercel logs every time.
+    const pgHint = postgresHint(upsertErr.code)
     const response: ImportResponse = {
       ...envelopeError(
         'upsert_failed',
-        'บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง',
-        'Failed to save the imported data. Please try again.',
+        pgHint.th,
+        pgHint.en,
       ),
-      // Surface the parser's warnings even though the write failed —
-      // they may still be useful context for the owner.
       warnings: parsed.warnings,
       daysParsed: parsed.days.length,
+    }
+    if (response.routeError) {
+      response.routeError.code = upsertErr.code || 'upsert_failed'
+      // Surface the raw message under the structured routeError so
+      // the client can render it in a "details" disclosure block.
+      // This is launch-debugging convenience — once the schema is
+      // stable, the structured TH/EN messages above are sufficient
+      // and this can be gated on NODE_ENV.
+      ;(response.routeError as { detail?: string }).detail = upsertErr.message
     }
     return NextResponse.json(response, { status: 500 })
   }
@@ -220,4 +245,60 @@ export async function POST(
     errors: [],
   }
   return NextResponse.json(response)
+}
+
+// Map Postgres SQLSTATE codes to a bilingual hint the owner can act on.
+// Codes covered:
+//   42P01 undefined_table       — table missing (migration not run)
+//   42703 undefined_column      — column missing (migration 029
+//                                 likely not applied: room_type_breakdown)
+//   42501 insufficient_privilege — RLS or grant denied write
+//   23505 unique_violation       — onConflict mismatch with constraint
+//   23502 not_null_violation     — NOT NULL field not provided
+//   23503 foreign_key_violation  — branch_id refers to nothing
+//   22P02 invalid_text_representation — wrong type on a column
+// Falls back to a generic "try again" message for everything else.
+function postgresHint(code: string | undefined): { th: string; en: string } {
+  switch (code) {
+    case '42P01':
+      return {
+        th: 'ตารางในฐานข้อมูลยังไม่ถูกสร้าง — กรุณารัน migration ก่อนใช้งาน',
+        en: 'A required database table is missing — apply the pending migration.',
+      }
+    case '42703':
+      return {
+        th: 'คอลัมน์บางส่วนยังไม่มีในฐานข้อมูล — กรุณารัน migration 029 (room_type_breakdown)',
+        en: 'A required column is missing — apply migration 029 (room_type_breakdown).',
+      }
+    case '42501':
+      return {
+        th: 'ฐานข้อมูลปฏิเสธการเขียน (RLS) — กรุณาตรวจสอบ policy หรือเข้าสู่ระบบใหม่',
+        en: 'Database refused the write (RLS). Check the policy or sign in again.',
+      }
+    case '23505':
+      return {
+        th: 'พบข้อมูลซ้ำ — onConflict อาจไม่ตรงกับ unique constraint',
+        en: 'Duplicate row detected — onConflict may not match the unique constraint.',
+      }
+    case '23502':
+      return {
+        th: 'ข้อมูลบางส่วนเป็นค่าว่าง — มี NOT NULL constraint ที่ยังไม่ได้ระบุค่า',
+        en: 'A required field is null — a NOT NULL constraint is unmet.',
+      }
+    case '23503':
+      return {
+        th: 'อ้างอิงสาขา (branch_id) ไม่ถูกต้อง — branch อาจถูกลบ',
+        en: 'Foreign key violation — the branch_id no longer exists.',
+      }
+    case '22P02':
+      return {
+        th: 'รูปแบบข้อมูลไม่ตรงกับชนิดในคอลัมน์',
+        en: 'A value has the wrong type for its column.',
+      }
+    default:
+      return {
+        th: 'บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง',
+        en: 'Failed to save the imported data. Please try again.',
+      }
+  }
 }
