@@ -235,6 +235,7 @@
   "ratedesk": {
     "title": "RateDesk",
     "windowLabel": "{days} วันล่าสุด",
+    "daysWithData": "{count} วันที่มีข้อมูล",
     "occupancy": "Occupancy",
     "adr": "ADR",
     "revpar": "RevPAR",

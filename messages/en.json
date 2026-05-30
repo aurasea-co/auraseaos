@@ -235,6 +235,7 @@
   "ratedesk": {
     "title": "RateDesk",
     "windowLabel": "Last {days} days",
+    "daysWithData": "{count, plural, one {# day with data} other {# days with data}}",
     "occupancy": "Occupancy",
     "adr": "ADR",
     "revpar": "RevPAR",

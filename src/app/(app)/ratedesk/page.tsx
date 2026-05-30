@@ -95,12 +95,22 @@ export default function RateDeskPage() {
 
   useEffect(() => { load() }, [load])
 
+  // Collapse duplicate rows per date (caused by re-imports that
+  // happened before migration 018's unique constraint was applied,
+  // visible in production as ~10× inflated totals on the dashboard)
+  // and filter to days that actually have data so empty padding rows
+  // don't shrink the sparkline bars to 1px each. activeRows is the
+  // single source of truth — chart, aggregator, breakdown picker,
+  // and the subtitle day count all read from it.
+  const activeRows = useMemo(() => activeMetrics(rows), [rows])
+  const activePriorRows = useMemo(() => activeMetrics(priorRows), [priorRows])
+
   const stats = useMemo(() => {
     return {
-      current: aggregate(rows),
-      prior: aggregate(priorRows),
+      current: aggregate(activeRows),
+      prior: aggregate(activePriorRows),
     }
-  }, [rows, priorRows])
+  }, [activeRows, activePriorRows])
 
   // Active branch isn't a hotel → friendly redirect-ish notice.
   if (activeBranch && activeBranch.business_type !== 'accommodation') {
@@ -119,7 +129,7 @@ export default function RateDeskPage() {
     return <EmptyState t={t} />
   }
 
-  const sparkData = rows.map((r) => {
+  const sparkData = activeRows.map((r) => {
     const occ = r.rooms_available && r.rooms_available > 0 && r.rooms_sold != null
       ? (r.rooms_sold / r.rooms_available) * 100
       : 0
@@ -130,7 +140,7 @@ export default function RateDeskPage() {
   // We pick the most recent row with a non-null breakdown; if every
   // row is form-entered (no breakdown), the table is empty and we
   // surface a hint to import via CSV.
-  const latestWithBreakdown = [...rows]
+  const latestWithBreakdown = [...activeRows]
     .reverse()
     .find((r) => Array.isArray(r.room_type_breakdown) && r.room_type_breakdown.length > 0)
 
@@ -154,6 +164,9 @@ export default function RateDeskPage() {
           </h1>
           <p style={{ fontSize: 12, color: 'var(--color-text-tertiary)', marginTop: 4 }}>
             {activeBranch?.name} · {t('windowLabel', { days: window })}
+            {activeRows.length > 0 && (
+              <> · {t('daysWithData', { count: activeRows.length })}</>
+            )}
           </p>
         </div>
         <div style={{ display: 'inline-flex', gap: 4, background: 'var(--color-bg-surface, #f4f4f2)', padding: 3, borderRadius: 999 }}>
@@ -281,6 +294,28 @@ export default function RateDeskPage() {
       </section>
     </div>
   )
+}
+
+// Collapse duplicates by metric_date (re-imports created multiple
+// rows before migration 018's unique constraint went live) and drop
+// days with no real data so the chart and KPIs only reflect what
+// the owner actually entered or imported. Two consequences for the
+// caller:
+//   - the sparkline draws one bar per real day instead of 30 bars
+//     where 27 are zero-height — fixes the "flat line at the bottom"
+//     symptom even though every input bar was technically rendered;
+//   - aggregate() sums each date once, so a 10× duplicated payload
+//     stops surfacing as 10× revenue on the Total Revenue KPI.
+// Note: this is a display-side fix only. The duplicate rows are still
+// in the DB. Run the dedupe SQL in supabase/sql once the migration 018
+// unique constraint is confirmed applied — see commit message for the
+// snippet.
+function activeMetrics(rows: MetricRow[]): MetricRow[] {
+  const byDate = new Map<string, MetricRow>()
+  for (const r of rows) byDate.set(r.metric_date, r)
+  return Array.from(byDate.values())
+    .filter((r) => (r.revenue ?? 0) > 0 || (r.rooms_sold ?? 0) > 0)
+    .sort((a, b) => a.metric_date.localeCompare(b.metric_date))
 }
 
 function aggregate(rows: MetricRow[]) {
