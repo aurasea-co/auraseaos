@@ -21,7 +21,7 @@ import { SparklineChart } from '@/components/sparkline-chart'
 
 interface MetricRow {
   metric_date: string
-  total_rooms: number | null
+  rooms_available: number | null
   rooms_sold: number | null
   revenue: number | null
   room_type_breakdown: Array<{
@@ -69,14 +69,14 @@ export default function RateDeskPage() {
     const [currentRes, priorRes, compRes] = await Promise.all([
       db
         .from('accommodation_daily_metrics')
-        .select('metric_date, total_rooms, rooms_sold, revenue, room_type_breakdown')
+        .select('metric_date, rooms_available, rooms_sold, revenue, room_type_breakdown')
         .eq('branch_id', activeBranch.id)
         .gte('metric_date', iso(windowStart))
         .lte('metric_date', iso(endDate))
         .order('metric_date', { ascending: true }),
       db
         .from('accommodation_daily_metrics')
-        .select('metric_date, total_rooms, rooms_sold, revenue, room_type_breakdown')
+        .select('metric_date, rooms_available, rooms_sold, revenue, room_type_breakdown')
         .eq('branch_id', activeBranch.id)
         .gte('metric_date', iso(priorStart))
         .lt('metric_date', iso(windowStart)),
@@ -120,8 +120,8 @@ export default function RateDeskPage() {
   }
 
   const sparkData = rows.map((r) => {
-    const occ = r.total_rooms && r.total_rooms > 0 && r.rooms_sold != null
-      ? (r.rooms_sold / r.total_rooms) * 100
+    const occ = r.rooms_available && r.rooms_available > 0 && r.rooms_sold != null
+      ? (r.rooms_sold / r.rooms_available) * 100
       : 0
     return { date: r.metric_date, value: occ }
   })
@@ -289,7 +289,7 @@ function aggregate(rows: MetricRow[]) {
   let roomsSold = 0
   let totalRevenue = 0
   for (const r of rows) {
-    totalRooms += r.total_rooms || 0
+    totalRooms += r.rooms_available || 0
     roomsSold += r.rooms_sold || 0
     totalRevenue += r.revenue || 0
   }
