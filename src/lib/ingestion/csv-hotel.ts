@@ -101,16 +101,46 @@ export function parseHotelCsv(input: string): IngestionParseResult {
     const occupiedRaw = (cells[colIndex.occupied_rooms!] || '').trim()
     const rateRaw = (cells[colIndex.rate_thb!] || '').trim()
 
+    // Row-level skip: any required numeric field that's blank-like
+    // (empty, "-", "N/A") means the owner hasn't filled in that day
+    // yet — the most common case is downloading the template and
+    // leaving future dates empty. Emit a single warning per row and
+    // skip silently; previously this triggered invalid_number and
+    // failed the whole import.
+    if (isBlankCell(totalRoomsRaw) || isBlankCell(occupiedRaw) || isBlankCell(rateRaw)) {
+      const blankField = isBlankCell(occupiedRaw)
+        ? 'occupied_rooms'
+        : isBlankCell(totalRoomsRaw)
+          ? 'total_rooms'
+          : 'rate_thb'
+      warnings.push({
+        row: rowNum,
+        code: 'incomplete_row',
+        messageTh: `บรรทัด ${rowNum}: ${blankField} ว่าง — ข้ามบรรทัดนี้`,
+        messageEn: `Row ${rowNum}: ${blankField} is blank — skipping`,
+      })
+      continue
+    }
+
     const totalRooms = toNonNegativeNumber(totalRoomsRaw)
     const occupiedRooms = toNonNegativeNumber(occupiedRaw)
     const rateThb = toNonNegativeNumber(rateRaw)
 
     if (totalRooms === null || occupiedRooms === null || rateThb === null) {
+      // All three are non-blank but at least one didn't parse as a
+      // non-negative number. Tell the owner exactly which field and
+      // what the offending value was so they can find it in their CSV.
+      const offending =
+        totalRooms === null
+          ? `total_rooms="${totalRoomsRaw}"`
+          : occupiedRooms === null
+            ? `occupied_rooms="${occupiedRaw}"`
+            : `rate_thb="${rateRaw}"`
       errors.push({
         row: rowNum,
         code: 'invalid_number',
-        messageTh: `บรรทัด ${rowNum}: ค่าตัวเลขไม่ถูกต้อง (total_rooms, occupied_rooms หรือ rate_thb)`,
-        messageEn: `Row ${rowNum}: invalid number in total_rooms, occupied_rooms, or rate_thb`,
+        messageTh: `บรรทัด ${rowNum}: ค่าตัวเลขไม่ถูกต้อง (${offending})`,
+        messageEn: `Row ${rowNum}: invalid number (${offending})`,
       })
       continue
     }
@@ -313,6 +343,18 @@ function validateCalendarDate(yyyyMmDd: string): string | null {
   // Round-trip check — catches 2026-02-30, 2026-13-01, etc.
   const roundTripped = d.toISOString().slice(0, 10)
   return roundTripped === yyyyMmDd ? yyyyMmDd : null
+}
+
+// Returns true for the common "no data yet" placeholders Thai owners
+// leave in template rows for future dates: empty string, "-", "N/A",
+// "NA" (case-insensitive). Whitespace-only counts as empty because
+// callers pass already-trimmed input. Used to distinguish "row is
+// incomplete, skip silently" from "row has a real non-numeric value,
+// reject loudly."
+function isBlankCell(raw: string): boolean {
+  if (raw === '') return true
+  const upper = raw.toUpperCase()
+  return upper === '-' || upper === 'N/A' || upper === 'NA'
 }
 
 function toNonNegativeNumber(raw: string): number | null {

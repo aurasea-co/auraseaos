@@ -38,6 +38,10 @@ export default function ImportPage() {
   const [result, setResult] = useState<ApiResponse | null>(null)
   const [previewDays, setPreviewDays] = useState<PreviewDay[]>([])
   const [previewError, setPreviewError] = useState<string | null>(null)
+  // Row numbers the parser skipped because of blank required fields
+  // (most commonly: template rows for future dates the owner hasn't
+  // filled in yet). Surfaced as an amber info banner — not red error.
+  const [previewSkipped, setPreviewSkipped] = useState<number[]>([])
   const [selectedBranchId, setSelectedBranchId] = useState<string>(activeBranch?.id || '')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -69,6 +73,7 @@ export default function ImportPage() {
     setResult(null)
     setPreviewError(null)
     setPreviewDays([])
+    setPreviewSkipped([])
     setFilename(file.name)
     try {
       // Friendly rejection for binary formats we can't parse as CSV.
@@ -110,6 +115,10 @@ export default function ImportPage() {
       } else {
         setPreviewDays(parsed.days)
       }
+      const skippedRows = parsed.warnings
+        .filter((w) => w.code === 'incomplete_row')
+        .map((w) => w.row)
+      setPreviewSkipped(skippedRows)
     } catch (err) {
       setPreviewError((err as Error).message)
     } finally {
@@ -138,6 +147,7 @@ export default function ImportPage() {
     setFilename('')
     setPreviewDays([])
     setPreviewError(null)
+    setPreviewSkipped([])
     setResult(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
@@ -234,6 +244,35 @@ export default function ImportPage() {
             <div style={errorBox}>
               <XCircle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
               <span>{previewError}</span>
+            </div>
+          )}
+
+          {/* Skipped-row notice — amber (info), not red (error). Blank
+              occupied_rooms / total_rooms / rate_thb cells are usually
+              "I haven't filled in this day yet" not "I uploaded a
+              broken file." Lines list is truncated when long. */}
+          {previewSkipped.length > 0 && !previewError && (
+            <div style={{
+              background: '#FFFBEB',
+              border: '1px solid #FCD34D',
+              color: '#92400E',
+              borderRadius: 8,
+              padding: '10px 14px',
+              fontSize: 13,
+              lineHeight: 1.55,
+            }}>
+              ⚠ ข้ามแล้ว <strong>{previewSkipped.length}</strong> แถวที่ข้อมูลไม่ครบ
+              {previewSkipped.length <= 10 && (
+                <> (บรรทัด {previewSkipped.join(', ')})</>
+              )}
+              <br />
+              <span style={{ fontSize: 12, opacity: 0.85 }}>
+                Skipped {previewSkipped.length} rows with incomplete data
+                {previewSkipped.length <= 10 && (
+                  <> (lines {previewSkipped.join(', ')})</>
+                )}
+                .
+              </span>
             </div>
           )}
 

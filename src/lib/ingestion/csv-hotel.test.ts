@@ -91,6 +91,56 @@ describe('parseHotelCsv', () => {
     expect(errors.some((e) => e.code === 'missing_column')).toBe(true)
   })
 
+  it('silently skips rows with blank occupied_rooms (template future date)', () => {
+    // Most common owner flow: download template, future dates have
+    // blank occupied_rooms because they haven't happened yet. Should
+    // skip, not fail the whole import.
+    const csv = `${HEADER}
+2026-05-01,Deluxe,10,7,1500
+2026-05-02,Deluxe,10,,1500`
+    const { days, errors, warnings } = parseHotelCsv(csv)
+    expect(errors).toHaveLength(0)
+    expect(days).toHaveLength(1)
+    expect(days[0].date).toBe('2026-05-01')
+    const skips = warnings.filter((w) => w.code === 'incomplete_row')
+    expect(skips).toHaveLength(1)
+    expect(skips[0].row).toBe(3)
+    expect(skips[0].messageTh).toContain('occupied_rooms')
+  })
+
+  it('silently skips rows where total_rooms or rate_thb is blank', () => {
+    const csv = `${HEADER}
+2026-05-01,Deluxe,,7,1500
+2026-05-02,Deluxe,10,7,`
+    const { days, errors, warnings } = parseHotelCsv(csv)
+    expect(errors).toHaveLength(0)
+    expect(days).toHaveLength(0)
+    expect(warnings.filter((w) => w.code === 'incomplete_row')).toHaveLength(2)
+  })
+
+  it('treats "-" and "N/A" as blank (silently skips)', () => {
+    const csv = `${HEADER}
+2026-05-01,Deluxe,10,-,1500
+2026-05-02,Deluxe,10,N/A,1500
+2026-05-03,Deluxe,10,n/a,1500`
+    const { days, errors, warnings } = parseHotelCsv(csv)
+    expect(errors).toHaveLength(0)
+    expect(days).toHaveLength(0)
+    expect(warnings.filter((w) => w.code === 'incomplete_row')).toHaveLength(3)
+  })
+
+  it('still errors on non-blank non-numeric values like "abc"', () => {
+    const csv = `${HEADER}
+2026-05-01,Deluxe,10,abc,1500`
+    const { errors, warnings } = parseHotelCsv(csv)
+    expect(warnings.filter((w) => w.code === 'incomplete_row')).toHaveLength(0)
+    expect(errors).toHaveLength(1)
+    expect(errors[0].code).toBe('invalid_number')
+    // Error message should name the offending field + raw value.
+    expect(errors[0].messageTh).toContain('occupied_rooms="abc"')
+    expect(errors[0].messageEn).toContain('occupied_rooms="abc"')
+  })
+
   it('errors when the date format is genuinely unparseable', () => {
     const csv = `${HEADER}
 not-a-date,Standard,10,5,1500`
