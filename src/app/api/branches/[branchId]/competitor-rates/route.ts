@@ -1,0 +1,251 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/service'
+
+// /api/branches/[branchId]/competitor-rates
+//
+// GET    — list competitors with the latest rate per room type
+// POST   — add a new competitor (placeholder row) or upsert a rate
+//          for an existing one (date defaults to Bangkok today)
+// DELETE — remove all rate rows for the given competitor name
+//          (query param ?competitor=...)
+//
+// Owner-only. The page at /settings/competitors is the only caller.
+
+const MAX_COMPETITORS = 5
+
+interface CompetitorRow {
+  competitor_name: string
+  room_type: string
+  rate: number
+  captured_at: string
+  created_at: string
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────
+
+async function authorize(branchId: string) {
+  const userClient = await createClient()
+  const { data: userRes } = await userClient.auth.getUser()
+  const user = userRes?.user
+  if (!user) return { ok: false as const, status: 401, error: 'unauthenticated' }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ub = userClient as any
+  const { data: branch } = await ub
+    .from('branches')
+    .select('id, organization_id, business_type')
+    .eq('id', branchId)
+    .maybeSingle()
+  if (!branch) return { ok: false as const, status: 404, error: 'branch_not_found' }
+  if (branch.business_type !== 'accommodation') {
+    return { ok: false as const, status: 400, error: 'wrong_business_type' }
+  }
+  const { data: ownerRow } = await ub
+    .from('organization_members')
+    .select('role')
+    .eq('user_id', user.id)
+    .eq('organization_id', branch.organization_id)
+    .eq('role', 'owner')
+    .maybeSingle()
+  if (!ownerRow) return { ok: false as const, status: 403, error: 'owner_only' }
+  return { ok: true as const, user, branch }
+}
+
+function bkkToday(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+}
+
+function bail(status: number, code: string, messageTh: string, messageEn: string) {
+  return NextResponse.json({ error: code, code, messageTh, messageEn }, { status })
+}
+
+// ─── GET ──────────────────────────────────────────────────────────────────
+
+export async function GET(_req: NextRequest, ctx: { params: Promise<{ branchId: string }> }) {
+  const { branchId } = await ctx.params
+  const auth = await authorize(branchId)
+  if (!auth.ok) return bail(auth.status, auth.error, '', '')
+
+  const supabase = createServiceClient()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = supabase as any
+  const { data, error } = await db
+    .from('competitor_rates')
+    .select('competitor_name, room_type, rate, captured_at, created_at')
+    .eq('branch_id', branchId)
+    .order('captured_at', { ascending: false })
+    .order('created_at', { ascending: false })
+  if (error) {
+    console.error('[competitor-rates] GET failed', error)
+    return bail(500, 'fetch_failed', '', error.message)
+  }
+
+  // Group by competitor name. Each competitor carries its latest non-zero
+  // rate row (across any room type) for the "last known rate" column, plus
+  // the most recent capture timestamp so the UI can show "X hours ago".
+  const rows: CompetitorRow[] = data || []
+  const byName = new Map<string, {
+    competitorName: string
+    latestRateRow: CompetitorRow | null
+    lastCapturedAt: string | null
+    lastCreatedAt: string | null
+    rates: CompetitorRow[]
+  }>()
+  for (const r of rows) {
+    const existing = byName.get(r.competitor_name) || {
+      competitorName: r.competitor_name,
+      latestRateRow: null,
+      lastCapturedAt: null,
+      lastCreatedAt: null,
+      rates: [] as CompetitorRow[],
+    }
+    existing.rates.push(r)
+    if (!existing.lastCreatedAt || r.created_at > existing.lastCreatedAt) {
+      existing.lastCapturedAt = r.captured_at
+      existing.lastCreatedAt = r.created_at
+    }
+    if (!existing.latestRateRow && Number(r.rate) > 0) existing.latestRateRow = r
+    byName.set(r.competitor_name, existing)
+  }
+
+  const competitors = Array.from(byName.values()).map((c) => ({
+    competitorName: c.competitorName,
+    lastRateThb: c.latestRateRow ? Number(c.latestRateRow.rate) : null,
+    lastRateRoomType: c.latestRateRow?.room_type ?? null,
+    lastRateCapturedAt: c.latestRateRow?.captured_at ?? null,
+    lastUpdatedAt: c.lastCreatedAt,
+  }))
+
+  return NextResponse.json({ competitors, maxCompetitors: MAX_COMPETITORS })
+}
+
+// ─── POST ─────────────────────────────────────────────────────────────────
+
+interface PostBody {
+  competitorName?: string
+  roomType?: string
+  /** THB. When absent, a placeholder row is written so the competitor
+   *  appears in the list before the owner enters any real rates. */
+  rateThb?: number
+  /** ISO YYYY-MM-DD; defaults to BKK today. */
+  capturedAt?: string
+}
+
+export async function POST(req: NextRequest, ctx: { params: Promise<{ branchId: string }> }) {
+  const { branchId } = await ctx.params
+  const auth = await authorize(branchId)
+  if (!auth.ok) return bail(auth.status, auth.error, '', '')
+
+  let body: PostBody
+  try {
+    body = await req.json()
+  } catch {
+    return bail(400, 'invalid_json', 'ข้อมูลที่ส่งมาไม่ถูกต้อง', 'Invalid JSON in request body')
+  }
+  const competitorName = (body.competitorName || '').trim()
+  if (!competitorName) {
+    return bail(
+      400,
+      'missing_competitor_name',
+      'กรุณากรอกชื่อคู่แข่ง',
+      'Competitor name is required',
+    )
+  }
+  if (competitorName.length > 80) {
+    return bail(
+      400,
+      'name_too_long',
+      'ชื่อคู่แข่งยาวเกินไป (สูงสุด 80 ตัวอักษร)',
+      'Competitor name is too long (max 80 chars)',
+    )
+  }
+  const roomType = (body.roomType || 'Standard').trim() || 'Standard'
+  const rateThb = body.rateThb != null ? Number(body.rateThb) : 0
+  if (Number.isNaN(rateThb) || rateThb < 0) {
+    return bail(400, 'invalid_rate', 'ราคาไม่ถูกต้อง', 'Rate must be a non-negative number')
+  }
+  const capturedAt = body.capturedAt || bkkToday()
+
+  const supabase = createServiceClient()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = supabase as any
+
+  // Enforce MAX_COMPETITORS — count distinct names already on file
+  // for this branch. Cheap because every owner caps out at 5.
+  const { data: existingNames } = await db
+    .from('competitor_rates')
+    .select('competitor_name')
+    .eq('branch_id', branchId)
+  const distinct = new Set<string>((existingNames || []).map((r: { competitor_name: string }) => r.competitor_name))
+  if (!distinct.has(competitorName) && distinct.size >= MAX_COMPETITORS) {
+    return bail(
+      400,
+      'max_competitors',
+      `เพิ่มได้สูงสุด ${MAX_COMPETITORS} คู่แข่ง — กรุณาลบรายการเก่าก่อน`,
+      `Maximum ${MAX_COMPETITORS} competitors allowed — remove an existing one first.`,
+    )
+  }
+
+  const { error: upsertErr } = await db
+    .from('competitor_rates')
+    .upsert(
+      {
+        branch_id: branchId,
+        competitor_name: competitorName,
+        room_type: roomType,
+        rate: rateThb,
+        captured_at: capturedAt,
+        source: 'manual',
+      },
+      { onConflict: 'branch_id,competitor_name,room_type,captured_at' },
+    )
+
+  if (upsertErr) {
+    console.error('[competitor-rates] upsert failed', upsertErr)
+    // 42P10 = no_unique_or_exclusion_constraint — migration 030 hasn't
+    // been applied yet. Surface a clear hint.
+    const hintTh =
+      upsertErr.code === '42P10'
+        ? 'ตารางยังไม่มี unique constraint — กรุณารัน migration 030'
+        : 'บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'
+    const hintEn =
+      upsertErr.code === '42P10'
+        ? 'Database is missing the unique constraint — apply migration 030.'
+        : 'Failed to save the rate. Please try again.'
+    return bail(500, upsertErr.code || 'upsert_failed', hintTh, hintEn)
+  }
+
+  return NextResponse.json({ success: true })
+}
+
+// ─── DELETE ───────────────────────────────────────────────────────────────
+
+export async function DELETE(req: NextRequest, ctx: { params: Promise<{ branchId: string }> }) {
+  const { branchId } = await ctx.params
+  const auth = await authorize(branchId)
+  if (!auth.ok) return bail(auth.status, auth.error, '', '')
+
+  const competitorName = req.nextUrl.searchParams.get('competitor')?.trim() || ''
+  if (!competitorName) {
+    return bail(400, 'missing_competitor', 'กรุณาระบุชื่อคู่แข่ง', 'Competitor name is required')
+  }
+
+  const supabase = createServiceClient()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = supabase as any
+  const { error: deleteErr, count } = await db
+    .from('competitor_rates')
+    .delete({ count: 'exact' })
+    .eq('branch_id', branchId)
+    .eq('competitor_name', competitorName)
+  if (deleteErr) {
+    console.error('[competitor-rates] delete failed', deleteErr)
+    return bail(500, 'delete_failed', 'ลบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง', deleteErr.message)
+  }
+  return NextResponse.json({ success: true, deleted: count ?? 0 })
+}

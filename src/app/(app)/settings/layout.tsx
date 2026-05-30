@@ -16,6 +16,7 @@ import {
   Download,
   Upload,
   BedDouble,
+  LineChart,
   ChevronRight,
 } from 'lucide-react'
 
@@ -29,6 +30,9 @@ const allSections = [
   // branch is F&B so the link is harmless if surfaced for a mixed
   // owner who's currently on an F&B branch.
   { href: '/settings/rooms', icon: BedDouble, labelKey: 'rooms' as const, roles: ['owner'] },
+  // Competitor rate manual entry — feeds the RateDesk undercut
+  // signal. Same hotel-only early-return as /settings/rooms.
+  { href: '/settings/competitors', icon: LineChart, labelKey: 'competitors' as const, roles: ['owner'] },
   { href: '/settings/targets', icon: Target, labelKey: 'targets' as const, roles: ['owner'] },
   { href: '/settings/team', icon: Users, labelKey: 'team' as const, roles: ['owner'] },
   { href: '/settings/billing', icon: CreditCard, labelKey: 'billing' as const, roles: ['owner'] },
