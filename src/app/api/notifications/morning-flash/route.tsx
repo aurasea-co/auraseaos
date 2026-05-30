@@ -3,11 +3,17 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { Resend } from 'resend'
 import { EMAIL_SENDERS } from '@/lib/email/resend'
 import MorningFlash, { type MorningFlashBranchData } from '@/lib/email/templates/morningFlash'
-import { buildMorningFlashLine, sendLineMessage } from '@/lib/line/messaging'
+import { buildMorningFlashLine, sendLineMessage, sendLineFlexMessage } from '@/lib/line/messaging'
+import { buildHotelBriefFlexMessage } from '@/lib/line/hotel-brief'
 import { getTodayBangkok } from '@/lib/businessDate'
 import { calculateGrossMarginStrict } from '@/lib/calculations/fnb'
 import { periodAvgMargin, type MarginInputRow } from '@/lib/calculations/marginAggregates'
 import { generateHotelRecommendation, generateFnbRecommendation } from '@/lib/notifications/recommendation'
+import {
+  generateDailyRecommendations,
+  forecastTomorrow,
+  toRecommendationInputs,
+} from '@/lib/recommendations/hotel/engine'
 
 async function handleMorningFlash(req: NextRequest) {
   // Allowed callers:
@@ -185,6 +191,17 @@ async function handleMorningFlash(req: NextRequest) {
     // LINE message (one push) and the combined email (one render).
     const branchDataList: MorningFlashBranchData[] = []
     const lineSnippets: string[] = []
+    // For single-hotel-branch recipients we send the richer RateDesk
+    // Flex Message instead of the legacy text snippet. Collected
+    // per-iteration; consumed at LINE-send time below. Stays empty
+    // when the recipient has any F&B branches in scope or more than
+    // one hotel branch (we'd need a carousel to show both, and Flex
+    // bubbles are constrained — text path handles multi-branch).
+    const hotelFlexInputs: Array<{
+      branchName: string
+      latest: Record<string, unknown>
+      metrics: Record<string, unknown>[]
+    }> = []
     let totalRevenue = 0
     let latestMetricDate = today
 
@@ -332,6 +349,18 @@ async function handleMorningFlash(req: NextRequest) {
           recommendation,
         }),
       )
+
+      // Stash hotel inputs for the Flex Message path below. F&B
+      // branches in the same recipient's scope short-circuit this
+      // (the Flex render is hotel-specific; mixed-vertical recipients
+      // fall through to the existing text-bundle path).
+      if (isHotel) {
+        hotelFlexInputs.push({
+          branchName: branch.name,
+          latest: latest as Record<string, unknown>,
+          metrics: (metrics || []) as Record<string, unknown>[],
+        })
+      }
     }
 
     let lineStatus = 'skipped'
@@ -354,10 +383,60 @@ async function handleMorningFlash(req: NextRequest) {
       if (!profile?.line_id) {
         console.log(`[morning-flash] user=${setting.user_id} has no profiles.line_id — cannot push LINE`)
       } else {
-        const combined = lineSnippets.join('\n===================\n')
-        const ok = await sendLineMessage(profile.line_id as string, combined)
+        // Single-hotel-branch recipients get the RateDesk Flex
+        // Message (yesterday's KPIs as cards + tonight forecast +
+        // top recs). Everyone else continues to receive the
+        // concatenated text snippets — same content, same dedup.
+        const isSingleHotelOnly =
+          hotelFlexInputs.length === 1 && lineSnippets.length === 1
+
+        let ok = false
+        let channelLabel = 'text'
+
+        if (isSingleHotelOnly) {
+          const f = hotelFlexInputs[0]
+          // Project the 30-day metric window into the engine's input
+          // shape and run the recommendation + forecast layers.
+          // Both are pure functions — no extra round-trips.
+          const recInputs = toRecommendationInputs(
+            f.metrics.map((m) => ({
+              metric_date: String((m as { metric_date: string }).metric_date),
+              rooms_available: numOrNull(m.rooms_available),
+              rooms_sold: numOrNull(m.rooms_sold),
+              revenue: numOrNull(m.revenue),
+            })),
+          )
+          const recs = generateDailyRecommendations(recInputs)
+            .filter((r) => r.urgency !== 'low')
+            .slice(0, 2)
+          const forecast = forecastTomorrow(recInputs)
+
+          const yRevenue = Number((f.latest as { revenue: unknown }).revenue) || 0
+          const yRoomsSold = Number((f.latest as { rooms_sold: unknown }).rooms_sold) || 0
+          const yRoomsAvailable = Number((f.latest as { rooms_available: unknown }).rooms_available) || 0
+          const yAdrThb = yRoomsSold > 0 ? yRevenue / yRoomsSold : 0
+          const yOccupancy = yRoomsAvailable > 0 ? yRoomsSold / yRoomsAvailable : 0
+
+          const flex = buildHotelBriefFlexMessage({
+            branchName: f.branchName,
+            yesterday: {
+              date: String((f.latest as { metric_date: string }).metric_date),
+              occupancyRate: yOccupancy,
+              adrThb: yAdrThb,
+              revparThb: yAdrThb * yOccupancy,
+              revenueThb: yRevenue,
+            },
+            topRecs: recs,
+            forecast,
+          })
+          ok = await sendLineFlexMessage(profile.line_id as string, flex.altText, flex.contents)
+          channelLabel = 'flex'
+        } else {
+          const combined = lineSnippets.join('\n===================\n')
+          ok = await sendLineMessage(profile.line_id as string, combined)
+        }
         lineStatus = ok ? 'sent' : 'failed'
-        console.log(`[morning-flash] LINE push to user=${setting.user_id} branches=${lineSnippets.length} → ${lineStatus}`)
+        console.log(`[morning-flash] LINE push to user=${setting.user_id} branches=${lineSnippets.length} mode=${channelLabel} → ${lineStatus}`)
         await supabase.from('notification_log').insert({
           user_id: setting.user_id,
           organization_id: setting.organization_id,
@@ -435,4 +514,14 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   return handleMorningFlash(req)
+}
+
+// Narrow unknown jsonb-ish values to a number-or-null for the engine
+// adapter. Empty strings, NaN, and false-y non-zero values all coerce
+// to null so toRecommendationInputs skips the day instead of treating
+// it as a real zero (which would distort occupancy averages).
+function numOrNull(v: unknown): number | null {
+  if (v == null) return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
 }
