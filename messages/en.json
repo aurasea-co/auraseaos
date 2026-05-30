@@ -236,6 +236,7 @@
     "title": "RateDesk",
     "windowLabel": "Last {days} days",
     "daysWithData": "{count, plural, one {# day with data} other {# days with data}}",
+    "breakdownSource": "Averaged across {days, plural, one {# imported day} other {# imported days}}",
     "occupancy": "Occupancy",
     "adr": "ADR",
     "revpar": "RevPAR",

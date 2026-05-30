@@ -136,24 +136,19 @@ export default function RateDeskPage() {
     return { date: r.metric_date, value: occ }
   })
 
-  // Latest day's room-type breakdown drives the breakdown table.
-  // We pick the most recent row with a non-null breakdown; if every
-  // row is form-entered (no breakdown), the table is empty and we
-  // surface a hint to import via CSV.
-  const latestWithBreakdown = [...activeRows]
-    .reverse()
-    .find((r) => Array.isArray(r.room_type_breakdown) && r.room_type_breakdown.length > 0)
-
-  const breakdownRows = (latestWithBreakdown?.room_type_breakdown || []).map((b) => {
-    const occ = b.totalRooms > 0 ? b.occupiedRooms / b.totalRooms : 0
-    return {
-      roomType: b.roomType,
-      totalRooms: b.totalRooms,
-      occupancyRate: occ,
-      adr: b.rateThb,
-      revpar: b.rateThb * occ,
-    }
-  }).sort((a, b) => b.revpar - a.revpar)
+  // Room-type breakdown aggregated across every day in the window
+  // that has CSV-imported data (form entries don't carry a
+  // room_type_breakdown JSON, so they're naturally excluded). The
+  // table previously rendered only the latest single day, which
+  // disagreed with the 30-day KPIs above and confused owners
+  // looking at /ratedesk. Now both the headline KPIs and this
+  // table summarise the same window; the caption underneath tells
+  // the operator how many of the windowed days had breakdown data
+  // feeding it.
+  const breakdownRows = aggregateBreakdown(activeRows)
+  const breakdownDayCount = activeRows.filter(
+    (r) => Array.isArray(r.room_type_breakdown) && r.room_type_breakdown.length > 0,
+  ).length
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -228,7 +223,14 @@ export default function RateDeskPage() {
 
       {/* Room-type breakdown */}
       <section style={card}>
-        <h3 style={cardTitle}>{t('roomTypeBreakdown')}</h3>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <h3 style={cardTitle}>{t('roomTypeBreakdown')}</h3>
+          {breakdownRows.length > 0 && (
+            <span style={{ fontSize: 11, color: 'var(--color-text-tertiary)' }}>
+              {t('breakdownSource', { days: breakdownDayCount })}
+            </span>
+          )}
+        </div>
         {breakdownRows.length === 0 ? (
           <div style={{ padding: '12px 0', fontSize: 12, color: 'var(--color-text-tertiary)' }}>
             {t('noBreakdownHint')}{' '}
@@ -316,6 +318,50 @@ function activeMetrics(rows: MetricRow[]): MetricRow[] {
   return Array.from(byDate.values())
     .filter((r) => (r.revenue ?? 0) > 0 || (r.rooms_sold ?? 0) > 0)
     .sort((a, b) => a.metric_date.localeCompare(b.metric_date))
+}
+
+// Same window as the headline KPIs — sum inventory and occupied
+// room-nights per room_type across every day in the window that
+// has a CSV-imported breakdown, then surface the window-wide
+// occupancy / ADR / RevPAR per type. ADR is weighted by occupied
+// room-nights so a low-occupancy day at a high rate doesn't drown
+// out a high-occupancy day at a lower rate. Inventory uses
+// max(totalRooms) per type — the assumption is the hotel's room
+// count doesn't change inside the window; if it did, max is the
+// most useful headline number to display ("you have N Deluxe
+// rooms today").
+function aggregateBreakdown(rows: MetricRow[]) {
+  type Agg = { inventory: number; occupiedRoomNights: number; revenueThb: number; totalRoomNights: number }
+  const byRoomType = new Map<string, Agg>()
+  for (const r of rows) {
+    if (!Array.isArray(r.room_type_breakdown)) continue
+    for (const b of r.room_type_breakdown) {
+      const acc = byRoomType.get(b.roomType) || {
+        inventory: 0,
+        occupiedRoomNights: 0,
+        revenueThb: 0,
+        totalRoomNights: 0,
+      }
+      acc.inventory = Math.max(acc.inventory, b.totalRooms || 0)
+      acc.totalRoomNights += b.totalRooms || 0
+      acc.occupiedRoomNights += b.occupiedRooms || 0
+      acc.revenueThb += (b.rateThb || 0) * (b.occupiedRooms || 0)
+      byRoomType.set(b.roomType, acc)
+    }
+  }
+  return Array.from(byRoomType.entries())
+    .map(([roomType, agg]) => {
+      const occ = agg.totalRoomNights > 0 ? agg.occupiedRoomNights / agg.totalRoomNights : 0
+      const adr = agg.occupiedRoomNights > 0 ? agg.revenueThb / agg.occupiedRoomNights : 0
+      return {
+        roomType,
+        totalRooms: agg.inventory,
+        occupancyRate: occ,
+        adr,
+        revpar: adr * occ,
+      }
+    })
+    .sort((a, b) => b.revpar - a.revpar)
 }
 
 function aggregate(rows: MetricRow[]) {

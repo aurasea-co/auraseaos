@@ -236,6 +236,7 @@
     "title": "RateDesk",
     "windowLabel": "{days} วันล่าสุด",
     "daysWithData": "{count} วันที่มีข้อมูล",
+    "breakdownSource": "เฉลี่ยจาก {days} วันที่นำเข้า CSV",
     "occupancy": "Occupancy",
     "adr": "ADR",
     "revpar": "RevPAR",
