@@ -15,6 +15,7 @@ import {
   toRecommendationInputs,
   attachCompetitorRates,
 } from '@/lib/recommendations/hotel/engine'
+import { hasFeature } from '@/lib/auth/plan-features'
 
 async function handleMorningFlash(req: NextRequest) {
   // Allowed callers:
@@ -447,6 +448,62 @@ async function handleMorningFlash(req: NextRequest) {
           const yAdrThb = yRoomsSold > 0 ? yRevenue / yRoomsSold : 0
           const yOccupancy = yRoomsAvailable > 0 ? yRoomsSold / yRoomsAvailable : 0
 
+          // Auto Push approval (Pro plan only). We create a single-use
+          // token bound to this branch + today + the suggested rate, and
+          // pass the click-through URL to the Flex builder. Re-running the
+          // job for the same branch/date first deletes any unexpired,
+          // unapproved token so we don't multiply rows.
+          //
+          // Re-checks the plan at delivery time (rather than caching at
+          // org fetch) so a Pro→Growth downgrade between fetch and send
+          // doesn't leak the button. The /api/line/approve-rate endpoint
+          // re-checks again at click time for the same reason.
+          let approveButton: { url: string; label: string } | undefined
+          if (forecast && hasFeature(org.plan, 'auto_push')) {
+            const rateThb = Math.round(forecast.suggestedRateThb)
+            const adminSb = createServiceClient()
+
+            // Drop any previous unapproved token for this branch+date so
+            // re-running the cron doesn't leave orphaned rows. Approved
+            // rows are preserved (audit trail).
+            await adminSb
+              .from('rate_approvals')
+              .delete()
+              .eq('branch_id', f.branchId)
+              .eq('date', today)
+              .is('approved_at', null)
+
+            const { data: created, error: createErr } = await adminSb
+              .from('rate_approvals')
+              .insert({
+                branch_id: f.branchId,
+                room_type: 'all',
+                date: today,
+                suggested_rate_thb: rateThb,
+                push_status: 'pending',
+                expires_at: new Date(Date.now() + 20 * 60 * 60 * 1000).toISOString(),
+              })
+              .select('token')
+              .single()
+
+            if (createErr) {
+              console.error(`[morning-flash] failed to create approval token for branch=${f.branchId}:`, createErr)
+            } else if (created?.token) {
+              // LINE caps button labels at 20 chars. "✓ อนุมัติราคา ฿" is
+              // already 14 visual chars; "฿9,999" pushes us to 20 exactly,
+              // anything bigger overflows. Fall back to a generic label
+              // when the rate would push us over.
+              const rateStr = rateThb.toLocaleString('th-TH')
+              const fullLabel = `✓ อนุมัติราคา ฿${rateStr}`
+              const label = fullLabel.length <= 20 ? fullLabel : '✓ อนุมัติราคาคืนนี้'
+              const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.auraseaos.com'
+              approveButton = {
+                url: `${baseUrl}/api/line/approve-rate?token=${created.token}`,
+                label,
+              }
+            }
+          }
+
           const flex = buildHotelBriefFlexMessage({
             branchName: f.branchName,
             yesterday: {
@@ -458,6 +515,7 @@ async function handleMorningFlash(req: NextRequest) {
             },
             topRecs: recs,
             forecast,
+            approveButton,
           })
           ok = await sendLineFlexMessage(profile.line_id as string, flex.altText, flex.contents)
           channelLabel = 'flex'

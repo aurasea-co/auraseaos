@@ -24,6 +24,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useTranslations, useLocale } from 'next-intl'
 import { useUser } from '@/providers/user-context'
+import { hasFeature } from '@/lib/auth/plan-features'
 import {
   canAccessRateDesk,
   canSeeElement,
@@ -70,11 +71,25 @@ interface CompetitorRow {
   captured_at: string
 }
 
+// One row from rate_approvals — what the dashboard's history table renders.
+// Status is computed at render time from (approved_at, expires_at, push_status).
+interface ApprovalRow {
+  date: string
+  suggested_rate_thb: number
+  approved_at: string | null
+  approved_via: 'line' | 'dashboard' | 'auto' | null
+  expires_at: string
+  push_status: 'pending' | 'success' | 'failed' | 'skipped' | null
+  pushed_to_pms_at: string | null
+  created_at: string
+}
+
 const WINDOWS = [30, 60, 90] as const
 type Window = (typeof WINDOWS)[number]
 
 export default function RateDeskPage() {
-  const { activeBranch, role } = useUser()
+  const { activeBranch, role, plan } = useUser()
+  const hasAutoPush = hasFeature(plan, 'auto_push')
   const rdRole = role as RateDeskRole
   const router = useRouter()
 
@@ -93,6 +108,7 @@ export default function RateDeskPage() {
   const [rows, setRows] = useState<MetricRow[]>([])
   const [priorRows, setPriorRows] = useState<MetricRow[]>([])
   const [competitors, setCompetitors] = useState<CompetitorRow[]>([])
+  const [approvals, setApprovals] = useState<ApprovalRow[]>([])
   const [loading, setLoading] = useState(true)
   const supabase = createClient()
 
@@ -110,7 +126,20 @@ export default function RateDeskPage() {
     const priorStart = new Date(endDate.getTime() - 2 * window * 86_400_000)
     const iso = (d: Date) => d.toISOString().slice(0, 10)
 
-    const [currentRes, priorRes, compRes] = await Promise.all([
+    // Approval history is Pro-only — guard the query so non-Pro users
+    // don't hit the table at all (RLS would block writes anyway, and
+    // the select-policy is permissive across org members, but skipping
+    // the round-trip when the UI won't render anything is cheaper).
+    const approvalsQuery = hasAutoPush
+      ? db
+          .from('rate_approvals')
+          .select('date, suggested_rate_thb, approved_at, approved_via, expires_at, push_status, pushed_to_pms_at, created_at')
+          .eq('branch_id', activeBranch.id)
+          .order('created_at', { ascending: false })
+          .limit(7)
+      : Promise.resolve({ data: [], error: null })
+
+    const [currentRes, priorRes, compRes, approvalsRes] = await Promise.all([
       db
         .from('accommodation_daily_metrics')
         .select('metric_date, rooms_available, rooms_sold, revenue, room_type_breakdown')
@@ -130,12 +159,14 @@ export default function RateDeskPage() {
         .eq('branch_id', activeBranch.id)
         .gte('captured_at', iso(windowStart))
         .order('captured_at', { ascending: false }),
+      approvalsQuery,
     ])
     setRows(currentRes.data || [])
     setPriorRows(priorRes.data || [])
     setCompetitors(compRes.data || [])
+    setApprovals(approvalsRes.data || [])
     setLoading(false)
-  }, [activeBranch, window, supabase])
+  }, [activeBranch, window, supabase, hasAutoPush])
 
   useEffect(() => { load() }, [load])
 
@@ -255,6 +286,22 @@ export default function RateDeskPage() {
           })}
         </div>
       </div>
+
+      {/* Auto Push upgrade nudge — non-Pro plans only. Sits above the
+          recommendations so the owner sees the upsell before the value
+          (recommendations) they'd be acting on with one tap. Suppressed
+          for Pro/Enterprise where the feature is already active. */}
+      {!hasAutoPush && (
+        <section style={{ background: 'var(--color-bg-surface, #F8F7FF)', borderRadius: 8, padding: '12px 16px', fontSize: 13, lineHeight: 1.5 }}>
+          <strong style={{ color: 'var(--color-accent, #534AB7)' }}>{t('autoPushTitle')}</strong>
+          <span style={{ color: 'var(--color-text-secondary, #6B7280)' }}>
+            {' — '}{t('autoPushPitch')}
+          </span>{' '}
+          <Link href="/settings/billing" style={{ color: 'var(--color-accent, #534AB7)', fontWeight: 500 }}>
+            {t('upgradeToPro')} →
+          </Link>
+        </section>
+      )}
 
       {/* Recommendations — runs the rate-optimisation engine on the
           fetched window. Empty state nudges the owner to import more
@@ -404,8 +451,95 @@ export default function RateDeskPage() {
           )
         })()}
       </section>
+
+      {/* Auto Push approval history — Pro plans only. Reads the last 7
+          rate_approvals rows for this branch and renders one line per
+          row with a status badge. Cloudbeds write-back (push_status →
+          success) lands in Phase R3; until then approved rows show
+          "pending push" in amber so the owner has visibility but isn't
+          surprised when the PMS doesn't change. */}
+      {hasAutoPush && (
+        <section style={card}>
+          <h3 style={cardTitle}>{t('approvalHistoryTitle')}</h3>
+          {approvals.length === 0 ? (
+            <div style={{ padding: '12px 0', fontSize: 12, color: 'var(--color-text-tertiary)' }}>
+              {t('approvalHistoryEmpty')}
+            </div>
+          ) : (
+            <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', marginTop: 6 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+                  <th style={th}>{t('colDate')}</th>
+                  <th style={th}>{t('colSuggestedRate')}</th>
+                  <th style={th}>{t('colApproved')}</th>
+                  <th style={th}>{t('colStatus')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {approvals.map((a, i) => {
+                  const status = approvalStatus(a)
+                  return (
+                    <tr key={i} style={{ borderTop: '1px solid #f0f0ee' }}>
+                      <td style={td}>{a.date}</td>
+                      <td style={td}>฿{a.suggested_rate_thb.toLocaleString('th-TH')}</td>
+                      <td style={{ ...td, color: 'var(--color-text-tertiary)' }}>
+                        {a.approved_at
+                          ? `${t(`approvedVia.${a.approved_via || 'line'}`)} · ${fmtTime(a.approved_at)}`
+                          : '—'}
+                      </td>
+                      <td style={td}>
+                        <span style={{
+                          display: 'inline-block',
+                          padding: '2px 8px',
+                          borderRadius: 999,
+                          fontSize: 11,
+                          fontWeight: 500,
+                          background: status.bg,
+                          color: status.fg,
+                        }}>
+                          {t(status.labelKey)}
+                        </span>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </section>
+      )}
     </div>
   )
+}
+
+// Compute the row's display status. Order matters: expiry beats
+// "pending tap" so a row that was never approved and is now past
+// expires_at shows "expired", not "awaiting approval".
+function approvalStatus(a: ApprovalRow): { labelKey: string; bg: string; fg: string } {
+  if (a.approved_at) {
+    if (a.push_status === 'success') return { labelKey: 'statusPushed',     bg: '#F0FDF4', fg: '#166534' }
+    if (a.push_status === 'failed')  return { labelKey: 'statusPushFailed', bg: '#FEF2F2', fg: '#991B1B' }
+    if (a.push_status === 'skipped') return { labelKey: 'statusSkipped',    bg: '#F3F4F6', fg: '#6B7280' }
+    // Approved + pending push → R3 will pick this up. Amber.
+    return { labelKey: 'statusPendingPush', bg: '#FFFBEB', fg: '#92400E' }
+  }
+  if (new Date(a.expires_at).getTime() < Date.now()) {
+    return { labelKey: 'statusExpired', bg: '#F3F4F6', fg: '#6B7280' }
+  }
+  // Brief sent, owner hasn't tapped yet.
+  return { labelKey: 'statusAwaiting', bg: '#F8F7FF', fg: '#534AB7' }
+}
+
+// Format a timestamptz like "7:03 AM" in Bangkok time. Used in the
+// "approved" column so the owner can correlate against when they
+// tapped the brief.
+function fmtTime(iso: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'Asia/Bangkok',
+  }).format(new Date(iso))
 }
 
 // Collapse duplicates by metric_date (re-imports created multiple

@@ -317,7 +317,27 @@
     "loading": "กำลังโหลด…",
     "emptyHeading": "ยังไม่มีข้อมูล",
     "emptyBody": "อัพโหลด CSV เพื่อเริ่มต้นข้อมูลย้อนหลังของ Occupancy, ADR และรายได้ ข้อมูลในอนาคตจะถูกบันทึกอัตโนมัติผ่านฟอร์มรายวัน",
-    "emptyCta": "นำเข้า CSV"
+    "emptyCta": "นำเข้า CSV",
+    "autoPushTitle": "Auto Push",
+    "autoPushPitch": "อนุมัติราคาผ่าน LINE แล้วส่งตรงเข้า PMS ประหยัด 30–60 นาที/วัน",
+    "upgradeToPro": "อัพเกรดเป็น Pro",
+    "approvalHistoryTitle": "ประวัติการอนุมัติ Auto Push",
+    "approvalHistoryEmpty": "ยังไม่มีการอนุมัติราคา — จะปรากฏที่นี่หลังคุณกด ✓ ใน LINE brief พรุ่งนี้",
+    "colDate": "วันที่",
+    "colSuggestedRate": "ราคาที่แนะนำ",
+    "colApproved": "อนุมัติ",
+    "colStatus": "สถานะ",
+    "approvedVia": {
+      "line": "กดผ่าน LINE",
+      "dashboard": "Dashboard",
+      "auto": "อัตโนมัติ"
+    },
+    "statusAwaiting": "รอการอนุมัติ",
+    "statusPendingPush": "รอส่งเข้า PMS",
+    "statusPushed": "ส่งเข้า PMS แล้ว ✓",
+    "statusPushFailed": "ส่งเข้า PMS ไม่สำเร็จ",
+    "statusSkipped": "ข้าม",
+    "statusExpired": "หมดอายุ"
   },
   "settingsImport": {
     "title": "นำเข้าข้อมูลโรงแรม (CSV)",

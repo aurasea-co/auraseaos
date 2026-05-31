@@ -317,7 +317,27 @@
     "loading": "Loading…",
     "emptyHeading": "No data yet",
     "emptyBody": "Upload a CSV to seed your historical occupancy, ADR, and revenue. Future days flow in automatically via the daily entry form.",
-    "emptyCta": "Import CSV"
+    "emptyCta": "Import CSV",
+    "autoPushTitle": "Auto Push",
+    "autoPushPitch": "Approve rates via LINE and push directly to your PMS. Saves 30–60 min/day.",
+    "upgradeToPro": "Upgrade to Pro",
+    "approvalHistoryTitle": "Auto Push approval history",
+    "approvalHistoryEmpty": "No rate approvals yet — they'll appear here after you tap ✓ in tomorrow's LINE brief.",
+    "colDate": "Date",
+    "colSuggestedRate": "Suggested rate",
+    "colApproved": "Approved",
+    "colStatus": "Status",
+    "approvedVia": {
+      "line": "LINE tap",
+      "dashboard": "Dashboard",
+      "auto": "Auto"
+    },
+    "statusAwaiting": "Awaiting tap",
+    "statusPendingPush": "Pending push",
+    "statusPushed": "Pushed to PMS ✓",
+    "statusPushFailed": "Push failed",
+    "statusSkipped": "Skipped",
+    "statusExpired": "Expired"
   },
   "settingsImport": {
     "title": "Import hotel data (CSV)",

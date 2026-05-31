@@ -21,6 +21,18 @@ export interface HotelBriefData {
   topRecs: HotelRecommendation[]
   /** Output of forecastTomorrow(); pass null when not enough data. */
   forecast: { expectedOccupancy: number; suggestedRateThb: number } | null
+  /** Auto Push approval — Pro plan only. Both fields are passed by the
+   *  caller (route knows the base URL, locale, and rate); the builder
+   *  just renders. Pass either both or neither — the button only shows
+   *  when both are non-empty. */
+  approveButton?: {
+    /** Full URL the LINE in-app browser will GET (token already in qs). */
+    url: string
+    /** Locale-aware label. LINE caps at 20 chars — caller is responsible
+     *  for picking a short form like "✓ อนุมัติราคาคืนนี้" when the
+     *  rate string would overflow. */
+    label: string
+  }
 }
 
 export interface FlexMessageEnvelope {
@@ -188,9 +200,27 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
       },
       footer: {
         type: 'box',
-        layout: 'horizontal',
+        layout: 'vertical',
         paddingAll: '12px',
+        spacing: 'sm',
         contents: [
+          // Pro-tier approve button — only rendered when the caller
+          // provides both url + label. Sits above the branding text.
+          ...(data.approveButton
+            ? [
+                {
+                  type: 'button',
+                  style: 'primary',
+                  color: COLORS.primary,
+                  height: 'sm',
+                  action: {
+                    type: 'uri',
+                    label: data.approveButton.label,
+                    uri: data.approveButton.url,
+                  },
+                } as Record<string, unknown>,
+              ]
+            : []),
           {
             type: 'text',
             text: 'RateDesk by Aurasea',
