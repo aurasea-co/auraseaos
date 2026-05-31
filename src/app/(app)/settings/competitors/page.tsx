@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import Link from 'next/link'
-import { ArrowLeft, Trash2, Plus } from 'lucide-react'
+import { ArrowLeft, Trash2, Plus, Upload, Download } from 'lucide-react'
 import { useUser } from '@/providers/user-context'
 import { createClient } from '@/lib/supabase/client'
 import type { RoomTypeOccupancy } from '@/lib/ingestion/types'
 import { deriveRoomTypesFromBreakdowns } from '@/lib/recommendations/hotel/room-types'
+import { buildCompetitorCsvTemplate } from '@/lib/ingestion/csv-competitor'
 
 // Settings → ราคาคู่แข่ง (Competitor rates). A 2-minute daily task for
 // the hotel owner. Two sections:
@@ -168,6 +169,73 @@ export default function CompetitorsPage() {
     await reload()
   }
 
+  // CSV import state. Single-shot: pick file → upload → show result.
+  // No drag-drop; the file picker keeps the UX simple and works on
+  // mobile (LINE in-app browser can attach files from the OS).
+  const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState<
+    | null
+    | { imported: number; skipped: number; skippedUnknownCompetitor?: number; warnings: Array<{ lineNumber: number; code: string; raw: string }> }
+  >(null)
+
+  async function handleImportFile(file: File) {
+    if (!activeBranch) return
+    setImporting(true)
+    setImportResult(null)
+    setError(null)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const res = await fetch(`/api/branches/${activeBranch.id}/competitor-rates/import`, {
+        method: 'POST',
+        body: form,
+      })
+      const json = await res.json().catch(() => null)
+      if (!res.ok) {
+        setError((json?.error as string) || res.statusText)
+        return
+      }
+      setImportResult(json)
+      await reload()
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  // Download a pre-filled CSV template for the next 7 days × the
+  // branch's known competitors × known room types. Owner fills the
+  // rate_thb column in Excel and uploads. Reuses the page's existing
+  // competitor + room-type state — no extra round-trip.
+  function downloadTemplate() {
+    const competitorNames = competitors.map((c) => c.competitorName)
+    if (competitorNames.length === 0 || roomTypes.length === 0) {
+      setError(t('templateNoData'))
+      return
+    }
+    // Tomorrow's BKK date as start.
+    const tmrw = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Bangkok',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(Date.now() + 24 * 60 * 60 * 1000))
+    const csv = buildCompetitorCsvTemplate({
+      competitors: competitorNames,
+      roomTypes,
+      startDate: tmrw,
+      days: 7,
+    })
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `competitor-rates-template-${tmrw}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
   if (role !== 'owner') return null
   if (!activeBranch) return null
   if (activeBranch.business_type !== 'accommodation') {
@@ -261,6 +329,123 @@ export default function CompetitorsPage() {
           <p style={{ color: 'var(--color-text-tertiary)', marginTop: 4 }}>{t('guideFooter')}</p>
         </div>
       </details>
+
+      {/* CSV bulk import — file picker + template download. Slice 4
+          of the competitor redesign. Owner picks a CSV → POST to the
+          /import route → result panel summarises imported/skipped
+          rows + per-line warnings. */}
+      {!loading && competitors.length > 0 && (
+        <section
+          style={{
+            background: 'var(--color-bg-surface)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 8,
+            padding: '10px 14px',
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: 10,
+            fontSize: 12,
+          }}
+        >
+          <span style={{ color: 'var(--color-text-secondary)', flex: 1, minWidth: 200 }}>
+            {t('csvBlurb')}
+          </span>
+          <button
+            type="button"
+            onClick={downloadTemplate}
+            style={{
+              padding: '6px 10px',
+              fontSize: 12,
+              background: 'transparent',
+              border: '1px solid var(--color-border)',
+              borderRadius: 6,
+              color: 'var(--color-text-secondary)',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            <Download size={12} /> {t('downloadTemplate')}
+          </button>
+          <label
+            style={{
+              padding: '6px 10px',
+              fontSize: 12,
+              background: 'var(--color-accent, #534AB7)',
+              color: 'white',
+              border: 'none',
+              borderRadius: 6,
+              cursor: importing ? 'not-allowed' : 'pointer',
+              opacity: importing ? 0.5 : 1,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            <Upload size={12} /> {importing ? t('importing') : t('importCsv')}
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              disabled={importing}
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) {
+                  handleImportFile(file)
+                  // Reset the input so the same file can be re-uploaded.
+                  e.target.value = ''
+                }
+              }}
+            />
+          </label>
+        </section>
+      )}
+
+      {importResult && (
+        <section
+          style={{
+            background: importResult.imported > 0 ? '#F0FDF4' : '#FFFBEB',
+            border: `1px solid ${importResult.imported > 0 ? '#BBF7D0' : '#FCD34D'}`,
+            borderRadius: 8,
+            padding: '10px 14px',
+            fontSize: 12,
+            color: importResult.imported > 0 ? '#166534' : '#92400E',
+          }}
+        >
+          <div style={{ fontWeight: 500, marginBottom: 4 }}>
+            {t('importSummary', {
+              imported: importResult.imported,
+              skipped: importResult.skipped,
+            })}
+          </div>
+          {importResult.skippedUnknownCompetitor && importResult.skippedUnknownCompetitor > 0 && (
+            <div style={{ marginTop: 4 }}>
+              {t('importSkippedUnknown', { count: importResult.skippedUnknownCompetitor })}
+            </div>
+          )}
+          {importResult.warnings.length > 0 && (
+            <details style={{ marginTop: 6 }}>
+              <summary style={{ cursor: 'pointer' }}>
+                {t('importWarningsToggle', { count: importResult.warnings.length })}
+              </summary>
+              <ul style={{ marginTop: 6, paddingLeft: 18, fontSize: 11, lineHeight: 1.5 }}>
+                {importResult.warnings.slice(0, 20).map((w, i) => (
+                  <li key={i}>
+                    {t('importWarningLine', { line: w.lineNumber })} — {t(`importError.${w.code}`)}
+                  </li>
+                ))}
+                {importResult.warnings.length > 20 && (
+                  <li style={{ color: 'var(--color-text-tertiary)' }}>
+                    {t('importWarningsMore', { count: importResult.warnings.length - 20 })}
+                  </li>
+                )}
+              </ul>
+            </details>
+          )}
+        </section>
+      )}
 
       {!loading && (
         <>
