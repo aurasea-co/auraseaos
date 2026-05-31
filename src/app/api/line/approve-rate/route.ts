@@ -29,17 +29,17 @@ export async function GET(req: NextRequest) {
 
   const supabase = createServiceClient()
 
-  // Pull the approval row + the branch's organization plan in one query.
-  // The plan re-check protects against Pro→Growth downgrades that happen
-  // between brief generation (token created when org was Pro) and click
-  // (org now on Growth — approval should be refused).
+  // Three sequential lookups — approval, branch, org — instead of one
+  // nested join. The nested join syntax
+  //   .select('branches:branches(name, organization_id, organizations(plan))')
+  // returned null at runtime even when the raw SQL join worked, because
+  // PostgREST's automatic FK-relationship detection occasionally refuses
+  // to embed deeply through chained references. Three round-trips here
+  // is a few hundred extra ms — paid only at click time, once per tap —
+  // and the code is immune to the embedding quirk.
   const { data: approval, error: fetchErr } = await supabase
     .from('rate_approvals')
-    .select(`
-      id, branch_id, room_type, date, suggested_rate_thb,
-      approved_at, expires_at,
-      branches:branches(name, organization_id, organizations:organizations(plan))
-    `)
+    .select('id, branch_id, room_type, date, suggested_rate_thb, approved_at, expires_at')
     .eq('token', token)
     .maybeSingle()
 
@@ -51,15 +51,29 @@ export async function GET(req: NextRequest) {
     return htmlResponse('not_found', 'ไม่พบคำขออนุมัตินี้', 'Approval not found', 404)
   }
 
-  // Supabase types the joined relation as either an object or an array
-  // depending on the schema — narrow it defensively. We only need name
-  // and plan, both safely fall back to sane defaults.
-  const branchJoin = Array.isArray(approval.branches) ? approval.branches[0] : approval.branches
-  const branchName: string = (branchJoin?.name as string) ?? 'your hotel'
-  const orgJoin = branchJoin
-    ? (Array.isArray(branchJoin.organizations) ? branchJoin.organizations[0] : branchJoin.organizations)
-    : null
-  const plan: string | null = (orgJoin?.plan as string | null) ?? null
+  // Lookup branch (for name + organization_id). Missing branch is
+  // treated as a non-fatal — we fall back to generic copy in the
+  // success page so the owner still gets confirmation.
+  const { data: branchRow } = await supabase
+    .from('branches')
+    .select('name, organization_id')
+    .eq('id', approval.branch_id)
+    .maybeSingle()
+  const branchName: string = (branchRow?.name as string) ?? 'your hotel'
+  const organizationId: string | null = (branchRow?.organization_id as string) ?? null
+
+  // Lookup org plan separately. If the org disappeared between brief
+  // and tap (extremely unlikely), plan stays null and the plan-gate
+  // below blocks the approval — failing closed.
+  let plan: string | null = null
+  if (organizationId) {
+    const { data: orgRow } = await supabase
+      .from('organizations')
+      .select('plan')
+      .eq('id', organizationId)
+      .maybeSingle()
+    plan = (orgRow?.plan as string | null) ?? null
+  }
 
   // Re-check plan at click time. If the org downgraded between brief and
   // tap, the button is dead. We use the same hasFeature() the dashboard
@@ -119,7 +133,7 @@ export async function GET(req: NextRequest) {
   // in the normal case it's set so the org's audit view scopes correctly.
   await supabase.from('audit_log').insert({
     actor_user_id: null,
-    organization_id: branchJoin?.organization_id ?? null,
+    organization_id: organizationId,
     action: 'rate.approved',
     target_entity: 'rate_approval',
     target_id: approval.id,
