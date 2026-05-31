@@ -174,7 +174,16 @@
     "notes": "หมายเหตุ",
     "notesHint": "เช่น กรุ๊ปทัวร์เข้า, งานแต่งงาน",
     "submit": "บันทึกข้อมูล",
-    "update": "อัปเดตข้อมูล"
+    "update": "อัปเดตข้อมูล",
+    "roomTypeBreakdownTitle": "แยกตามประเภทห้อง",
+    "roomTypeBreakdownOptional": "ไม่บังคับ",
+    "roomTypeBreakdownHint": "กรอกห้องที่ขายได้ + ราคาคืนนี้ของแต่ละประเภท ระบบจะรวมยอดรวมของโรงแรมให้อัตโนมัติ",
+    "roomTypeInventoryLabel": "{count} ห้อง",
+    "roomTypeOccupiedPlaceholder": "ขายได้",
+    "roomTypeRatePlaceholder": "ราคา ฿",
+    "roomTypeAutoSummed": "รวมอัตโนมัติ: {rooms} ห้อง · {revenue}",
+    "roomTypeBreakdownNoHistory": "ยังไม่มีประเภทห้องที่ลงทะเบียนสำหรับสาขานี้",
+    "roomTypeBreakdownNoHistoryCta": "นำเข้า CSV เพื่อลงทะเบียนประเภท →"
   },
   "entryFnb": {
     "totalSales": "ยอดขายวันนี้ (฿)",
@@ -337,7 +346,10 @@
     "statusPushed": "ส่งเข้า PMS แล้ว ✓",
     "statusPushFailed": "ส่งเข้า PMS ไม่สำเร็จ",
     "statusSkipped": "ข้าม",
-    "statusExpired": "หมดอายุ"
+    "statusExpired": "หมดอายุ",
+    "todayMissingTitle": "ยังไม่ได้บันทึกข้อมูลวันนี้",
+    "todayMissingBody": "บันทึกห้องที่ขายได้และรายได้เมื่อคืนเพื่อให้คำแนะนำแม่นยำ",
+    "logTodayCta": "บันทึกข้อมูลวันนี้"
   },
   "settingsImport": {
     "title": "นำเข้าข้อมูลโรงแรม (CSV)",

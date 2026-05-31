@@ -20,6 +20,8 @@ import {
   formatBusinessDateDisplay,
 } from '@/lib/businessDate'
 import type { Target } from '@/lib/supabase/types'
+import type { KnownRoomType } from '@/lib/recommendations/hotel/room-types'
+import { deriveRoomTypesFromBreakdowns } from '@/lib/recommendations/hotel/room-types'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { StaffEntryTip } from '@/components/onboarding/StaffEntryTip'
 
@@ -37,6 +39,12 @@ export default function EntryPage() {
   const [existingAccom, setExistingAccom] = useState<AccommodationDailyMetric | null>(null)
   const [existingFnb, setExistingFnb] = useState<FnbDailyMetric | null>(null)
   const [target, setTarget] = useState<Target | null>(null)
+  // Known room types for the active hotel branch — derived from past
+  // accommodation_daily_metrics.room_type_breakdown entries (mirror of
+  // the aggregation /settings/rooms uses). Empty array when the branch
+  // has no breakdown history yet, in which case the entry form
+  // suppresses the per-room-type section.
+  const [knownRoomTypes, setKnownRoomTypes] = useState<KnownRoomType[]>([])
   // Entry forms seed their local state from `existing` via useState — which
   // only reads the initial value on mount. If we render the form before the
   // fetch for the new date resolves, it mounts with the *previous* date's
@@ -66,15 +74,29 @@ export default function EntryPage() {
     const table = getEntryTable(activeBranch.business_type)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db = supabase as any
-    const [entryResult, targetResult] = await Promise.all([
+    // For hotel branches we also pull the recent breakdown history to
+    // derive known room types — non-hotel branches skip the join.
+    const roomTypesQuery = isHotel
+      ? db
+          .from('accommodation_daily_metrics')
+          .select('metric_date, room_type_breakdown')
+          .eq('branch_id', activeBranch.id)
+          .order('metric_date', { ascending: false })
+          .limit(90)
+      : Promise.resolve({ data: [], error: null })
+
+    const [entryResult, targetResult, roomTypesResult] = await Promise.all([
       db.from(table).select('*').eq('branch_id', activeBranch.id).eq('metric_date', date).maybeSingle(),
       db.from('targets').select('adr_target, occupancy_target, occ_target, covers_target, cogs_target, avg_spend_target, labour_target, operating_days').eq('branch_id', activeBranch.id).maybeSingle(),
+      roomTypesQuery,
     ])
 
     if (isHotel) {
       setExistingAccom(entryResult.data as AccommodationDailyMetric | null)
+      setKnownRoomTypes(deriveRoomTypesFromBreakdowns(roomTypesResult.data || []))
     } else {
       setExistingFnb(entryResult.data as FnbDailyMetric | null)
+      setKnownRoomTypes([])
     }
     setTarget(targetResult.data as Target | null)
     setLoadingEntry(false)
@@ -257,6 +279,7 @@ export default function EntryPage() {
           existing={existingAccom}
           target={target}
           totalRooms={totalRooms}
+          knownRoomTypes={knownRoomTypes}
           onSubmit={handleSubmit}
           saving={saving}
         />

@@ -174,7 +174,16 @@
     "notes": "Notes",
     "notesHint": "e.g. group tour, wedding event",
     "submit": "Save Entry",
-    "update": "Update Entry"
+    "update": "Update Entry",
+    "roomTypeBreakdownTitle": "Per-room-type breakdown",
+    "roomTypeBreakdownOptional": "Optional",
+    "roomTypeBreakdownHint": "Fill in rooms occupied + tonight's rate per room type. Hotel-wide totals above will auto-sum.",
+    "roomTypeInventoryLabel": "{count} rooms",
+    "roomTypeOccupiedPlaceholder": "Occupied",
+    "roomTypeRatePlaceholder": "Rate ฿",
+    "roomTypeAutoSummed": "Auto-summed from breakdown: {rooms} rooms · {revenue}",
+    "roomTypeBreakdownNoHistory": "No room types registered for this branch yet.",
+    "roomTypeBreakdownNoHistoryCta": "Import a CSV to register types →"
   },
   "entryFnb": {
     "totalSales": "Total sales today (฿)",
@@ -337,7 +346,10 @@
     "statusPushed": "Pushed to PMS ✓",
     "statusPushFailed": "Push failed",
     "statusSkipped": "Skipped",
-    "statusExpired": "Expired"
+    "statusExpired": "Expired",
+    "todayMissingTitle": "Today's data isn't logged yet",
+    "todayMissingBody": "Log last night's rooms sold and revenue to keep recommendations accurate.",
+    "logTodayCta": "Log today's data"
   },
   "settingsImport": {
     "title": "Import hotel data (CSV)",

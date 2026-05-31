@@ -31,7 +31,8 @@ import {
   type RateDeskRole,
 } from '@/lib/auth/ratedesk-permissions'
 import { createClient } from '@/lib/supabase/client'
-import { ArrowRight, Upload, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { ArrowRight, Upload, TrendingUp, TrendingDown, Minus, Edit3 } from 'lucide-react'
+import { getTodayBangkok } from '@/lib/businessDate'
 import { SparklineChart } from '@/components/sparkline-chart'
 import {
   generateDailyRecommendations,
@@ -268,6 +269,15 @@ export default function RateDeskPage() {
     (r) => Array.isArray(r.room_type_breakdown) && r.room_type_breakdown.length > 0,
   ).length
 
+  // "No data for today" detection. activeMetrics() filters out empty
+  // days, so if today's BKK date isn't present in activeRows then
+  // either the owner hasn't entered today's row yet or they entered
+  // zeros (which read as "no data" for our purposes). Surfaces a
+  // call-to-action card at the top of the dashboard so the owner
+  // doesn't have to hunt for /entry in the nav.
+  const todayBkk = getTodayBangkok()
+  const hasTodayRow = activeRows.some((r) => r.metric_date === todayBkk)
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
@@ -308,6 +318,52 @@ export default function RateDeskPage() {
           })}
         </div>
       </div>
+
+      {/* Empty state for today — if there's no row for today's BKK
+          calendar date, surface a prominent "Log today's data" CTA
+          that deep-links to /entry. Closes the loop for hotel owners
+          who otherwise have to remember to navigate to the nav tab
+          every morning. Suppressed when today already has data, so
+          the dashboard stays clean during the rest of the day. */}
+      {!loading && activeBranch && !hasTodayRow && (
+        <section style={{
+          background: '#FFFBEB',
+          border: '1px solid #FCD34D',
+          borderRadius: 8,
+          padding: '14px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 14,
+          flexWrap: 'wrap',
+        }}>
+          <Edit3 size={18} color="#92400E" />
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <strong style={{ color: '#92400E', fontSize: 14, display: 'block', marginBottom: 2 }}>
+              {t('todayMissingTitle')}
+            </strong>
+            <span style={{ color: '#78350F', fontSize: 12 }}>
+              {t('todayMissingBody')}
+            </span>
+          </div>
+          <Link
+            href="/entry"
+            style={{
+              background: '#92400E',
+              color: '#FFFBEB',
+              padding: '8px 14px',
+              borderRadius: 6,
+              fontSize: 13,
+              fontWeight: 500,
+              textDecoration: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            {t('logTodayCta')} <ArrowRight size={14} />
+          </Link>
+        </section>
+      )}
 
       {/* Auto Push upgrade nudge — non-Pro plans only. Sits above the
           recommendations so the owner sees the upsell before the value
