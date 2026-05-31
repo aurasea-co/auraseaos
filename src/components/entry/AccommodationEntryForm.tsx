@@ -23,11 +23,16 @@ interface Props {
 
 // Local per-row state for the per-room-type entry section. Inputs stay
 // strings so the form can distinguish "empty" from "explicit 0".
+// rateUserEdited tracks whether the rate was changed from its pre-filled
+// default (the room type's last-known rate). Used to render the rate
+// input in a muted color until the owner confirms (or changes) it —
+// signal that the value is a hint, not a recorded fact.
 interface BreakdownEntry {
   roomType: string
   inventory: number
   occupied: string
   rateThb: string
+  rateUserEdited: boolean
 }
 
 export function AccommodationEntryForm({ existing, target, totalRooms, knownRoomTypes, onSubmit, saving }: Props) {
@@ -56,18 +61,26 @@ export function AccommodationEntryForm({ existing, target, totalRooms, knownRoom
 
   const [breakdown, setBreakdown] = useState<BreakdownEntry[]>(() => {
     if (existingBreakdown.length > 0) {
+      // Editing a saved entry — every rate was explicitly chosen by
+      // whoever saved the row originally. Mark them as user-edited so
+      // they render at full contrast.
       return existingBreakdown.map((b) => ({
         roomType: b.roomType,
         inventory: b.totalRooms || 0,
         occupied: String(b.occupiedRooms ?? ''),
         rateThb: String(b.rateThb ?? ''),
+        rateUserEdited: true,
       }))
     }
+    // Fresh entry — pre-fill with the last known rate per type (from
+    // historical breakdowns). Flagged as not-yet-user-edited so the
+    // owner sees a clear visual hint that this is a default.
     return knownRoomTypes.map((rt) => ({
       roomType: rt.roomType,
       inventory: rt.inventory,
       occupied: '',
       rateThb: rt.latestRateThb > 0 ? String(rt.latestRateThb) : '',
+      rateUserEdited: false,
     }))
   })
 
@@ -91,19 +104,24 @@ export function AccommodationEntryForm({ existing, target, totalRooms, knownRoom
     return { roomsFromBreakdown, revenueFromBreakdown, anyFilled }
   }, [breakdown])
 
+  // When any per-room row has data, the breakdown is the source of
+  // truth for hotel-wide totals — update them on every keystroke so
+  // edits flow through instantly. Top-level inputs become read-only
+  // while this is active (see hasAnyBreakdownData below). When all
+  // breakdown rows are emptied, the totals are cleared so the owner
+  // can resume manual entry without stale numbers in the way.
   useEffect(() => {
-    if (!breakdownTotals.anyFilled) return
-    if (roomsSold === '' && breakdownTotals.roomsFromBreakdown > 0) {
+    if (breakdownTotals.anyFilled) {
       setRoomsSold(String(breakdownTotals.roomsFromBreakdown))
-    }
-    if (revenue === '' && breakdownTotals.revenueFromBreakdown > 0) {
       setRevenue(String(Math.round(breakdownTotals.revenueFromBreakdown)))
+    } else {
+      // Only clear if the field is non-empty AND was set by us — but
+      // we can't distinguish "set by us" from "manually typed" without
+      // an extra flag. Simpler: don't auto-clear. If the owner emptied
+      // every breakdown row, they can clear the top-level inputs by
+      // hand.
     }
-    // Intentional: we only auto-fill once when hotel-wide fields are
-    // empty. Users typing into hotel-wide after fill should be
-    // respected; we don't want to fight their input.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [breakdownTotals.anyFilled])
+  }, [breakdownTotals.anyFilled, breakdownTotals.roomsFromBreakdown, breakdownTotals.revenueFromBreakdown])
 
   const occTarget = Number(target?.occupancy_target ?? target?.occ_target) || 80
 
@@ -166,11 +184,47 @@ export function AccommodationEntryForm({ existing, target, totalRooms, knownRoom
       <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-4">
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1 leading-body">{t('roomsSold')}</label>
-          <input type="number" inputMode="numeric" value={roomsSold} onChange={(e) => setRoomsSold(e.target.value)} max={totalRooms} min={0} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 touch-target" placeholder={t('roomsSoldHint', { max: totalRooms })} required />
+          <input
+            type="number"
+            inputMode="numeric"
+            value={roomsSold}
+            onChange={(e) => setRoomsSold(e.target.value)}
+            max={totalRooms}
+            min={0}
+            className={`w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 touch-target ${
+              breakdownTotals.anyFilled
+                ? 'bg-slate-50 text-slate-600 cursor-not-allowed'
+                : 'text-slate-900'
+            }`}
+            placeholder={t('roomsSoldHint', { max: totalRooms })}
+            readOnly={breakdownTotals.anyFilled}
+            required
+          />
+          {breakdownTotals.anyFilled && (
+            <p className="text-[11px] text-slate-500 mt-1">{t('autoCalculatedFromBreakdown')}</p>
+          )}
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1 leading-body">{t('totalRevenue')}</label>
-          <input type="number" inputMode="numeric" value={revenue} onChange={(e) => setRevenue(e.target.value)} min={0} step="0.01" className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 touch-target" placeholder="฿" required />
+          <input
+            type="number"
+            inputMode="numeric"
+            value={revenue}
+            onChange={(e) => setRevenue(e.target.value)}
+            min={0}
+            step="0.01"
+            className={`w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 touch-target ${
+              breakdownTotals.anyFilled
+                ? 'bg-slate-50 text-slate-600 cursor-not-allowed'
+                : 'text-slate-900'
+            }`}
+            placeholder="฿"
+            readOnly={breakdownTotals.anyFilled}
+            required
+          />
+          {breakdownTotals.anyFilled && (
+            <p className="text-[11px] text-slate-500 mt-1">{t('autoCalculatedFromBreakdown')}</p>
+          )}
         </div>
       </div>
 
@@ -211,38 +265,77 @@ export function AccommodationEntryForm({ existing, target, totalRooms, knownRoom
             <span className="text-xs text-slate-500">{t('roomTypeBreakdownOptional')}</span>
           </div>
           <p className="text-xs text-slate-500">{t('roomTypeBreakdownHint')}</p>
+
+          {/* Rate-column explanation. The default rate pre-fill comes
+              from past room_type_breakdown rows (latest known) — it's
+              a hint, not a recorded fact. Spelling out the "achieved
+              rate vs walk-in" distinction up front prevents owners
+              from mis-entering the rack rate. */}
+          <div className="flex items-start gap-2 bg-slate-50 rounded-lg px-3 py-2 text-xs text-slate-600 leading-relaxed">
+            <span className="flex-shrink-0 mt-0.5">ℹ</span>
+            <div>
+              <strong>{t('avgRateExplainLabel')}</strong>
+              <span> {t('avgRateExplainBody1')}</span>
+              <br />
+              {t('avgRateExplainBody2')}
+              <br />
+              <span className="text-slate-500">{t('avgRateExplainBody3')}</span>
+            </div>
+          </div>
+
+          {/* Column headers — give the Occupied + Rate columns a label
+              so the form reads without having to infer column meaning
+              from placeholder text. */}
+          <div className="grid grid-cols-12 gap-2 pb-1 border-b border-slate-100 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+            <div className="col-span-4">{t('colRoomType')}</div>
+            <div className="col-span-4">{t('colRoomsSold')}</div>
+            <div className="col-span-4">{t('colAvgRateSold')}</div>
+          </div>
+
           <div className="space-y-2">
-            {breakdown.map((row, i) => (
-              <div key={row.roomType} className="grid grid-cols-12 gap-2 items-center">
-                <div className="col-span-4 text-sm text-slate-700 font-medium">
-                  {row.roomType}
-                  {row.inventory > 0 && (
-                    <span className="block text-xs text-slate-500 font-normal">
-                      {t('roomTypeInventoryLabel', { count: row.inventory })}
-                    </span>
-                  )}
+            {breakdown.map((row, i) => {
+              const isDefaultRate = !row.rateUserEdited && row.rateThb !== ''
+              return (
+                <div key={row.roomType} className="grid grid-cols-12 gap-2 items-start">
+                  <div className="col-span-4 text-sm text-slate-700 font-medium pt-2">
+                    {row.roomType}
+                    {row.inventory > 0 && (
+                      <span className="block text-xs text-slate-500 font-normal">
+                        {t('roomTypeInventoryLabel', { count: row.inventory })}
+                      </span>
+                    )}
+                  </div>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    value={row.occupied}
+                    onChange={(e) => updateBreakdownRow(i, { occupied: e.target.value })}
+                    className="col-span-4 px-2 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 touch-target"
+                    placeholder={t('roomTypeOccupiedPlaceholder')}
+                    min={0}
+                    max={row.inventory || undefined}
+                  />
+                  <div className="col-span-4">
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      value={row.rateThb}
+                      onChange={(e) => updateBreakdownRow(i, { rateThb: e.target.value, rateUserEdited: true })}
+                      className={`w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 touch-target ${
+                        isDefaultRate ? 'text-slate-400' : 'text-slate-900'
+                      }`}
+                      placeholder={t('roomTypeRatePlaceholder')}
+                      min={0}
+                    />
+                    {isDefaultRate && (
+                      <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                        {t('defaultRateHint')}
+                      </p>
+                    )}
+                  </div>
                 </div>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  value={row.occupied}
-                  onChange={(e) => updateBreakdownRow(i, { occupied: e.target.value })}
-                  className="col-span-4 px-2 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 touch-target"
-                  placeholder={t('roomTypeOccupiedPlaceholder')}
-                  min={0}
-                  max={row.inventory || undefined}
-                />
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  value={row.rateThb}
-                  onChange={(e) => updateBreakdownRow(i, { rateThb: e.target.value })}
-                  className="col-span-4 px-2 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 touch-target"
-                  placeholder={t('roomTypeRatePlaceholder')}
-                  min={0}
-                />
-              </div>
-            ))}
+              )
+            })}
           </div>
           {breakdownTotals.anyFilled && (
             <div className="text-xs text-slate-500 border-t border-slate-100 pt-2">
@@ -264,18 +357,74 @@ export function AccommodationEntryForm({ existing, target, totalRooms, knownRoom
 
       <PlanGate requiredPlan="growth" featureName={t('channelBreakdown')}>
         <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-          <h4 className="text-sm font-medium text-slate-700">{t('channelBreakdown')}</h4>
+          <div className="flex items-baseline justify-between">
+            <h4 className="text-sm font-medium text-slate-700">{t('channelBreakdown')}</h4>
+            <span className="text-xs text-slate-500">{t('roomTypeBreakdownOptional')}</span>
+          </div>
+          <p className="text-xs text-slate-500 leading-relaxed">{t('channelHint')}</p>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-slate-500 mb-1">{t('channelDirect')}</label>
-              <input type="number" inputMode="numeric" value={channelDirect} onChange={(e) => setChannelDirect(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 touch-target" />
+              <input
+                type="number"
+                inputMode="numeric"
+                value={channelDirect}
+                onChange={(e) => setChannelDirect(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 touch-target"
+                min={0}
+                placeholder="0"
+              />
+              {calcs.rooms > 0 && channelDirect !== '' && (
+                <p className="text-[11px] text-slate-500 mt-1">
+                  {t('channelPercent', { pct: Math.round(((parseInt(channelDirect) || 0) / calcs.rooms) * 100) })}
+                </p>
+              )}
             </div>
             <div>
-              <label className="block text-xs text-slate-500 mb-1">{t('channelOta')}</label>
-              <input type="number" inputMode="numeric" value={channelOta} onChange={(e) => setChannelOta(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 touch-target" />
+              <label className="block text-xs text-slate-500 mb-1">
+                {t('channelOta')}
+                <span className="text-slate-400 ml-1">{t('channelOtaExamples')}</span>
+              </label>
+              <input
+                type="number"
+                inputMode="numeric"
+                value={channelOta}
+                onChange={(e) => setChannelOta(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 touch-target"
+                min={0}
+                placeholder="0"
+              />
+              {calcs.rooms > 0 && channelOta !== '' && (
+                <p className="text-[11px] text-slate-500 mt-1">
+                  {t('channelPercent', { pct: Math.round(((parseInt(channelOta) || 0) / calcs.rooms) * 100) })}
+                </p>
+              )}
             </div>
           </div>
-          {channelMismatch && <p className="text-xs text-red-600">{t('channelMismatch', { total: channelTotal, rooms: calcs.rooms })}</p>}
+
+          {/* "From breakdown" hint when both channels still empty AND
+              we have a total rooms count from the breakdown — helps
+              the owner anchor on the right denominator. */}
+          {calcs.rooms > 0 && channelDirect === '' && channelOta === '' && (
+            <p className="text-[11px] text-slate-500">
+              {t('channelFromBreakdown', { rooms: calcs.rooms })}
+            </p>
+          )}
+
+          {/* Exceeds-total warning: Direct + OTA > total rooms sold.
+              Warn, don't block — the owner may have walk-ins counted
+              separately and that's fine. */}
+          {calcs.rooms > 0 && channelTotal > calcs.rooms && (
+            <p className="text-xs text-red-600">
+              {t('channelExceedsTotal', { total: channelTotal, rooms: calcs.rooms })}
+            </p>
+          )}
+          {channelMismatch && channelTotal <= calcs.rooms && (
+            <p className="text-xs text-amber-600">
+              {t('channelMismatch', { total: channelTotal, rooms: calcs.rooms })}
+            </p>
+          )}
         </div>
       </PlanGate>
 

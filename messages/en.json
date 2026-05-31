@@ -184,7 +184,21 @@
     "roomTypeRatePlaceholder": "Rate ฿",
     "roomTypeAutoSummed": "Auto-summed from breakdown: {rooms} rooms · {revenue}",
     "roomTypeBreakdownNoHistory": "No room types registered for this branch yet.",
-    "roomTypeBreakdownNoHistoryCta": "Import a CSV to register types →"
+    "roomTypeBreakdownNoHistoryCta": "Import a CSV to register types →",
+    "colRoomType": "Room type",
+    "colRoomsSold": "Rooms sold",
+    "colAvgRateSold": "Avg rate sold (฿)",
+    "avgRateExplainLabel": "Avg rate sold",
+    "avgRateExplainBody1": "= room revenue ÷ rooms sold for that type.",
+    "avgRateExplainBody2": "e.g. 2 direct at ฿1,200 + 3 OTA at ฿980 → enter ฿1,073.",
+    "avgRateExplainBody3": "Not the rack / walk-in rate.",
+    "defaultRateHint": "Last known rate — edit if different",
+    "autoCalculatedFromBreakdown": "Auto-calculated from breakdown",
+    "channelHint": "Enter the number of rooms per channel — percentages are calculated automatically.",
+    "channelOtaExamples": "Agoda, Booking, Expedia",
+    "channelPercent": "{pct}% of total rooms sold",
+    "channelFromBreakdown": "From breakdown: {rooms} rooms sold last night",
+    "channelExceedsTotal": "Direct + OTA ({total} rooms) exceeds total rooms sold ({rooms})"
   },
   "entryFnb": {
     "totalSales": "Total sales today (฿)",
