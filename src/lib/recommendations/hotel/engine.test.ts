@@ -443,3 +443,276 @@ describe('attachCompetitorRates', () => {
     expect(out[0].competitorRates).toHaveLength(3)
   })
 })
+
+// ── Multi-room-type behaviour ───────────────────────────────────────────────
+//
+// Replicates the Crystal Resort shape: 4 room types with very different
+// rates. The blended ADR for a mixed-occupancy day is meaningless to the
+// owner — they need per-room signals.
+
+interface RoomDayRow {
+  roomType: string
+  totalRooms: number
+  occupied: number
+  rateThb: number
+}
+
+function multiRoomDays(
+  perDayRows: RoomDayRow[][],
+  endDate = ANCHOR,
+): RecommendationInput[] {
+  return perDayRows.map((rows, i) => {
+    const d = new Date(`${endDate}T00:00:00Z`)
+    d.setUTCDate(d.getUTCDate() - (perDayRows.length - 1 - i))
+    const totalRooms = rows.reduce((s, r) => s + r.totalRooms, 0)
+    const totalOccupied = rows.reduce((s, r) => s + r.occupied, 0)
+    const totalRevenue = rows.reduce((s, r) => s + r.occupied * r.rateThb, 0)
+    const adr = totalOccupied > 0 ? totalRevenue / totalOccupied : 0
+    return {
+      date: d.toISOString().slice(0, 10),
+      occupancyRate: totalRooms > 0 ? totalOccupied / totalRooms : 0,
+      adrThb: adr,
+      roomTypeBreakdown: rows.map((r) => ({
+        roomType: r.roomType,
+        totalRooms: r.totalRooms,
+        occupiedRooms: r.occupied,
+        rateThb: r.rateThb,
+      })),
+    }
+  })
+}
+
+describe('suggestRates — multi-room-type dispatch', () => {
+  it('emits a per-room rate_increase for a single high-occupancy room type', () => {
+    const recs = suggestRates(multiRoomDays([
+      [
+        { roomType: 'Suite', totalRooms: 11, occupied: 10, rateThb: 1920 },  // 91%
+        { roomType: 'Deluxe5', totalRooms: 33, occupied: 18, rateThb: 790 }, // 55% — comfortable
+      ],
+      [
+        { roomType: 'Suite', totalRooms: 11, occupied: 10, rateThb: 1920 },
+        { roomType: 'Deluxe5', totalRooms: 33, occupied: 20, rateThb: 790 },
+      ],
+      [
+        { roomType: 'Suite', totalRooms: 11, occupied: 11, rateThb: 1920 },
+        { roomType: 'Deluxe5', totalRooms: 33, occupied: 17, rateThb: 790 },
+      ],
+    ]))
+
+    const suiteRec = recs.find((r) => r.roomType === 'Suite')
+    expect(suiteRec?.type).toBe('rate_increase')
+    expect(suiteRec?.urgency).toBe('high')
+    // Suite rate is the input rate, not a blended figure.
+    expect(suiteRec?.currentRateThb).toBe(1920)
+    expect(suiteRec?.suggestedRateThb).toBeGreaterThan(1920)
+
+    // Deluxe5 stays silent — middle of the hold band.
+    expect(recs.find((r) => r.roomType === 'Deluxe5')).toBeUndefined()
+  })
+
+  it('emits per-room signals for high AND low rooms in the same window', () => {
+    const recs = suggestRates(multiRoomDays([
+      [
+        { roomType: 'Suite', totalRooms: 11, occupied: 10, rateThb: 1920 },   // 91% → up
+        { roomType: 'Deluxe2', totalRooms: 19, occupied: 5, rateThb: 950 },   // 26% → down
+      ],
+      [
+        { roomType: 'Suite', totalRooms: 11, occupied: 10, rateThb: 1920 },
+        { roomType: 'Deluxe2', totalRooms: 19, occupied: 4, rateThb: 950 },
+      ],
+      [
+        { roomType: 'Suite', totalRooms: 11, occupied: 11, rateThb: 1920 },
+        { roomType: 'Deluxe2', totalRooms: 19, occupied: 6, rateThb: 950 },
+      ],
+    ]))
+
+    const suite = recs.find((r) => r.roomType === 'Suite')
+    const deluxe = recs.find((r) => r.roomType === 'Deluxe2')
+
+    expect(suite?.type).toBe('rate_increase')
+    expect(suite?.suggestedRateThb).toBeGreaterThan(suite?.currentRateThb ?? 0)
+
+    expect(deluxe?.type).toBe('rate_decrease')
+    expect(deluxe?.suggestedRateThb).toBeLessThan(deluxe?.currentRateThb ?? Infinity)
+  })
+
+  it('per-room recs use each room type\'s own current rate (not blended ADR)', () => {
+    const recs = suggestRates(multiRoomDays([
+      [
+        { roomType: 'Suite', totalRooms: 10, occupied: 9, rateThb: 1920 },
+        { roomType: 'Deluxe', totalRooms: 30, occupied: 28, rateThb: 790 },
+      ],
+      [
+        { roomType: 'Suite', totalRooms: 10, occupied: 10, rateThb: 1920 },
+        { roomType: 'Deluxe', totalRooms: 30, occupied: 27, rateThb: 790 },
+      ],
+      [
+        { roomType: 'Suite', totalRooms: 10, occupied: 9, rateThb: 1920 },
+        { roomType: 'Deluxe', totalRooms: 30, occupied: 28, rateThb: 790 },
+      ],
+    ]))
+    // Both above 85% — both should suggest increase using their OWN rates.
+    const suite = recs.find((r) => r.roomType === 'Suite')
+    const deluxe = recs.find((r) => r.roomType === 'Deluxe')
+    expect(suite?.currentRateThb).toBe(1920)
+    expect(deluxe?.currentRateThb).toBe(790)
+    // Critical: the blended ADR for this window is ~৻900, but neither
+    // suggested rate should be near 900 — that's the bug we're fixing.
+    expect(suite?.suggestedRateThb).toBeGreaterThan(1900)
+    expect(deluxe?.suggestedRateThb).toBeGreaterThan(800)
+  })
+
+  it('falls back to blended hold when no per-room signal fires', () => {
+    // Every room type comfortably in the 35-85 band → blended path
+    // returns rate_hold so the property still has SOME signal.
+    const recs = suggestRates(multiRoomDays([
+      [
+        { roomType: 'Suite', totalRooms: 11, occupied: 6, rateThb: 1920 },   // 55%
+        { roomType: 'Deluxe', totalRooms: 33, occupied: 18, rateThb: 790 }, // 55%
+      ],
+      [
+        { roomType: 'Suite', totalRooms: 11, occupied: 7, rateThb: 1920 },
+        { roomType: 'Deluxe', totalRooms: 33, occupied: 19, rateThb: 790 },
+      ],
+      [
+        { roomType: 'Suite', totalRooms: 11, occupied: 7, rateThb: 1920 },
+        { roomType: 'Deluxe', totalRooms: 33, occupied: 20, rateThb: 790 },
+      ],
+    ]))
+    expect(recs).toHaveLength(1)
+    expect(recs[0].type).toBe('rate_hold')
+    // The blended hold rec has NO roomType — it's a property-level signal.
+    expect(recs[0].roomType).toBeUndefined()
+  })
+
+  it('rate signals stay integers and never go negative', () => {
+    const recs = suggestRates(multiRoomDays([
+      [{ roomType: 'Suite', totalRooms: 11, occupied: 2, rateThb: 1920 }],
+      [{ roomType: 'Suite', totalRooms: 11, occupied: 2, rateThb: 1920 }],
+      [{ roomType: 'Suite', totalRooms: 11, occupied: 2, rateThb: 1920 }],
+    ]))
+    for (const r of recs) {
+      if (r.suggestedRateThb !== undefined) {
+        expect(Number.isInteger(r.suggestedRateThb)).toBe(true)
+        expect(r.suggestedRateThb).toBeGreaterThanOrEqual(0)
+      }
+    }
+  })
+
+  it('single-room-type breakdown falls through to blended', () => {
+    // One room type in the breakdown — engine should treat as blended.
+    const recs = suggestRates(multiRoomDays([
+      [{ roomType: 'Suite', totalRooms: 11, occupied: 10, rateThb: 1920 }],
+      [{ roomType: 'Suite', totalRooms: 11, occupied: 10, rateThb: 1920 }],
+      [{ roomType: 'Suite', totalRooms: 11, occupied: 11, rateThb: 1920 }],
+    ]))
+    expect(recs).toHaveLength(1)
+    // Blended path emits one property-level rec with no roomType.
+    expect(recs[0].roomType).toBeUndefined()
+  })
+
+  it('handles room types that vanish on some days within the window', () => {
+    // Deluxe2 appears on days 1+3 but not day 2 (e.g. all rooms blocked
+    // for maintenance) — engine should still compute its 2-day average.
+    const recs = suggestRates(multiRoomDays([
+      [
+        { roomType: 'Suite', totalRooms: 11, occupied: 6, rateThb: 1920 },
+        { roomType: 'Deluxe2', totalRooms: 19, occupied: 5, rateThb: 950 }, // 26%
+      ],
+      [
+        { roomType: 'Suite', totalRooms: 11, occupied: 6, rateThb: 1920 },
+        // Deluxe2 missing today
+      ],
+      [
+        { roomType: 'Suite', totalRooms: 11, occupied: 7, rateThb: 1920 },
+        { roomType: 'Deluxe2', totalRooms: 19, occupied: 4, rateThb: 950 }, // 21%
+      ],
+    ]))
+    // Deluxe2 has 2 days of data (above the ≥2-day threshold), 23% avg
+    // → should still fire rate_decrease.
+    const deluxe = recs.find((r) => r.roomType === 'Deluxe2')
+    expect(deluxe?.type).toBe('rate_decrease')
+  })
+})
+
+describe('generateDailyRecommendations dedup — preserves per-room recs', () => {
+  it('returns BOTH Suite and Deluxe rate_increase when both fire', () => {
+    const recs = generateDailyRecommendations(multiRoomDays([
+      [
+        { roomType: 'Suite', totalRooms: 11, occupied: 10, rateThb: 1920 },
+        { roomType: 'Deluxe', totalRooms: 30, occupied: 28, rateThb: 790 },
+      ],
+      [
+        { roomType: 'Suite', totalRooms: 11, occupied: 11, rateThb: 1920 },
+        { roomType: 'Deluxe', totalRooms: 30, occupied: 27, rateThb: 790 },
+      ],
+      [
+        { roomType: 'Suite', totalRooms: 11, occupied: 10, rateThb: 1920 },
+        { roomType: 'Deluxe', totalRooms: 30, occupied: 28, rateThb: 790 },
+      ],
+    ]))
+    const increases = recs.filter((r) => r.type === 'rate_increase')
+    const rooms = increases.map((r) => r.roomType).sort()
+    expect(rooms).toEqual(['Deluxe', 'Suite'])
+  })
+})
+
+describe('toRecommendationInputs — passes room_type_breakdown through', () => {
+  it('threads breakdown rows into RecommendationInput unchanged', () => {
+    const out = toRecommendationInputs([{
+      metric_date: '2026-05-29',
+      rooms_available: 84,
+      rooms_sold: 50,
+      revenue: 50000,
+      room_type_breakdown: [
+        { roomType: 'Suite', totalRooms: 11, occupiedRooms: 10, rateThb: 1920 },
+        { roomType: 'Deluxe', totalRooms: 33, occupiedRooms: 25, rateThb: 790 },
+      ],
+    }])
+    expect(out[0].roomTypeBreakdown).toHaveLength(2)
+    expect(out[0].roomTypeBreakdown?.[0].roomType).toBe('Suite')
+  })
+
+  it('omits roomTypeBreakdown when the column is null', () => {
+    const out = toRecommendationInputs([{
+      metric_date: '2026-05-29',
+      rooms_available: 84,
+      rooms_sold: 50,
+      revenue: 50000,
+      room_type_breakdown: null,
+    }])
+    expect(out[0].roomTypeBreakdown).toBeUndefined()
+  })
+
+  it('omits roomTypeBreakdown when the column is an empty array', () => {
+    const out = toRecommendationInputs([{
+      metric_date: '2026-05-29',
+      rooms_available: 84,
+      rooms_sold: 50,
+      revenue: 50000,
+      room_type_breakdown: [],
+    }])
+    expect(out[0].roomTypeBreakdown).toBeUndefined()
+  })
+
+  it('filters out malformed breakdown entries that lack a roomType', () => {
+    // Build the breakdown array as `unknown` and cast — production
+    // jsonb can carry malformed objects (e.g. from legacy imports),
+    // and the adapter is supposed to drop them silently. Test simulates
+    // exactly that shape without resorting to `any`.
+    type ValidEntry = { roomType: string; totalRooms: number; occupiedRooms: number; rateThb: number }
+    const malformed: unknown = [
+      { roomType: 'Suite', totalRooms: 11, occupiedRooms: 10, rateThb: 1920 },
+      { roomType: undefined, totalRooms: 1, occupiedRooms: 1, rateThb: 0 },
+    ]
+    const out = toRecommendationInputs([{
+      metric_date: '2026-05-29',
+      rooms_available: 84,
+      rooms_sold: 50,
+      revenue: 50000,
+      room_type_breakdown: malformed as ReadonlyArray<ValidEntry>,
+    }])
+    expect(out[0].roomTypeBreakdown).toHaveLength(1)
+    expect(out[0].roomTypeBreakdown?.[0].roomType).toBe('Suite')
+  })
+})

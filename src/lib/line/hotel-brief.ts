@@ -24,7 +24,9 @@ export interface HotelBriefData {
   /** Auto Push approval — Pro plan only. Both fields are passed by the
    *  caller (route knows the base URL, locale, and rate); the builder
    *  just renders. Pass either both or neither — the button only shows
-   *  when both are non-empty. */
+   *  when both are non-empty AND the property is single-room-type (a
+   *  single suggested rate is meaningless for a 4-room-type hotel
+   *  where each type prices differently). */
   approveButton?: {
     /** Full URL the LINE in-app browser will GET (token already in qs). */
     url: string
@@ -33,6 +35,18 @@ export interface HotelBriefData {
      *  rate string would overflow. */
     label: string
   }
+  /** Deep-link URL to /ratedesk on the dashboard. When provided, the
+   *  bubble footer renders an "Open RateDesk" button (always — single
+   *  AND multi-room properties). This is the only on-bubble action for
+   *  multi-room hotels since the approve button is hidden there. */
+  dashboardUrl?: string
+  /** True when yesterday's row carried 2+ distinct room types in its
+   *  breakdown jsonb. Controls (1) whether the approve button renders
+   *  and (2) which "tonight" panel the bubble body shows. Caller is
+   *  responsible for setting this; the builder doesn't re-derive it
+   *  from topRecs because some single-room-type hotels also have
+   *  per-room recs (degenerate case). */
+  hasMultipleRoomTypes?: boolean
 }
 
 export interface FlexMessageEnvelope {
@@ -114,6 +128,37 @@ function recRow(rec: HotelRecommendation): Record<string, unknown> {
   }
 }
 
+// Compact per-room rate signal row used inside the "Rooms to adjust"
+// panel for multi-room hotels. Render shape:
+//   ↑ Suite: ฿1,920 → ฿2,112    (green arrow, rate_increase)
+//   ↓ Deluxe2: ฿950 → ฿893      (red arrow, rate_decrease)
+// Skips the urgency emoji — the arrow + colour already encode the
+// direction, and bubble width is tight on multi-room rows.
+function perRoomLine(rec: HotelRecommendation): Record<string, unknown> {
+  const isIncrease = rec.type === 'rate_increase'
+  const arrow = isIncrease ? '↑' : '↓'
+  const arrowColor = isIncrease ? COLORS.success : COLORS.warn
+  const current = rec.currentRateThb ?? 0
+  const suggested = rec.suggestedRateThb ?? 0
+  const label = `${rec.roomType ?? '—'}: ฿${fmtThb(current)} → ฿${fmtThb(suggested)}`
+  return {
+    type: 'box',
+    layout: 'horizontal',
+    margin: 'xs',
+    contents: [
+      { type: 'text', text: arrow, size: 'xs', flex: 0, weight: 'bold', color: arrowColor },
+      {
+        type: 'text',
+        text: label,
+        size: 'xs',
+        color: COLORS.text,
+        flex: 1,
+        margin: 'sm',
+      },
+    ],
+  }
+}
+
 export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnvelope {
   const occPct = Math.round(data.yesterday.occupancyRate * 100)
   const adrStr = `฿${fmtThb(data.yesterday.adrThb)}`
@@ -135,8 +180,35 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
     },
   ]
 
-  // Tonight forecast — only when the engine had enough data
-  if (data.forecast) {
+  // Split recs into per-room and property-level. Multi-room hotels
+  // get a dedicated "rooms to adjust" panel showing per-room rate
+  // signals (Suite ฿1,920 → ฿2,112); single-room hotels keep the
+  // blended forecast strip from the original layout.
+  const perRoomRecs = data.topRecs.filter((r) => Boolean(r.roomType) && (r.type === 'rate_increase' || r.type === 'rate_decrease'))
+  const propertyRecs = data.topRecs.filter((r) => !r.roomType)
+
+  if (data.hasMultipleRoomTypes && perRoomRecs.length > 0) {
+    // "Rooms to adjust" panel — per-room rate signals, max 3 to keep
+    // the bubble height bounded.
+    bodyContents.push({
+      type: 'box',
+      layout: 'vertical',
+      backgroundColor: COLORS.forecastBg,
+      cornerRadius: '6px',
+      paddingAll: '10px',
+      contents: [
+        {
+          type: 'text',
+          text: 'ห้องที่ควรปรับราคา',
+          size: 'xs',
+          weight: 'bold',
+          color: COLORS.forecastFg,
+        },
+        ...perRoomRecs.slice(0, 3).map((rec) => perRoomLine(rec)),
+      ],
+    })
+  } else if (data.forecast && !data.hasMultipleRoomTypes) {
+    // Single-room / no-breakdown path — keep the blended forecast strip.
     const forecastOcc = Math.round(data.forecast.expectedOccupancy * 100)
     const suggested = `฿${fmtThb(data.forecast.suggestedRateThb)}`
     bodyContents.push({
@@ -156,10 +228,30 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
         },
       ],
     })
+  } else if (data.hasMultipleRoomTypes) {
+    // Multi-room property but no per-room rec fired — every room sits
+    // comfortably in the hold band. Tell the owner so the silence
+    // doesn't read as "engine isn't working".
+    bodyContents.push({
+      type: 'box',
+      layout: 'vertical',
+      backgroundColor: '#F0FDF4',
+      cornerRadius: '6px',
+      paddingAll: '10px',
+      contents: [
+        {
+          type: 'text',
+          text: 'ราคาทุกประเภทห้องเหมาะสม',
+          size: 'xs',
+          color: COLORS.success,
+        },
+      ],
+    })
   }
 
-  // Up to 2 highest-urgency recs; engine already pre-sorts high→low.
-  for (const rec of data.topRecs.slice(0, 2)) {
+  // Up to 2 property-level recs (weekend signal, undercut, etc.).
+  // Per-room recs already rendered inside the panel above.
+  for (const rec of propertyRecs.slice(0, 2)) {
     bodyContents.push(recRow(rec))
   }
 
@@ -204,9 +296,11 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
         paddingAll: '12px',
         spacing: 'sm',
         contents: [
-          // Pro-tier approve button — only rendered when the caller
-          // provides both url + label. Sits above the branding text.
-          ...(data.approveButton
+          // Pro-tier approve button. Suppressed for multi-room hotels
+          // because a single ฿X label can't represent 4 different room-
+          // type rates — the per-room recs are in the body panel above,
+          // and approval has to be a per-room action on the dashboard.
+          ...(data.approveButton && !data.hasMultipleRoomTypes
             ? [
                 {
                   type: 'button',
@@ -217,6 +311,26 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
                     type: 'uri',
                     label: data.approveButton.label,
                     uri: data.approveButton.url,
+                  },
+                } as Record<string, unknown>,
+              ]
+            : []),
+          // "Open RateDesk" deep-link — always present when caller
+          // provides a URL. Single-room hotels get it below the approve
+          // button (low-friction "see more"); multi-room hotels get it
+          // INSTEAD of the approve button (the only action). Secondary
+          // style keeps it visually subordinate to the approve button
+          // when both render.
+          ...(data.dashboardUrl
+            ? [
+                {
+                  type: 'button',
+                  style: 'secondary',
+                  height: 'sm',
+                  action: {
+                    type: 'uri',
+                    label: 'ดู RateDesk',
+                    uri: data.dashboardUrl,
                   },
                 } as Record<string, unknown>,
               ]

@@ -22,6 +22,10 @@ export interface HotelRecommendation {
   suggestedRateThb?: number
   /** THB integer at the time of the rec (latest day's ADR). */
   currentRateThb?: number
+  /** Room type the rec applies to — present when the rec is room-type
+   *  specific (multi-room-type hotels). Absent for property-level recs
+   *  (weekend signal, undercut signal, blended hold/increase/decrease). */
+  roomType?: string
   messageTh: string
   messageEn: string
   urgency: 'high' | 'medium' | 'low'
@@ -45,6 +49,18 @@ export interface RecommendationInput {
    *  competitor signals require ≥3 days where this array is
    *  non-empty before they fire. */
   competitorRates?: ReadonlyArray<{ name: string; rateThb: number }>
+  /** Per-room-type breakdown for the day. Populated from the
+   *  accommodation_daily_metrics.room_type_breakdown jsonb when
+   *  available (CSV imports + per-room-type manual entry). When two
+   *  or more types are present the engine emits per-room-type rate
+   *  signals instead of a single blended suggestion (which is
+   *  meaningless when each room type has a different rate). */
+  roomTypeBreakdown?: ReadonlyArray<{
+    roomType: string
+    totalRooms: number
+    occupiedRooms: number
+    rateThb: number
+  }>
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -83,6 +99,33 @@ export function suggestRates(days: RecommendationInput[]): HotelRecommendation[]
   // launch debugging cycle. Anything stricter would silently produce
   // nothing for a brand-new branch.
   if (days.length < 3) return []
+
+  // Multi-room-type dispatch. When the latest day carries a breakdown
+  // with two or more room types, a single blended ADR suggestion is
+  // meaningless (Suite at ฿1,920 + Deluxe2 at ฿950 → blended ฿669
+  // doesn't correspond to any real rate). Emit per-room-type signals
+  // instead so the owner sees actionable, accurately-priced advice.
+  // Falls back to blended logic when the per-room signals don't fire
+  // (e.g. every room type is within the hold band) so the owner still
+  // gets a hold/increase/decrease signal at the property level.
+  const latest = pickLatest(days)
+  const hasMultiRoomBreakdown =
+    Array.isArray(latest.roomTypeBreakdown) && latest.roomTypeBreakdown.length > 1
+  if (hasMultiRoomBreakdown) {
+    const perRoom = suggestRatesPerRoomType(days)
+    if (perRoom.length > 0) return perRoom
+    // No per-room signal — fall through to blended (yields rate_hold
+    // most likely, which is the right property-level signal).
+  }
+
+  return suggestBlendedRate(days)
+}
+
+// Blended suggestion — used for single-room-type properties, properties
+// without breakdown data, and as a fallback when per-room signals don't
+// fire on a multi-room property. Behaviour identical to the original
+// pre-multi-room engine.
+function suggestBlendedRate(days: RecommendationInput[]): HotelRecommendation[] {
   const recent = days.slice(-3)
   const occ = avgOccupancy(recent)
   const latest = pickLatest(days)
@@ -129,6 +172,81 @@ export function suggestRates(days: RecommendationInput[]): HotelRecommendation[]
     supportingData: { avgOccupancy: occ, days: 3, currentRateThb: currentRate },
     requiresMinDays: 3,
   }]
+}
+
+// Per-room-type rate signals — fired when the latest day's breakdown
+// carries 2+ room types. Computes each type's 3-day rolling occupancy
+// from the breakdown rows on each day (handling types that don't appear
+// in every day), then emits rate_increase / rate_decrease using the
+// SAME thresholds as the blended path (85% / 40%) so the owner's
+// mental model translates cleanly between single-room and multi-room
+// hotels.
+//
+// Note: we widen the hold band slightly per-room (40% lower band stays;
+// emit decrease only at <35% to avoid noise for short room-type lists
+// where one bad night can drag the 3-day avg down) — keeps the signal
+// quality high.
+function suggestRatesPerRoomType(days: RecommendationInput[]): HotelRecommendation[] {
+  const recent = days.slice(-3)
+  const latest = pickLatest(days)
+  const tomorrow = addDays(latest.date, 1)
+
+  // Union of room types that appear in the latest day's breakdown.
+  const latestBreakdown = latest.roomTypeBreakdown ?? []
+  const recs: HotelRecommendation[] = []
+
+  for (const rt of latestBreakdown) {
+    // Gather this room type's occupancy across the last 3 days.
+    const rtOccupancies: number[] = []
+    for (const d of recent) {
+      const row = (d.roomTypeBreakdown ?? []).find((r) => r.roomType === rt.roomType)
+      if (!row || row.totalRooms <= 0) continue
+      rtOccupancies.push(row.occupiedRooms / row.totalRooms)
+    }
+    // Need at least 2 days of data to compute a stable signal.
+    if (rtOccupancies.length < 2) continue
+
+    const avgOcc = rtOccupancies.reduce((s, v) => s + v, 0) / rtOccupancies.length
+    const currentRate = Math.round(rt.rateThb)
+    if (currentRate <= 0) continue
+    const occPct = Math.round(avgOcc * 100)
+
+    if (avgOcc > 0.85) {
+      const lift = Math.round(currentRate * 0.10)
+      const newRate = currentRate + lift
+      recs.push({
+        type: 'rate_increase',
+        date: tomorrow,
+        roomType: rt.roomType,
+        suggestedRateThb: newRate,
+        currentRateThb: currentRate,
+        messageTh: `${rt.roomType}: Occupancy ${occPct}% สูง — แนะนำขึ้น ฿${currentRate.toLocaleString('th-TH')} → ฿${newRate.toLocaleString('th-TH')}`,
+        messageEn: `${rt.roomType}: ${occPct}% occupancy — suggest ฿${currentRate.toLocaleString('en-US')} → ฿${newRate.toLocaleString('en-US')}`,
+        urgency: 'high',
+        supportingData: { roomType: rt.roomType, avgOccupancy: avgOcc, days: rtOccupancies.length, currentRateThb: currentRate, liftThb: lift },
+        requiresMinDays: 3,
+      })
+    } else if (avgOcc < 0.35) {
+      const drop = Math.round(currentRate * 0.06)
+      const newRate = Math.max(0, currentRate - drop)
+      recs.push({
+        type: 'rate_decrease',
+        date: tomorrow,
+        roomType: rt.roomType,
+        suggestedRateThb: newRate,
+        currentRateThb: currentRate,
+        messageTh: `${rt.roomType}: Occupancy ${occPct}% ต่ำ — พิจารณาลด ฿${currentRate.toLocaleString('th-TH')} → ฿${newRate.toLocaleString('th-TH')}`,
+        messageEn: `${rt.roomType}: ${occPct}% occupancy — consider ฿${currentRate.toLocaleString('en-US')} → ฿${newRate.toLocaleString('en-US')}`,
+        urgency: 'medium',
+        supportingData: { roomType: rt.roomType, avgOccupancy: avgOcc, days: rtOccupancies.length, currentRateThb: currentRate, dropThb: drop },
+        requiresMinDays: 3,
+      })
+    }
+    // Silence in the 35%–85% band is the hold signal at the room level
+    // — no per-room hold rec to avoid bubble clutter on a 4-room-type
+    // property where most rooms are sitting in the comfortable middle.
+  }
+  return recs
 }
 
 export function detectLowOccupancy(days: RecommendationInput[]): HotelRecommendation[] {
@@ -327,14 +445,19 @@ export function generateDailyRecommendations(
     ...detectCompetitorUndercutting(days),
     ...detectOverpricing(days),
   ]
-  // Dedupe by type, keep highest urgency on collisions.
+  // Dedupe by (type, roomType) so that on a multi-room property the
+  // per-room rate_increase / rate_decrease recs survive side-by-side
+  // (a property might want both "Suite +10%" and "Deluxe -6%" on the
+  // same day). Property-level recs (no roomType) keep the historical
+  // behaviour: one row per type.
   const order: Record<HotelRecommendation['urgency'], number> = { high: 0, medium: 1, low: 2 }
-  const byType = new Map<HotelRecommendationType, HotelRecommendation>()
+  const byKey = new Map<string, HotelRecommendation>()
   for (const r of all) {
-    const existing = byType.get(r.type)
-    if (!existing || order[r.urgency] < order[existing.urgency]) byType.set(r.type, r)
+    const key = `${r.type}|${r.roomType ?? ''}`
+    const existing = byKey.get(key)
+    if (!existing || order[r.urgency] < order[existing.urgency]) byKey.set(key, r)
   }
-  return Array.from(byType.values())
+  return Array.from(byKey.values())
     .sort((a, b) => order[a.urgency] - order[b.urgency])
     .slice(0, 5)
 }
@@ -351,6 +474,15 @@ export interface AccommodationRowForRec {
   rooms_available: number | null
   rooms_sold: number | null
   revenue: number | null
+  /** Optional per-room-type breakdown from the daily metrics row's
+   *  jsonb column. When 2+ types are present, the engine emits per-room
+   *  rate signals instead of a blended ADR suggestion. */
+  room_type_breakdown?: ReadonlyArray<{
+    roomType: string
+    totalRooms: number
+    occupiedRooms: number
+    rateThb: number
+  }> | null
 }
 
 export function toRecommendationInputs(
@@ -362,10 +494,17 @@ export function toRecommendationInputs(
     const sold = r.rooms_sold ?? 0
     const revenue = r.revenue ?? 0
     if (available <= 0 || sold <= 0) continue
+    // Pass breakdown through when it's a non-empty array. Defensive
+    // against malformed jsonb (e.g. legacy CSV imports that wrote a
+    // string or an object) — only arrays make it through.
+    const breakdown = Array.isArray(r.room_type_breakdown) && r.room_type_breakdown.length > 0
+      ? r.room_type_breakdown.filter((b) => b && typeof b.roomType === 'string')
+      : undefined
     out.push({
       date: r.metric_date,
       occupancyRate: sold / available,
       adrThb: revenue / sold,
+      ...(breakdown ? { roomTypeBreakdown: breakdown } : {}),
     })
   }
   return out.sort((a, b) => a.date.localeCompare(b.date))

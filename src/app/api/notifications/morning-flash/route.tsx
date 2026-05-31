@@ -417,12 +417,28 @@ async function handleMorningFlash(req: NextRequest) {
           // shape and run the recommendation + forecast layers.
           // Both are pure functions — no extra round-trips.
           const baseInputs = toRecommendationInputs(
-            f.metrics.map((m) => ({
-              metric_date: String((m as { metric_date: string }).metric_date),
-              rooms_available: numOrNull(m.rooms_available),
-              rooms_sold: numOrNull(m.rooms_sold),
-              revenue: numOrNull(m.revenue),
-            })),
+            f.metrics.map((m) => {
+              // Defensive cast of the jsonb breakdown column — runtime
+              // shape may be null, an array of valid objects, or (legacy)
+              // a malformed import. toRecommendationInputs filters
+              // malformed entries; we just shovel whatever's there.
+              const breakdownRaw = (m as { room_type_breakdown?: unknown }).room_type_breakdown
+              const breakdown = Array.isArray(breakdownRaw)
+                ? (breakdownRaw as Array<{
+                    roomType: string
+                    totalRooms: number
+                    occupiedRooms: number
+                    rateThb: number
+                  }>)
+                : null
+              return {
+                metric_date: String((m as { metric_date: string }).metric_date),
+                rooms_available: numOrNull(m.rooms_available),
+                rooms_sold: numOrNull(m.rooms_sold),
+                revenue: numOrNull(m.revenue),
+                room_type_breakdown: breakdown,
+              }
+            }),
           )
 
           // Fetch the competitor rates the owner logged at
@@ -462,18 +478,40 @@ async function handleMorningFlash(req: NextRequest) {
           const yAdrThb = yRoomsSold > 0 ? yRevenue / yRoomsSold : 0
           const yOccupancy = yRoomsAvailable > 0 ? yRoomsSold / yRoomsAvailable : 0
 
-          // Auto Push approval (Pro plan only). We create a single-use
-          // token bound to this branch + today + the suggested rate, and
-          // pass the click-through URL to the Flex builder. Re-running the
-          // job for the same branch/date first deletes any unexpired,
-          // unapproved token so we don't multiply rows.
+          const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.auraseaos.com'
+
+          // Multi-room detection — computed up here so the approval-
+          // token block below can skip insert/delete when the button
+          // won't render (saves a wasted DB round-trip every morning).
+          const latestBreakdown = (() => {
+            const raw = (f.latest as { room_type_breakdown?: unknown }).room_type_breakdown
+            return Array.isArray(raw) ? raw : []
+          })()
+          const distinctRoomTypes = new Set(
+            latestBreakdown
+              .map((b) => (b as { roomType?: string }).roomType)
+              .filter((rt): rt is string => typeof rt === 'string' && rt.length > 0),
+          )
+          const hasMultipleRoomTypes = distinctRoomTypes.size > 1
+
+          // Auto Push approval (Pro plan only, single-room only). We
+          // create a single-use token bound to this branch + today +
+          // the suggested rate, and pass the click-through URL to the
+          // Flex builder. Re-running the job for the same branch/date
+          // first deletes any unexpired, unapproved token so we don't
+          // multiply rows.
+          //
+          // Multi-room properties skip token creation entirely — a
+          // single ฿X rate doesn't represent 4 different room types,
+          // so the button is hidden in the Flex render. Owner goes to
+          // /ratedesk (dashboard deep-link button) to act per-room.
           //
           // Re-checks the plan at delivery time (rather than caching at
           // org fetch) so a Pro→Growth downgrade between fetch and send
           // doesn't leak the button. The /api/line/approve-rate endpoint
           // re-checks again at click time for the same reason.
           let approveButton: { url: string; label: string } | undefined
-          if (forecast && hasFeature(org.plan, 'auto_push')) {
+          if (forecast && hasFeature(org.plan, 'auto_push') && !hasMultipleRoomTypes) {
             const rateThb = Math.round(forecast.suggestedRateThb)
             const adminSb = createServiceClient()
 
@@ -510,13 +548,14 @@ async function handleMorningFlash(req: NextRequest) {
               const rateStr = rateThb.toLocaleString('th-TH')
               const fullLabel = `✓ อนุมัติราคา ฿${rateStr}`
               const label = fullLabel.length <= 20 ? fullLabel : '✓ อนุมัติราคาคืนนี้'
-              const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.auraseaos.com'
               approveButton = {
                 url: `${baseUrl}/api/line/approve-rate?token=${created.token}`,
                 label,
               }
             }
           }
+
+          const dashboardUrl = `${baseUrl}/ratedesk`
 
           const flex = buildHotelBriefFlexMessage({
             branchName: f.branchName,
@@ -530,6 +569,8 @@ async function handleMorningFlash(req: NextRequest) {
             topRecs: recs,
             forecast,
             approveButton,
+            dashboardUrl,
+            hasMultipleRoomTypes,
           })
 
           // Mixed-vertical recipients: Flex(hotel) + text(F&B) in one
