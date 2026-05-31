@@ -3,7 +3,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { Resend } from 'resend'
 import { EMAIL_SENDERS } from '@/lib/email/resend'
 import MorningFlash, { type MorningFlashBranchData } from '@/lib/email/templates/morningFlash'
-import { buildMorningFlashLine, sendLineMessage, sendLineFlexMessage } from '@/lib/line/messaging'
+import { buildMorningFlashLine, sendLineMessage, sendLineFlexMessage, sendLineMixed } from '@/lib/line/messaging'
 import { buildHotelBriefFlexMessage } from '@/lib/line/hotel-brief'
 import { getTodayBangkok } from '@/lib/businessDate'
 import { calculateGrossMarginStrict } from '@/lib/calculations/fnb'
@@ -199,6 +199,13 @@ async function handleMorningFlash(req: NextRequest) {
     // when the recipient has any F&B branches in scope or more than
     // one hotel branch (we'd need a carousel to show both, and Flex
     // bubbles are constrained — text path handles multi-branch).
+    // F&B snippets are tracked separately so a recipient with exactly
+    // one hotel branch + N F&B branches can receive a Flex bubble for
+    // the hotel AND a follow-up text for the F&B in the same LINE push
+    // (LINE allows up to 5 messages per push). Previously the route
+    // gated Flex on lineSnippets.length === 1 which downgraded any
+    // mixed-vertical owner to text — hiding the Auto Push ✓ button.
+    const fnbSnippets: string[] = []
     const hotelFlexInputs: Array<{
       branchId: string
       branchName: string
@@ -353,10 +360,11 @@ async function handleMorningFlash(req: NextRequest) {
         }),
       )
 
-      // Stash hotel inputs for the Flex Message path below. F&B
-      // branches in the same recipient's scope short-circuit this
-      // (the Flex render is hotel-specific; mixed-vertical recipients
-      // fall through to the existing text-bundle path).
+      // Stash hotel inputs (consumed by the Flex Message path below)
+      // and F&B snippets (sent as a follow-up text in the same LINE
+      // push when the recipient has a single hotel + N F&B branches).
+      // We never get to the text-bundle path for mixed-vertical owners
+      // any more — they receive Flex(hotel) + text(F&B) together.
       if (isHotel) {
         hotelFlexInputs.push({
           branchId: branch.id,
@@ -364,6 +372,9 @@ async function handleMorningFlash(req: NextRequest) {
           latest: latest as Record<string, unknown>,
           metrics: (metrics || []) as Record<string, unknown>[],
         })
+      } else {
+        // Last entry pushed to lineSnippets is this F&B branch's text.
+        fnbSnippets.push(lineSnippets[lineSnippets.length - 1])
       }
     }
 
@@ -387,17 +398,20 @@ async function handleMorningFlash(req: NextRequest) {
       if (!profile?.line_id) {
         console.log(`[morning-flash] user=${setting.user_id} has no profiles.line_id — cannot push LINE`)
       } else {
-        // Single-hotel-branch recipients get the RateDesk Flex
-        // Message (yesterday's KPIs as cards + tonight forecast +
-        // top recs). Everyone else continues to receive the
-        // concatenated text snippets — same content, same dedup.
-        const isSingleHotelOnly =
-          hotelFlexInputs.length === 1 && lineSnippets.length === 1
+        // Any recipient with exactly one hotel branch gets the RateDesk
+        // Flex bubble (yesterday's KPIs + tonight forecast + top recs +
+        // Auto Push ✓ button on Pro). When the same recipient also has
+        // F&B branches in scope, the F&B summaries are appended to the
+        // same LINE push as a follow-up text message — LINE allows up
+        // to 5 messages per push call. Multi-hotel owners (rare — a
+        // chain operator) still fall through to the text-bundle path;
+        // adding carousel support is a separate ticket.
+        const hasSingleHotel = hotelFlexInputs.length === 1
 
         let ok = false
         let channelLabel = 'text'
 
-        if (isSingleHotelOnly) {
+        if (hasSingleHotel) {
           const f = hotelFlexInputs[0]
           // Project the 30-day metric window into the engine's input
           // shape and run the recommendation + forecast layers.
@@ -517,8 +531,20 @@ async function handleMorningFlash(req: NextRequest) {
             forecast,
             approveButton,
           })
-          ok = await sendLineFlexMessage(profile.line_id as string, flex.altText, flex.contents)
-          channelLabel = 'flex'
+
+          // Mixed-vertical recipients: Flex(hotel) + text(F&B) in one
+          // push. Single-hotel recipients: just the Flex bubble.
+          if (fnbSnippets.length > 0) {
+            const combinedFnb = fnbSnippets.join('\n===================\n')
+            ok = await sendLineMixed(profile.line_id as string, [
+              { type: 'flex', altText: flex.altText, contents: flex.contents },
+              { type: 'text', text: combinedFnb },
+            ])
+            channelLabel = 'flex+text'
+          } else {
+            ok = await sendLineFlexMessage(profile.line_id as string, flex.altText, flex.contents)
+            channelLabel = 'flex'
+          }
         } else {
           const combined = lineSnippets.join('\n===================\n')
           ok = await sendLineMessage(profile.line_id as string, combined)

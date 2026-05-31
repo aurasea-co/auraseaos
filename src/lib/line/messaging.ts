@@ -44,6 +44,53 @@ export async function sendLineFlexMessage(
       messages: [{ type: 'flex', altText, contents: flexContent }],
     }),
   })
+  if (!res.ok) {
+    // LINE returns descriptive JSON on rejection — surface it so a
+    // malformed bubble doesn't silently disappear into res.ok=false.
+    const body = await res.text()
+    console.error(`[LINE] flex push failed ${res.status}: ${body.slice(0, 500)}`)
+  }
+  return res.ok
+}
+
+// LINE Messaging API allows up to 5 messages per push() call. Used by
+// the morning brief when a recipient has both a hotel branch (renders
+// as a Flex bubble with the Auto Push approve button) and one or more
+// F&B branches in the same org (render as text). Without this, the
+// route had to pick one shape and the F&B owners got their hotel brief
+// downgraded to text, hiding the Pro-tier ✓ button.
+//
+// The caller is responsible for the message-object shape — text or
+// flex — because the route already knows which is which. The function
+// just enforces the 5-message cap and returns the API ok bit.
+export type LineMessage =
+  | { type: 'text'; text: string }
+  | { type: 'flex'; altText: string; contents: object }
+
+export async function sendLineMixed(userId: string, messages: LineMessage[]): Promise<boolean> {
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN
+  if (!token) {
+    console.log('[LINE] Not configured — LINE_CHANNEL_ACCESS_TOKEN not set')
+    return false
+  }
+  if (messages.length === 0) return false
+
+  const capped = messages.length > 5 ? messages.slice(0, 5) : messages
+
+  const res = await fetch(`${LINE_API}/message/push`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ to: userId, messages: capped }),
+  })
+  if (!res.ok) {
+    // Surface the body once — the LINE API returns useful JSON errors
+    // describing exactly which message failed validation.
+    const body = await res.text()
+    console.error(`[LINE] mixed push failed ${res.status}: ${body.slice(0, 500)}`)
+  }
   return res.ok
 }
 
