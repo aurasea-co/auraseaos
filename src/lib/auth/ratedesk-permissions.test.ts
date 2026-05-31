@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   canAccessRateDesk,
   canSeeElement,
+  canSeeRevenue,
   type RateDeskPage,
   type RateDeskElement,
 } from './ratedesk-permissions'
@@ -96,6 +97,42 @@ describe('RateDesk role access — element level', () => {
   it('staff sees no RateDesk elements', () => {
     for (const el of ALL_ELEMENTS) {
       expect(canSeeElement('staff', el)).toBe(false)
+    }
+  })
+})
+
+describe('canSeeRevenue — cross-cutting wrapper', () => {
+  // Tied to canSeeElement(role, 'total_revenue'); these tests pin the
+  // contract so the wrapper can't silently diverge from the source
+  // of truth. Used by F&B home, /ratedesk, exports, charts.
+  it('owner sees revenue', () => {
+    expect(canSeeRevenue('owner')).toBe(true)
+  })
+
+  it('superadmin sees revenue (platform staff mirror owner)', () => {
+    expect(canSeeRevenue('superadmin')).toBe(true)
+  })
+
+  it('manager does NOT see revenue (P&L-sensitive)', () => {
+    expect(canSeeRevenue('manager')).toBe(false)
+  })
+
+  it('staff does NOT see revenue', () => {
+    expect(canSeeRevenue('staff')).toBe(false)
+  })
+
+  it('unknown roles fail closed (defensive against new role additions)', () => {
+    expect(canSeeRevenue('viewer')).toBe(false)
+    expect(canSeeRevenue('auditor')).toBe(false)
+    expect(canSeeRevenue('')).toBe(false)
+  })
+
+  it('matches canSeeElement(role, "total_revenue") for every known role', () => {
+    // Contract guarantee: the wrapper must NEVER report different
+    // visibility than the source of truth. If this fails, someone
+    // changed the wrapper logic without updating ELEMENT_ACCESS.
+    for (const role of ['owner', 'manager', 'staff', 'superadmin'] as const) {
+      expect(canSeeRevenue(role)).toBe(canSeeElement(role, 'total_revenue'))
     }
   })
 })

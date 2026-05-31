@@ -78,3 +78,18 @@ export function canAccessRateDesk(role: RateDeskRole, page: RateDeskPage): boole
 export function canSeeElement(role: RateDeskRole, element: RateDeskElement): boolean {
   return ELEMENT_ACCESS[role]?.includes(element) ?? false
 }
+
+// Cross-cutting wrapper for "can this user see Total Revenue anywhere?"
+// — RateDesk, F&B home, exports, charts. Single source of truth so a
+// future role-rule tweak only needs to change ELEMENT_ACCESS above and
+// every call site updates automatically. Accepts the broader AppRole
+// string (rather than RateDeskRole specifically) so non-RateDesk
+// callers don't have to narrow first.
+export function canSeeRevenue(role: string): boolean {
+  // Anything outside our known role set defaults to no. Defensive
+  // against future role additions ('viewer', 'auditor', etc) that
+  // shouldn't auto-inherit revenue visibility.
+  const known: ReadonlyArray<RateDeskRole> = ['owner', 'manager', 'staff', 'superadmin']
+  if (!known.includes(role as RateDeskRole)) return false
+  return canSeeElement(role as RateDeskRole, 'total_revenue')
+}

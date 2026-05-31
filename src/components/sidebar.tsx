@@ -44,7 +44,13 @@ function getNavItems(role: AppRole, plan: string, branchType: string): (NavItem 
     { href: '/portfolio', icon: BarChart3, labelKey: 'portfolio', roles: ['owner', 'superadmin'], plans: ['pro'], requiredPlan: 'pro' },
     { href: '/trends', icon: TrendingUp, labelKey: 'trends', roles: ['owner', 'manager', 'superadmin'], plans: ['growth', 'pro'], requiredPlan: 'growth' },
     { href: '/entry', icon: PenLine, labelKey: 'entry', roles: ['owner', 'manager', 'staff', 'superadmin'] },
-    { href: '/pricing', icon: DollarSign, labelKey: 'pricing', roles: ['owner', 'superadmin'], plans: ['growth', 'pro'], branchTypes: ['accommodation'], requiredPlan: 'growth' },
+    // RateDesk — accommodation only. Owners + managers (manager access
+    // intentional: ratedesk-permissions.ts grants the dashboard, recs,
+    // competitors, import, and auto_push pages to managers; only room
+    // settings is owner-only and is reached via /settings/rooms). The
+    // legacy /pricing route is preserved at its own URL for bookmarks
+    // but is no longer the primary entry point.
+    { href: '/ratedesk', icon: DollarSign, labelKey: 'rateDesk', roles: ['owner', 'manager', 'superadmin'], plans: ['growth', 'pro'], branchTypes: ['accommodation'], requiredPlan: 'growth' },
     { href: '/cost', icon: PieChart, labelKey: 'cost', roles: ['owner', 'manager', 'superadmin'], plans: ['growth', 'pro'], branchTypes: ['fnb'], requiredPlan: 'growth' },
     { href: '/labour', icon: Briefcase, labelKey: 'labour', roles: ['owner', 'superadmin'], plans: ['pro'], requiredPlan: 'pro' },
     { href: '/help', icon: HelpCircle, labelKey: 'help', roles: ['owner', 'manager', 'staff', 'superadmin'] },
