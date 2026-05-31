@@ -109,6 +109,12 @@ export default function RateDeskPage() {
   const [priorRows, setPriorRows] = useState<MetricRow[]>([])
   const [competitors, setCompetitors] = useState<CompetitorRow[]>([])
   const [approvals, setApprovals] = useState<ApprovalRow[]>([])
+  // Occupancy target lives on the `targets` row joined to this branch.
+  // Stored as numeric(5,2) in the 0..100 range — same units as
+  // sparkData values, so we pass it straight through to SparklineChart.
+  // Fallback 80 matches the previous hardcoded value, so dashboards
+  // for branches without a target row don't visually regress.
+  const [occupancyTarget, setOccupancyTarget] = useState<number>(80)
   const [loading, setLoading] = useState(true)
   const supabase = createClient()
 
@@ -139,7 +145,7 @@ export default function RateDeskPage() {
           .limit(7)
       : Promise.resolve({ data: [], error: null })
 
-    const [currentRes, priorRes, compRes, approvalsRes] = await Promise.all([
+    const [currentRes, priorRes, compRes, approvalsRes, targetsRes] = await Promise.all([
       db
         .from('accommodation_daily_metrics')
         .select('metric_date, rooms_available, rooms_sold, revenue, room_type_breakdown')
@@ -160,11 +166,27 @@ export default function RateDeskPage() {
         .gte('captured_at', iso(windowStart))
         .order('captured_at', { ascending: false }),
       approvalsQuery,
+      // Targets row holds occupancy_target (numeric(5,2), 0..100).
+      // Older rows that pre-date migration 006 might only have
+      // occ_target set; fall back to that, then to 80.
+      db
+        .from('targets')
+        .select('occupancy_target, occ_target')
+        .eq('branch_id', activeBranch.id)
+        .maybeSingle(),
     ])
     setRows(currentRes.data || [])
     setPriorRows(priorRes.data || [])
     setCompetitors(compRes.data || [])
     setApprovals(approvalsRes.data || [])
+    const target = Number(
+      targetsRes.data?.occupancy_target
+      ?? targetsRes.data?.occ_target
+      ?? 80,
+    )
+    // Clamp to plausible range — guards against junk values in the DB
+    // that would render the reference line off-screen.
+    setOccupancyTarget(Number.isFinite(target) && target > 0 && target <= 100 ? target : 80)
     setLoading(false)
   }, [activeBranch, window, supabase, hasAutoPush])
 
@@ -352,12 +374,12 @@ export default function RateDeskPage() {
         <h3 style={cardTitle}>{t('occupancyTrend')} ({window}d)</h3>
         {/* Occupancy is naturally bounded 0..100% — fix the scale at 100
             so a single outlier day above target doesn't crush the visible
-            spread of the rest of the window. Value labels make each day's
-            absolute % readable at a glance. */}
+            spread of the rest of the window. The target comes from
+            /settings/targets per branch; default 80 only when no row. */}
         <SparklineChart
           label=""
           data={sparkData}
-          target={80}
+          target={occupancyTarget}
           ceiling={100}
           showValueLabels={sparkData.length <= 14}
           formatValue={(v) => `${Math.round(v)}%`}
