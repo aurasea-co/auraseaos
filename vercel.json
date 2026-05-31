@@ -11,6 +11,10 @@
     {
       "path": "/api/notifications/trial-reminder",
       "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/cron/push-approved-rates",
+      "schedule": "0 * * * *"
     }
   ]
 }

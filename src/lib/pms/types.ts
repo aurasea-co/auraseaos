@@ -1,0 +1,62 @@
+// PMS provider contract. Implemented by Cloudbeds, Mews, SiteMinder,
+// etc — and by MockProvider for environments without real credentials.
+// The push worker (lib/pms/worker.ts) speaks only this interface, so
+// adding a new PMS is a single file + a factory entry, never a worker
+// rewrite.
+
+export type ProviderName = 'cloudbeds' | 'mews' | 'siteminder' | 'opera' | 'mock'
+
+// All possible values of rate_approvals.push_status (DB CHECK matches).
+export type PushStatus = 'pending' | 'success' | 'failed' | 'skipped'
+
+// Subset a provider can return — 'pending' is the initial state, never
+// a push result. Keeping this tighter than PushStatus prevents a buggy
+// provider from accidentally re-flagging a row as pending and looping
+// forever through the hourly cron.
+export type ProviderPushStatus = Exclude<PushStatus, 'pending'>
+
+export interface PushRateInput {
+  /** RateDesk rate_approvals.id — passed through so the worker can
+   *  correlate provider responses with the row to update. */
+  approvalId: string
+
+  /** Provider-specific property identifier from branch_pms_config. */
+  externalPropertyId: string
+
+  /** Date the new rate applies to (YYYY-MM-DD, Bangkok wall time). */
+  date: string
+
+  /** Room type the rate applies to. 'all' = property-wide override. */
+  roomType: string
+
+  /** Rate in THB (integer). Providers that want decimal or satang
+   *  convert internally — the worker passes THB through. */
+  rateThb: number
+}
+
+export interface PushRateResult {
+  /** New push_status value for the rate_approvals row. Excludes
+   *  'pending' since a provider response always represents an
+   *  outcome (success / failure / skip), not the initial state. */
+  status: ProviderPushStatus
+
+  /** Provider-side identifier for the rate update (e.g. Cloudbeds
+   *  rateUpdateID) when the push succeeded. Stored on the approval
+   *  row for later reconciliation; absent on failure/skip. */
+  externalRef?: string
+
+  /** Human-readable error / skip reason. Stored in push_error on the
+   *  approval row so the owner sees it on the dashboard. */
+  error?: string
+}
+
+export interface PmsProvider {
+  /** Display name for logs + dashboard. */
+  readonly name: ProviderName
+
+  /** Push a single rate update to the PMS. Idempotent at the worker
+   *  level (the worker filters on push_status='pending') but
+   *  individual providers may also need idempotency keys if their
+   *  API doesn't natively deduplicate. */
+  pushRate(input: PushRateInput): Promise<PushRateResult>
+}
