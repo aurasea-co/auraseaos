@@ -304,6 +304,7 @@
     "importCsv": "นำเข้า CSV",
     "competitorRates": "ราคาคู่แข่ง",
     "noCompetitors": "ยังไม่มีการบันทึกราคาคู่แข่งในช่วงเวลานี้",
+    "manageCompetitors": "จัดการคู่แข่ง",
     "colRoomType": "ประเภทห้อง",
     "colRooms": "ห้อง",
     "colOccupancy": "Occupancy",

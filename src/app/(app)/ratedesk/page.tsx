@@ -345,35 +345,49 @@ export default function RateDeskPage() {
         )}
       </section>
 
-      {/* Competitor overlay */}
+      {/* Competitor overlay — ฿0 rows are placeholder competitors the
+          owner added at /settings/competitors but hasn't yet entered
+          a rate for. Hide them from the table so the dashboard doesn't
+          flash "Pullman Korat ฿0" as if it were a real data point.
+          The engine adapter already filters zeros, so the rec layer
+          isn't affected. */}
       <section style={card}>
         <h3 style={cardTitle}>{t('competitorRates')}</h3>
-        {competitors.length === 0 ? (
-          <div style={{ padding: '12px 0', fontSize: 12, color: 'var(--color-text-tertiary)' }}>
-            {t('noCompetitors')}
-          </div>
-        ) : (
-          <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', marginTop: 6 }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
-                <th style={th}>{t('colCompetitor')}</th>
-                <th style={th}>{t('colRoomType')}</th>
-                <th style={th}>{t('colRate')}</th>
-                <th style={th}>{t('colCaptured')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {competitors.slice(0, 10).map((c, i) => (
-                <tr key={i} style={{ borderTop: '1px solid #f0f0ee' }}>
-                  <td style={td}>{c.competitor_name}</td>
-                  <td style={td}>{c.room_type}</td>
-                  <td style={td}>฿{Math.round(c.rate).toLocaleString('th-TH')}</td>
-                  <td style={{ ...td, color: 'var(--color-text-tertiary)' }}>{c.captured_at}</td>
+        {(() => {
+          const realRates = competitors.filter((c) => Number(c.rate) > 0)
+          if (realRates.length === 0) {
+            return (
+              <div style={{ padding: '12px 0', fontSize: 12, color: 'var(--color-text-tertiary)' }}>
+                {t('noCompetitors')}{' '}
+                <Link href="/settings/competitors" style={{ color: 'var(--color-accent, #534AB7)' }}>
+                  {t('manageCompetitors')} →
+                </Link>
+              </div>
+            )
+          }
+          return (
+            <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', marginTop: 6 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+                  <th style={th}>{t('colCompetitor')}</th>
+                  <th style={th}>{t('colRoomType')}</th>
+                  <th style={th}>{t('colRate')}</th>
+                  <th style={th}>{t('colCaptured')}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+              </thead>
+              <tbody>
+                {realRates.slice(0, 10).map((c, i) => (
+                  <tr key={i} style={{ borderTop: '1px solid #f0f0ee' }}>
+                    <td style={td}>{c.competitor_name}</td>
+                    <td style={td}>{c.room_type}</td>
+                    <td style={td}>฿{Math.round(c.rate).toLocaleString('th-TH')}</td>
+                    <td style={{ ...td, color: 'var(--color-text-tertiary)' }}>{c.captured_at}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )
+        })()}
       </section>
     </div>
   )

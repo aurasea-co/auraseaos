@@ -304,6 +304,7 @@
     "importCsv": "Import CSV",
     "competitorRates": "Competitor rates",
     "noCompetitors": "No competitor rates captured for this period yet.",
+    "manageCompetitors": "Manage competitors",
     "colRoomType": "Room type",
     "colRooms": "Rooms",
     "colOccupancy": "Occupancy",
