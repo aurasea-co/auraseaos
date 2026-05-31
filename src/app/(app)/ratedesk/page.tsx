@@ -266,20 +266,24 @@ export default function RateDeskPage() {
         t={t}
       />
 
-      {/* KPI cards */}
+      {/* KPI cards — every label carries the window suffix (30d/60d/90d)
+          so the owner can never misread a 30-day total as "today" or
+          "this week". Total Revenue is a SUM across the window so the
+          suffix is load-bearing; Occupancy/ADR/RevPAR are averages where
+          the suffix is still useful context but less critical. */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
         <KpiCard
-          label={t('occupancy')}
+          label={`${t('occupancy')} (${window}d)`}
           value={`${Math.round(stats.current.occupancy * 100)}%`}
           delta={pct(stats.current.occupancy, stats.prior.occupancy)}
         />
         <KpiCard
-          label={t('adr')}
+          label={`${t('adr')} (${window}d)`}
           value={`฿${Math.round(stats.current.adr).toLocaleString('th-TH')}`}
           delta={pct(stats.current.adr, stats.prior.adr)}
         />
         <KpiCard
-          label={t('revpar')}
+          label={`${t('revpar')} (${window}d)`}
           value={`฿${Math.round(stats.current.revpar).toLocaleString('th-TH')}`}
           delta={pct(stats.current.revpar, stats.prior.revpar)}
         />
@@ -289,7 +293,7 @@ export default function RateDeskPage() {
             that a blurred card would create. */}
         {showRevenue && (
           <KpiCard
-            label={t('totalRevenue')}
+            label={`${t('totalRevenue')} (${window}d)`}
             value={`฿${Math.round(stats.current.totalRevenue).toLocaleString('th-TH')}`}
             delta={pct(stats.current.totalRevenue, stats.prior.totalRevenue)}
           />
@@ -298,7 +302,7 @@ export default function RateDeskPage() {
 
       {/* Sparkline */}
       <section style={card}>
-        <h3 style={cardTitle}>{t('occupancyTrend')}</h3>
+        <h3 style={cardTitle}>{t('occupancyTrend')} ({window}d)</h3>
         <SparklineChart label="" data={sparkData} target={80} formatValue={(v) => `${Math.round(v)}%`} />
       </section>
 
