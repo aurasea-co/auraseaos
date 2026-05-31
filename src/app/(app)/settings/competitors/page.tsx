@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import Link from 'next/link'
-import { ArrowLeft, Trash2, Plus, X } from 'lucide-react'
+import { ArrowLeft, Trash2, Plus } from 'lucide-react'
 import { useUser } from '@/providers/user-context'
 import { createClient } from '@/lib/supabase/client'
 import type { RoomTypeOccupancy } from '@/lib/ingestion/types'
@@ -21,7 +21,18 @@ interface Competitor {
   lastRateRoomType: string | null
   lastRateCapturedAt: string | null
   lastUpdatedAt: string | null
+  /** Today's rates per (roomType|channel) — keys like "Suite|ota" → 4200.
+   *  Populated by the GET response (Slice 1 + 2). Used by the
+   *  multi-channel rate grid to pre-fill input values. */
+  todayRates: Record<string, number>
 }
+
+// Rate channels supported by the migration 033 CHECK constraint.
+// Same set as RATE_CHANNELS in lib/types/competitor-rates.ts; kept
+// local for the dropdown render order (we surface OTA first because
+// it's the default daily-check channel).
+const CHANNEL_ORDER = ['ota', 'walk_in', 'package', 'promo'] as const
+type ChannelKey = (typeof CHANNEL_ORDER)[number]
 
 interface MetricRowForRoomTypes {
   room_type_breakdown: RoomTypeOccupancy[] | null
@@ -42,6 +53,10 @@ export default function CompetitorsPage() {
   const [error, setError] = useState<string | null>(null)
   const [openRateRow, setOpenRateRow] = useState<string | null>(null)
   const [savedRow, setSavedRow] = useState<string | null>(null)
+  // Channel-mode toggle. OTA-only is the default because that's the
+  // daily 2-minute task (check Agoda); expanding to all channels is
+  // opt-in for the occasional full competitive shop.
+  const [showAllChannels, setShowAllChannels] = useState(false)
 
   const reload = useCallback(async () => {
     if (!activeBranch) return
@@ -149,16 +164,35 @@ export default function CompetitorsPage() {
         </Link>
         <h2 style={{ fontSize: 18, fontWeight: 500, margin: 0 }}>{t('title')}</h2>
       </div>
-      <div>
-        <h2
-          className="hidden lg:block"
-          style={{ fontSize: 'var(--font-size-lg)', fontWeight: 500, color: 'var(--color-text-primary)', margin: 0 }}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <h2
+            className="hidden lg:block"
+            style={{ fontSize: 'var(--font-size-lg)', fontWeight: 500, color: 'var(--color-text-primary)', margin: 0 }}
+          >
+            {t('title')}
+          </h2>
+          <p style={{ fontSize: 12, color: 'var(--color-text-tertiary)', marginTop: 4 }}>
+            {activeBranch.name} · {t('subtitle')}
+          </p>
+        </div>
+        {/* Channel-mode toggle. Default is OTA-only (the daily 2-minute
+            task); expand for a full competitive shop with walk-in /
+            package / promo as additional columns. */}
+        <button
+          type="button"
+          onClick={() => setShowAllChannels((v) => !v)}
+          style={{
+            fontSize: 12,
+            color: 'var(--color-accent, #534AB7)',
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            padding: '4px 0',
+          }}
         >
-          {t('title')}
-        </h2>
-        <p style={{ fontSize: 12, color: 'var(--color-text-tertiary)', marginTop: 4 }}>
-          {activeBranch.name} · {t('subtitle')}
-        </p>
+          {showAllChannels ? t('showOtaOnly') : t('showAllChannels')}
+        </button>
       </div>
 
       {error && (
@@ -218,6 +252,7 @@ export default function CompetitorsPage() {
             onDelete={handleDelete}
             onRateSaved={reload}
             branchId={activeBranch.id}
+            showAllChannels={showAllChannels}
             t={t}
           />
 
@@ -288,6 +323,7 @@ function CompetitorList({
   onDelete,
   onRateSaved,
   branchId,
+  showAllChannels,
   t,
 }: {
   competitors: Competitor[]
@@ -299,6 +335,7 @@ function CompetitorList({
   onDelete: (name: string) => void
   onRateSaved: () => void
   branchId: string
+  showAllChannels: boolean
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   t: any
 }) {
@@ -387,22 +424,24 @@ function CompetitorList({
             </button>
           </div>
           {openRateRow === c.competitorName && (
-            <RateEntry
+            <MultiChannelRateGrid
               competitorName={c.competitorName}
-              roomTypes={roomTypes}
-              defaultRoomType={c.lastRateRoomType || roomTypes[0] || 'Standard'}
+              roomTypes={roomTypes.length > 0 ? roomTypes : ['Standard']}
+              todayRates={c.todayRates}
+              showAllChannels={showAllChannels}
               branchId={branchId}
               onSaved={() => {
                 const name = c.competitorName
                 setSavedRow(name)
-                setOpenRateRow(null)
                 onRateSaved()
-                // Direct value clear after 1.8s — the parent owns the
-                // `savedRow` state and only this row should ever be
-                // showing "Saved ✓" at a time, so unconditionally
-                // clearing the latest set is safe.
+                // Keep the grid open so the owner can fill more cells
+                // in one sitting. "Saved ✓" pill blinks per cell save
+                // to confirm individual writes (no global "all done"
+                // affordance — closing the grid is an explicit "Done"
+                // button).
                 window.setTimeout(() => setSavedRow(null), 1800)
               }}
+              onDone={() => setOpenRateRow(null)}
               t={t}
             />
           )}
@@ -415,92 +454,194 @@ function CompetitorList({
   )
 }
 
-function RateEntry({
+// Multi-channel rate entry grid. Rows = room types, columns = channels
+// (1 column in OTA-only mode, 4 columns when "Show all channels" is on).
+// Each cell is a numeric input that:
+//   - pre-fills from today's saved rate for that (roomType, channel)
+//     pair if one exists (server-side aggregation in route.ts GET)
+//   - saves on blur — no global "save all" button. Sets a brief
+//     per-cell "saving / saved ✓" indicator so the owner sees that
+//     individual edits stuck. Errors stay attached to the cell.
+//   - skips the network call when the value didn't actually change
+//     (compares parsed number against the pre-fill).
+function MultiChannelRateGrid({
   competitorName,
   roomTypes,
-  defaultRoomType,
+  todayRates,
+  showAllChannels,
   branchId,
   onSaved,
+  onDone,
   t,
 }: {
   competitorName: string
   roomTypes: string[]
-  defaultRoomType: string
+  todayRates: Record<string, number>
+  showAllChannels: boolean
   branchId: string
   onSaved: () => void
+  onDone: () => void
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   t: any
 }) {
-  const [roomType, setRoomType] = useState(defaultRoomType)
-  const [rateThb, setRateThb] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const channels: ChannelKey[] = showAllChannels ? [...CHANNEL_ORDER] : ['ota']
 
-  async function save() {
-    setError(null)
-    const n = Number(rateThb)
-    if (!rateThb || Number.isNaN(n) || n <= 0) {
-      setError(t('errorRateRequired'))
+  // Per-cell local input value. Key = `${roomType}|${channel}`. Strings
+  // so empty is distinguishable from explicit 0.
+  const [values, setValues] = useState<Record<string, string>>(() => {
+    const out: Record<string, string> = {}
+    for (const rt of roomTypes) {
+      for (const ch of channels) {
+        const key = `${rt}|${ch}`
+        const existing = todayRates[key]
+        out[key] = existing && existing > 0 ? String(Math.round(existing)) : ''
+      }
+    }
+    return out
+  })
+  // Per-cell save state (idle / saving / saved / error).
+  const [cellState, setCellState] = useState<Record<string, { status: 'idle' | 'saving' | 'saved' | 'error'; error?: string }>>({})
+
+  function setCellValue(key: string, value: string) {
+    setValues((prev) => ({ ...prev, [key]: value }))
+  }
+
+  async function saveCell(roomType: string, channel: ChannelKey) {
+    const key = `${roomType}|${channel}`
+    const raw = values[key]
+    if (raw == null || raw === '') {
+      // Allow clearing the cell back to empty — no DELETE yet (the
+      // schema requires keeping today's row to maintain the unique
+      // index integrity). Just skip the save.
       return
     }
-    setSubmitting(true)
+    const n = Number(raw)
+    if (Number.isNaN(n) || n <= 0) {
+      setCellState((s) => ({ ...s, [key]: { status: 'error', error: t('errorRateRequired') } }))
+      return
+    }
+    // Skip when unchanged from the server-side pre-fill.
+    const existing = todayRates[key]
+    if (existing && Math.round(existing) === Math.round(n)) {
+      return
+    }
+    setCellState((s) => ({ ...s, [key]: { status: 'saving' } }))
     try {
       const res = await fetch(`/api/branches/${branchId}/competitor-rates`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ competitorName, roomType, rateThb: n }),
+        body: JSON.stringify({ competitorName, roomType, rateThb: n, channel }),
       })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
-        setError(body?.messageTh || body?.error || res.statusText)
+        const msg = body?.messageTh || body?.error || res.statusText
+        setCellState((s) => ({ ...s, [key]: { status: 'error', error: msg } }))
         return
       }
+      setCellState((s) => ({ ...s, [key]: { status: 'saved' } }))
       onSaved()
-    } finally {
-      setSubmitting(false)
+      window.setTimeout(() => {
+        setCellState((s) => ({ ...s, [key]: { status: 'idle' } }))
+      }, 1800)
+    } catch {
+      setCellState((s) => ({ ...s, [key]: { status: 'error', error: t('errorRateRequired') } }))
     }
   }
 
   return (
-    <div style={{
-      background: 'var(--color-bg-surface)',
-      borderRadius: 8,
-      padding: 10,
-      display: 'flex',
-      gap: 8,
-      alignItems: 'center',
-      flexWrap: 'wrap',
-    }}>
-      <select
-        value={roomType}
-        onChange={(e) => setRoomType(e.target.value)}
-        style={{ ...input, maxWidth: 160 }}
+    <div
+      style={{
+        background: 'var(--color-bg-surface)',
+        borderRadius: 8,
+        padding: 12,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+      }}
+    >
+      {/* Column header row — Room type label + one column per channel. */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: `minmax(120px, 1fr) repeat(${channels.length}, minmax(110px, 1fr))`,
+          gap: 8,
+          paddingBottom: 6,
+          borderBottom: '1px solid var(--color-border)',
+          fontSize: 10,
+          fontWeight: 500,
+          textTransform: 'uppercase',
+          letterSpacing: '0.05em',
+          color: 'var(--color-text-tertiary)',
+        }}
       >
-        {roomTypes.map((rt) => (
-          <option key={rt} value={rt}>{rt}</option>
+        <div>{t('colRoomType')}</div>
+        {channels.map((ch) => (
+          <div key={ch}>{t(`channel.${ch}.label`)}</div>
         ))}
-      </select>
-      <input
-        type="number"
-        inputMode="numeric"
-        value={rateThb}
-        onChange={(e) => setRateThb(e.target.value)}
-        placeholder={t('ratePlaceholder')}
-        min={1}
-        style={{ ...input, maxWidth: 120 }}
-        onKeyDown={(e) => { if (e.key === 'Enter') save() }}
-        autoFocus
-      />
-      <span style={{ fontSize: 13, color: 'var(--color-text-tertiary)' }}>฿</span>
-      <button type="button" onClick={save} disabled={submitting} style={primaryBtn}>
-        {submitting ? t('savingLabel') : t('save')}
-      </button>
-      {error && (
-        <span style={{ fontSize: 12, color: '#A32D2D' }}>
-          <X size={10} style={{ display: 'inline', marginRight: 4 }} />
-          {error}
-        </span>
-      )}
+      </div>
+
+      {/* One row per room type. */}
+      {roomTypes.map((rt) => (
+        <div
+          key={rt}
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `minmax(120px, 1fr) repeat(${channels.length}, minmax(110px, 1fr))`,
+            gap: 8,
+            alignItems: 'start',
+          }}
+        >
+          <div style={{ fontSize: 13, paddingTop: 6 }}>{rt}</div>
+          {channels.map((ch) => {
+            const key = `${rt}|${ch}`
+            const state = cellState[key] ?? { status: 'idle' as const }
+            return (
+              <div key={key}>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={values[key] ?? ''}
+                  onChange={(e) => setCellValue(key, e.target.value)}
+                  onBlur={() => saveCell(rt, ch)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                  }}
+                  placeholder="฿"
+                  min={1}
+                  style={{
+                    width: '100%',
+                    padding: '6px 8px',
+                    fontSize: 13,
+                    border: `1px solid ${state.status === 'error' ? '#FECACA' : 'var(--color-border)'}`,
+                    borderRadius: 4,
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text-primary)',
+                  }}
+                />
+                {state.status === 'saving' && (
+                  <p style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginTop: 2 }}>
+                    {t('savingLabel')}
+                  </p>
+                )}
+                {state.status === 'saved' && (
+                  <p style={{ fontSize: 10, color: '#0F5132', marginTop: 2 }}>
+                    {t('saved')} ✓
+                  </p>
+                )}
+                {state.status === 'error' && state.error && (
+                  <p style={{ fontSize: 10, color: '#A32D2D', marginTop: 2 }}>{state.error}</p>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      ))}
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+        <button type="button" onClick={onDone} style={secondaryBtn}>
+          {t('done')}
+        </button>
+      </div>
     </div>
   )
 }

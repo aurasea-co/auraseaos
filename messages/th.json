@@ -294,7 +294,17 @@
     "guideStep3": "3. เลือกวันพรุ่งนี้ 1 คืน 1 ห้อง",
     "guideStep4": "4. จดราคาที่เห็นสำหรับแต่ละประเภทห้อง",
     "guideStep5": "5. กดปุ่ม \"อัพเดทราคาวันนี้\" ด้านบน แล้วกรอกราคาที่ดูมา",
-    "guideFooter": "ใช้เวลาประมาณ 2 นาทีต่อคู่แข่ง — ควรทำทุกเช้า"
+    "guideFooter": "ใช้เวลาประมาณ 2 นาทีต่อคู่แข่ง — ควรทำทุกเช้า",
+    "showAllChannels": "+ แสดงทุกช่องทาง",
+    "showOtaOnly": "แสดงแค่ OTA",
+    "colRoomType": "ประเภทห้อง",
+    "done": "เสร็จสิ้น",
+    "channel": {
+      "ota": { "label": "OTA", "note": "Agoda, Booking, Expedia — ราคาที่ลูกค้าเห็นออนไลน์" },
+      "walk_in": { "label": "Walk-in", "note": "ราคาที่แจ้งทางโทรศัพท์หรือ Front desk" },
+      "package": { "label": "Package", "note": "ราคารวมอาหารเช้าหรือโปรโมชัน" },
+      "promo": { "label": "โปรโมชัน", "note": "Flash sale หรือ Early bird" }
+    }
   },
   "settingsPms": {
     "title": "เชื่อมต่อ PMS",

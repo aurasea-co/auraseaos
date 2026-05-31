@@ -20,6 +20,8 @@ interface CompetitorRow {
   rate: number
   captured_at: string
   created_at: string
+  channel?: string | null
+  source?: string | null
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -113,13 +115,30 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ branchId: 
     byName.set(r.competitor_name, existing)
   }
 
-  const competitors = Array.from(byName.values()).map((c) => ({
-    competitorName: c.competitorName,
-    lastRateThb: c.latestRateRow ? Number(c.latestRateRow.rate) : null,
-    lastRateRoomType: c.latestRateRow?.room_type ?? null,
-    lastRateCapturedAt: c.latestRateRow?.captured_at ?? null,
-    lastUpdatedAt: c.lastCreatedAt,
-  }))
+  // Surface every (room_type, channel) rate captured TODAY so the
+  // multi-channel grid in /settings/competitors can pre-fill its
+  // inputs without a second round-trip. Keyed by `${roomType}|${channel}`
+  // because object-of-object adds two layers of optional-chaining
+  // pain in the client; a flat string key is simpler.
+  const todayBkk = bkkToday()
+  const competitors = Array.from(byName.values()).map((c) => {
+    const todayRates: Record<string, number> = {}
+    for (const r of c.rates) {
+      if (r.captured_at !== todayBkk) continue
+      const ch = r.channel || 'ota'
+      const rateNum = Number(r.rate)
+      if (!Number.isFinite(rateNum) || rateNum <= 0) continue
+      todayRates[`${r.room_type}|${ch}`] = rateNum
+    }
+    return {
+      competitorName: c.competitorName,
+      lastRateThb: c.latestRateRow ? Number(c.latestRateRow.rate) : null,
+      lastRateRoomType: c.latestRateRow?.room_type ?? null,
+      lastRateCapturedAt: c.latestRateRow?.captured_at ?? null,
+      lastUpdatedAt: c.lastCreatedAt,
+      todayRates,
+    }
+  })
 
   return NextResponse.json({ competitors, maxCompetitors: MAX_COMPETITORS })
 }

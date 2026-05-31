@@ -294,7 +294,17 @@
     "guideStep3": "3. Pick tomorrow, 1 night, 1 room.",
     "guideStep4": "4. Note the price shown for each room type.",
     "guideStep5": "5. Click \"Update today's rate\" above and enter what you saw.",
-    "guideFooter": "Takes ~2 min per competitor — best done every morning."
+    "guideFooter": "Takes ~2 min per competitor — best done every morning.",
+    "showAllChannels": "+ Show all channels",
+    "showOtaOnly": "Show OTA only",
+    "colRoomType": "Room type",
+    "done": "Done",
+    "channel": {
+      "ota": { "label": "OTA", "note": "Agoda, Booking, Expedia — what guests see online" },
+      "walk_in": { "label": "Walk-in", "note": "Front-desk / phone-call rate" },
+      "package": { "label": "Package", "note": "Room + breakfast / extras" },
+      "promo": { "label": "Promo", "note": "Flash sale / early bird" }
+    }
   },
   "settingsPms": {
     "title": "PMS integration",
