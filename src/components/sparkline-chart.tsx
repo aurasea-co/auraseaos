@@ -34,7 +34,18 @@ export function SparklineChart({
     )
   }
 
-  const maxVal = Math.max(...data.map((d) => d.value), target || 0)
+  // Scale the bar heights to the *actual* data range, not to the target.
+  // Previously maxVal included `target`, which meant a 30-day occupancy
+  // chart with target=80 and real values of 17–65% rendered all bars at
+  // 22–81% of chart height — visually flat because the top quarter of
+  // the chart was reserved for an unreached goal. Now bars fill the
+  // chart based on their own max, and the target is drawn as a reference
+  // line that may sit above the bars (with an indicator) when the data
+  // hasn't reached it yet.
+  const dataMax = Math.max(...data.map((d) => d.value), 0)
+  // Add 10% headroom so the tallest bar doesn't kiss the top edge.
+  const scaleMax = dataMax > 0 ? dataMax * 1.1 : 1
+  const targetWithinScale = target !== undefined && target <= scaleMax
   const chartHeight = 120
   const isScrollable = data.length > 14
 
@@ -72,14 +83,17 @@ export function SparklineChart({
             ...(isScrollable ? { minWidth: data.length * 28 } : {}),
           }}
         >
-          {/* Target dashed line */}
-          {target !== undefined && maxVal > 0 && (
+          {/* Target dashed line — drawn within the chart when reachable,
+              or as a small "↑ target" badge above the chart when the
+              current data is well below it (so the chart doesn't waste
+              vertical space displaying an empty top region). */}
+          {target !== undefined && scaleMax > 0 && targetWithinScale && (
             <div
               style={{
                 position: 'absolute',
                 left: 0,
                 right: 0,
-                bottom: `${(target / maxVal) * 100}%`,
+                bottom: `${(target / scaleMax) * 100}%`,
                 borderTop: '1px dashed rgba(0,0,0,0.2)',
                 zIndex: 10,
                 pointerEvents: 'none',
@@ -98,9 +112,26 @@ export function SparklineChart({
               </span>
             </div>
           )}
+          {target !== undefined && !targetWithinScale && (
+            <div
+              style={{
+                position: 'absolute',
+                right: 0,
+                top: 0,
+                fontSize: 10,
+                color: 'var(--color-text-tertiary)',
+                background: 'var(--color-bg)',
+                padding: '2px 4px',
+                zIndex: 10,
+                pointerEvents: 'none',
+              }}
+            >
+              ↑ {formatValue(target)}
+            </div>
+          )}
 
           {data.map((d, i) => {
-            const height = maxVal > 0 ? (d.value / maxVal) * 100 : 0
+            const height = scaleMax > 0 ? (d.value / scaleMax) * 100 : 0
             const aboveTarget = target ? d.value >= target : true
             return (
               <div
