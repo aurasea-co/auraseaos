@@ -17,6 +17,7 @@ import {
   Upload,
   BedDouble,
   LineChart,
+  Plug,
   ChevronRight,
 } from 'lucide-react'
 
@@ -33,6 +34,11 @@ const allSections = [
   // Competitor rate manual entry — feeds the RateDesk undercut
   // signal. Same hotel-only early-return as /settings/rooms.
   { href: '/settings/competitors', icon: LineChart, labelKey: 'competitors' as const, roles: ['owner'] },
+  // PMS integration config (provider + external_property_id) —
+  // consumed by the hourly push-approved-rates worker. Hotel-only
+  // early-return inside the page. Owner-only: managers shouldn't
+  // be able to point rates at a different PMS.
+  { href: '/settings/pms', icon: Plug, labelKey: 'pms' as const, roles: ['owner'] },
   { href: '/settings/targets', icon: Target, labelKey: 'targets' as const, roles: ['owner'] },
   { href: '/settings/team', icon: Users, labelKey: 'team' as const, roles: ['owner'] },
   { href: '/settings/billing', icon: CreditCard, labelKey: 'billing' as const, roles: ['owner'] },
