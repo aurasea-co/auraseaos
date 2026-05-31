@@ -442,6 +442,95 @@ describe('attachCompetitorRates', () => {
     ])
     expect(out[0].competitorRates).toHaveLength(3)
   })
+
+  it('threads channel through when provided', () => {
+    const inputs: RecommendationInput[] = [
+      { date: '2026-05-27', occupancyRate: 0.4, adrThb: 800 },
+    ]
+    const out = attachCompetitorRates(inputs, [
+      { captured_at: '2026-05-27', competitor_name: 'OTA-only', rate: 950, channel: 'ota' },
+      { captured_at: '2026-05-27', competitor_name: 'Walk-in', rate: 1100, channel: 'walk_in' },
+    ])
+    expect(out[0].competitorRates).toEqual([
+      { name: 'OTA-only', rateThb: 950, channel: 'ota' },
+      { name: 'Walk-in', rateThb: 1100, channel: 'walk_in' },
+    ])
+  })
+
+  it('omits channel field when source row has null/undefined channel (legacy data)', () => {
+    const inputs: RecommendationInput[] = [
+      { date: '2026-05-27', occupancyRate: 0.4, adrThb: 800 },
+    ]
+    const out = attachCompetitorRates(inputs, [
+      { captured_at: '2026-05-27', competitor_name: 'Legacy', rate: 950 },
+      { captured_at: '2026-05-27', competitor_name: 'Legacy null', rate: 950, channel: null },
+    ])
+    expect(out[0].competitorRates?.[0]).toEqual({ name: 'Legacy', rateThb: 950 })
+    expect(out[0].competitorRates?.[1]).toEqual({ name: 'Legacy null', rateThb: 950 })
+  })
+})
+
+describe('competitor signals — OTA-only filtering', () => {
+  // Helper: 3 days at low occupancy + ourAdrThb, each day with the
+  // given competitor rates. Used to set up the undercut signal threshold.
+  function daysWithRates(
+    rates: ReadonlyArray<{ name: string; rateThb: number; channel?: string }>,
+    ourAdrThb = 800,
+  ): RecommendationInput[] {
+    return [
+      { date: '2026-05-27', occupancyRate: 0.5, adrThb: ourAdrThb, competitorRates: rates },
+      { date: '2026-05-28', occupancyRate: 0.5, adrThb: ourAdrThb, competitorRates: rates },
+      { date: '2026-05-29', occupancyRate: 0.5, adrThb: ourAdrThb, competitorRates: rates },
+    ]
+  }
+
+  it('fires undercut signal when 3+ days carry OTA-channel competitor rates', () => {
+    const recs = detectCompetitorUndercutting(daysWithRates([
+      { name: 'Pullman', rateThb: 1200, channel: 'ota' },
+    ]))
+    expect(recs).toHaveLength(1)
+    expect(recs[0].type).toBe('competitor_undercut')
+  })
+
+  it('does NOT fire when ALL competitor rates are walk_in (3 days)', () => {
+    const recs = detectCompetitorUndercutting(daysWithRates([
+      { name: 'Pullman walk-in', rateThb: 1500, channel: 'walk_in' },
+    ]))
+    expect(recs).toHaveLength(0)
+  })
+
+  it('does NOT fire when ALL competitor rates are package or promo', () => {
+    expect(detectCompetitorUndercutting(daysWithRates([
+      { name: 'Suite + breakfast', rateThb: 1800, channel: 'package' },
+    ]))).toHaveLength(0)
+    expect(detectCompetitorUndercutting(daysWithRates([
+      { name: 'Flash sale', rateThb: 700, channel: 'promo' },
+    ]))).toHaveLength(0)
+  })
+
+  it('fires using ONLY the OTA rates when both OTA + walk-in are mixed', () => {
+    // OTA rates are 1100 (low gap), walk-in rates are 2400 (huge gap).
+    // The OTA-only filter should ignore the 2400 walk-in — gap stays
+    // small enough to NOT fire (15% threshold).
+    const recs = detectCompetitorUndercutting(daysWithRates([
+      { name: 'Pullman OTA', rateThb: 900, channel: 'ota' },
+      { name: 'Pullman walk-in', rateThb: 2400, channel: 'walk_in' },
+    ], 800))
+    // With walk-in filtered out, the OTA avg of 900 vs our 800 is
+    // ~12.5% — below the 15% threshold. Without the filter, blending
+    // 900 + 2400 / 2 = 1650 avg would be 106% gap — would fire as high.
+    expect(recs).toHaveLength(0)
+  })
+
+  it('treats legacy rates (no channel) as OTA for backward-compat', () => {
+    // Before migration 033, rows had no channel column. Engine should
+    // still emit the signal for pre-033 data so the dashboard doesn't
+    // go quiet during the migration window.
+    const recs = detectCompetitorUndercutting(daysWithRates([
+      { name: 'Pre-033', rateThb: 1200 },  // no channel field
+    ]))
+    expect(recs).toHaveLength(1)
+  })
 })
 
 // ── Multi-room-type behaviour ───────────────────────────────────────────────

@@ -180,6 +180,32 @@ export default function CompetitorsPage() {
         </div>
       )}
 
+      {/* Collapsible guide — closed by default. Walks the owner through
+          the Agoda check-rate flow so the daily 2-minute task is
+          mechanical and predictable. */}
+      <details
+        style={{
+          background: 'var(--color-bg-surface)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 8,
+          padding: '10px 14px',
+          fontSize: 12,
+          color: 'var(--color-text-secondary)',
+        }}
+      >
+        <summary style={{ cursor: 'pointer', fontWeight: 500, fontSize: 13, color: 'var(--color-text-primary)' }}>
+          {t('guideTitle')}
+        </summary>
+        <div style={{ marginTop: 10, lineHeight: 1.7, paddingLeft: 4 }}>
+          <p>{t('guideStep1')}</p>
+          <p>{t('guideStep2')}</p>
+          <p>{t('guideStep3')}</p>
+          <p>{t('guideStep4')}</p>
+          <p>{t('guideStep5')}</p>
+          <p style={{ color: 'var(--color-text-tertiary)', marginTop: 4 }}>{t('guideFooter')}</p>
+        </div>
+      </details>
+
       {!loading && (
         <>
           <CompetitorList
@@ -310,6 +336,27 @@ function CompetitorList({
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <strong style={{ flex: 1, fontSize: 14 }}>{c.competitorName}</strong>
+            {/* Per-competitor "updated today" badge — green tick when
+                the lastUpdatedAt is on today's BKK calendar date, amber
+                when not. Makes "what still needs my attention" a
+                glance-level question. */}
+            {(() => {
+              const updatedToday = isUpdatedTodayBkk(c.lastUpdatedAt)
+              const badgeStyle: React.CSSProperties = {
+                fontSize: 11,
+                fontWeight: 500,
+                padding: '2px 8px',
+                borderRadius: 999,
+                background: updatedToday ? '#F0FDF4' : '#FFFBEB',
+                color: updatedToday ? '#166534' : '#92400E',
+                border: `1px solid ${updatedToday ? '#BBF7D0' : '#FCD34D'}`,
+              }
+              return (
+                <span style={badgeStyle}>
+                  {updatedToday ? `✓ ${t('updatedToday')}` : t('notUpdatedToday')}
+                </span>
+              )
+            })()}
             <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)' }}>
               {c.lastRateThb != null
                 ? t('lastRate', {
@@ -460,6 +507,27 @@ function RateEntry({
 
 // Returns a short string like "2 hours ago" / "3 hr ago" in the
 // active locale. Falls back to the raw timestamp when the diff is
+// True when the timestamp falls on today's Bangkok calendar date.
+// Used by the "Updated today" badge on each competitor row — gives the
+// owner a glance-level "what still needs my attention" signal each
+// morning. Null lastUpdatedAt is treated as not-updated.
+function isUpdatedTodayBkk(iso: string | null): boolean {
+  if (!iso) return false
+  const todayBkk = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+  const updatedBkk = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(iso))
+  return todayBkk === updatedBkk
+}
+
 // implausibly large (clock skew).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function humanizeAgo(iso: string, t: any): string {

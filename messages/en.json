@@ -285,7 +285,16 @@
     "ratePlaceholder": "Rate",
     "deleteAria": "Delete competitor",
     "confirmDelete": "Delete \"{name}\" and all of its rate history?",
-    "maxReached": "Maximum {max} competitors reached — remove one to add another"
+    "maxReached": "Maximum {max} competitors reached — remove one to add another",
+    "updatedToday": "Updated today",
+    "notUpdatedToday": "Not updated today",
+    "guideTitle": "📖 How to check competitor rates on Agoda",
+    "guideStep1": "1. Open Agoda.com or the Agoda app.",
+    "guideStep2": "2. Search for a competitor hotel (e.g. \"Pullman Korat\").",
+    "guideStep3": "3. Pick tomorrow, 1 night, 1 room.",
+    "guideStep4": "4. Note the price shown for each room type.",
+    "guideStep5": "5. Click \"Update today's rate\" above and enter what you saw.",
+    "guideFooter": "Takes ~2 min per competitor — best done every morning."
   },
   "settingsPms": {
     "title": "PMS integration",

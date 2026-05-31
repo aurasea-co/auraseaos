@@ -48,7 +48,15 @@ export interface RecommendationInput {
    *  won't carry any (the owner hasn't logged that day yet). The
    *  competitor signals require ≥3 days where this array is
    *  non-empty before they fire. */
-  competitorRates?: ReadonlyArray<{ name: string; rateThb: number }>
+  competitorRates?: ReadonlyArray<{
+    name: string
+    rateThb: number
+    /** Channel the rate was captured from. The undercut + overpricing
+     *  signals filter to OTA-only since that's what guests actually
+     *  shop. Legacy data without a channel (rows from before
+     *  migration 033) is treated as OTA for backward-compat. */
+    channel?: string
+  }>
   /** Per-room-type breakdown for the day. Populated from the
    *  accommodation_daily_metrics.room_type_breakdown jsonb when
    *  available (CSV imports + per-room-type manual entry). When two
@@ -332,9 +340,17 @@ function competitorComparison(days: RecommendationInput[]): null | {
   gapRatio: number // (competitorAvg - ourAdr) / ourAdr; can be negative
   daysWithCompetitor: number
 } {
-  const daysWithCompetitor = days.filter(
-    (d) => (d.competitorRates?.length ?? 0) > 0,
-  )
+  // Filter to OTA channel (and legacy unspecified) per day BEFORE the
+  // 3-day quorum check. A day where the owner only logged walk-in
+  // rates shouldn't satisfy the threshold for the OTA-aware signal.
+  const isOtaOrLegacy = (r: { channel?: string }): boolean =>
+    !r.channel || r.channel === 'ota'
+  const daysWithCompetitor = days
+    .map((d) => ({
+      ...d,
+      competitorRates: (d.competitorRates ?? []).filter(isOtaOrLegacy),
+    }))
+    .filter((d) => d.competitorRates.length > 0)
   if (daysWithCompetitor.length < 3) return null
   const recent = daysWithCompetitor.slice(-3)
   const ourAvgAdrThb = recent.reduce((s, d) => s + d.adrThb, 0) / recent.length
@@ -522,18 +538,25 @@ export interface CompetitorRateRowForRec {
   captured_at: string
   competitor_name: string
   rate: number | string | null
+  /** Channel from migration 033; absent on rows from before the
+   *  migration ran (treated as 'ota' by the engine). */
+  channel?: string | null
 }
 
 export function attachCompetitorRates(
   inputs: RecommendationInput[],
   rates: CompetitorRateRowForRec[],
 ): RecommendationInput[] {
-  const byDate = new Map<string, Array<{ name: string; rateThb: number }>>()
+  const byDate = new Map<string, Array<{ name: string; rateThb: number; channel?: string }>>()
   for (const r of rates) {
     const rateNum = Number(r.rate)
     if (!Number.isFinite(rateNum) || rateNum <= 0) continue
     const arr = byDate.get(r.captured_at) || []
-    arr.push({ name: r.competitor_name, rateThb: rateNum })
+    arr.push({
+      name: r.competitor_name,
+      rateThb: rateNum,
+      ...(r.channel ? { channel: r.channel } : {}),
+    })
     byDate.set(r.captured_at, arr)
   }
   return inputs.map((i) => {

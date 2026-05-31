@@ -76,7 +76,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ branchId: 
   const db = supabase as any
   const { data, error } = await db
     .from('competitor_rates')
-    .select('competitor_name, room_type, rate, captured_at, created_at')
+    .select('competitor_name, room_type, rate, captured_at, created_at, channel, source')
     .eq('branch_id', branchId)
     .order('captured_at', { ascending: false })
     .order('created_at', { ascending: false })
@@ -134,6 +134,14 @@ interface PostBody {
   rateThb?: number
   /** ISO YYYY-MM-DD; defaults to BKK today. */
   capturedAt?: string
+  /** Rate channel — defaults to 'ota' to match the existing UX where
+   *  the daily check captures Agoda/Booking online rates. */
+  channel?: 'ota' | 'walk_in' | 'package' | 'promo'
+  /** Free-text label for where the rate was seen ("Agoda", "Booking
+   *  phone call", etc). Falls back to a channel-appropriate default. */
+  source?: string
+  /** Optional free-text notes from staff. */
+  notes?: string
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ branchId: string }> }) {
@@ -171,6 +179,22 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ branchId: 
   }
   const capturedAt = body.capturedAt || bkkToday()
 
+  // Channel + source. Channel defaults to 'ota' (matches the existing
+  // UX where daily checks track Agoda/Booking). Source defaults to a
+  // channel-appropriate label when the caller doesn't pass one. Both
+  // get validated lightly — channel against the migration's CHECK
+  // constraint set, source clamped to 200 chars.
+  const ALLOWED_CHANNELS: ReadonlyArray<string> = ['ota', 'walk_in', 'package', 'promo']
+  const channel = body.channel && ALLOWED_CHANNELS.includes(body.channel) ? body.channel : 'ota'
+  const defaultSourceByChannel: Record<string, string> = {
+    ota: 'Manual — Agoda/Booking check',
+    walk_in: 'Manual — phone/front desk',
+    package: 'Manual entry',
+    promo: 'Manual entry',
+  }
+  const source = (body.source && body.source.trim().slice(0, 200)) || defaultSourceByChannel[channel]
+  const notes = body.notes ? body.notes.trim().slice(0, 500) : null
+
   const supabase = createServiceClient()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = supabase as any
@@ -200,22 +224,28 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ branchId: 
         room_type: roomType,
         rate: rateThb,
         captured_at: capturedAt,
-        source: 'manual',
+        channel,
+        source,
+        notes,
       },
-      { onConflict: 'branch_id,competitor_name,room_type,captured_at' },
+      // onConflict updated to include channel (migration 033) so
+      // re-entering the walk-in rate doesn't clobber the day's OTA rate
+      // (and vice versa).
+      { onConflict: 'branch_id,competitor_name,room_type,channel,captured_at' },
     )
 
   if (upsertErr) {
     console.error('[competitor-rates] upsert failed', upsertErr)
-    // 42P10 = no_unique_or_exclusion_constraint — migration 030 hasn't
-    // been applied yet. Surface a clear hint.
+    // 42P10 = no_unique_or_exclusion_constraint — migration 033 hasn't
+    // been applied yet (or 030 is partially rolled back). Surface a
+    // clear hint with both possible fixes.
     const hintTh =
       upsertErr.code === '42P10'
-        ? 'ตารางยังไม่มี unique constraint — กรุณารัน migration 030'
+        ? 'ตารางยังไม่มี unique constraint — กรุณารัน migration 033'
         : 'บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'
     const hintEn =
       upsertErr.code === '42P10'
-        ? 'Database is missing the unique constraint — apply migration 030.'
+        ? 'Database is missing the unique constraint — apply migration 033.'
         : 'Failed to save the rate. Please try again.'
     return bail(500, upsertErr.code || 'upsert_failed', hintTh, hintEn)
   }
