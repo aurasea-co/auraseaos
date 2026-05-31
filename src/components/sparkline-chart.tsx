@@ -145,9 +145,15 @@ export function SparklineChart({
           {data.map((d, i) => {
             const height = scaleMax > 0 ? (d.value / scaleMax) * 100 : 0
             const aboveTarget = target ? d.value >= target : true
-            // Only label the bar if showValueLabels is on AND the bar
-            // isn't so squat it would overlap the day label below it.
-            const showLabel = showValueLabels && d.value > 0
+            // Label rules:
+            //   - showValueLabels=true → label every non-zero bar (used
+            //     on narrow windows where labels fit comfortably)
+            //   - showValueLabels=false → label only the above-target
+            //     bars so the user can visually disambiguate 78% (no
+            //     label, just a tall purple bar) from 82% (labelled,
+            //     green). Solves the "are those bars really above 80%?"
+            //     problem on the 30/60/90-day views without cluttering.
+            const showLabel = d.value > 0 && (showValueLabels || aboveTarget)
             return (
               <div
                 key={i}
@@ -157,7 +163,13 @@ export function SparklineChart({
                 {showLabel && (
                   <span style={{
                     fontSize: 9,
-                    color: 'var(--color-text-tertiary)',
+                    // Above-target labels use the positive color so the
+                    // eye can pair label → bar instantly. Other labels
+                    // (only shown when showValueLabels=true) stay muted.
+                    color: aboveTarget && target !== undefined
+                      ? 'var(--color-positive)'
+                      : 'var(--color-text-tertiary)',
+                    fontWeight: aboveTarget && target !== undefined ? 600 : 400,
                     fontVariantNumeric: 'tabular-nums',
                     lineHeight: 1,
                   }}>
