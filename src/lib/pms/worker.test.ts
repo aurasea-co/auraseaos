@@ -49,7 +49,9 @@ function makeFakeSupabase(opts: {
 function makeProvider(result: PushRateResult, name = 'mock'): PmsProvider {
   return {
     name: name as PmsProvider['name'],
-    pushRate: async (_input: PushRateInput) => result,
+    // No parameter — interface satisfied via TS's contravariant
+    // param rules. Avoids the no-unused-vars rule.
+    pushRate: async () => result,
   }
 }
 
