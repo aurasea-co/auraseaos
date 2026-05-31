@@ -303,7 +303,18 @@ export default function RateDeskPage() {
       {/* Sparkline */}
       <section style={card}>
         <h3 style={cardTitle}>{t('occupancyTrend')} ({window}d)</h3>
-        <SparklineChart label="" data={sparkData} target={80} formatValue={(v) => `${Math.round(v)}%`} />
+        {/* Occupancy is naturally bounded 0..100% — fix the scale at 100
+            so a single outlier day above target doesn't crush the visible
+            spread of the rest of the window. Value labels make each day's
+            absolute % readable at a glance. */}
+        <SparklineChart
+          label=""
+          data={sparkData}
+          target={80}
+          ceiling={100}
+          showValueLabels={sparkData.length <= 14}
+          formatValue={(v) => `${Math.round(v)}%`}
+        />
       </section>
 
       {/* Room-type breakdown */}

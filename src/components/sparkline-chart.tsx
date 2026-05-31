@@ -8,6 +8,15 @@ interface SparklineChartProps {
   target?: number
   label: string
   formatValue?: (v: number) => string
+  // Optional fixed ceiling for the y-axis. Use this for values with a
+  // natural upper bound (e.g. occupancy = 100). When set, bars scale
+  // against this ceiling instead of the data range — giving a stable
+  // 0..ceiling mental model that doesn't get distorted by outliers.
+  ceiling?: number
+  // Show a small numeric label above each bar so the absolute value
+  // is readable even when bars are short. Only useful when the chart
+  // has fewer than ~20 bars (otherwise labels collide).
+  showValueLabels?: boolean
 }
 
 export function SparklineChart({
@@ -15,6 +24,8 @@ export function SparklineChart({
   target,
   label,
   formatValue = (v) => v.toLocaleString(),
+  ceiling,
+  showValueLabels = false,
 }: SparklineChartProps) {
   const t = useTranslations('common')
 
@@ -34,19 +45,20 @@ export function SparklineChart({
     )
   }
 
-  // Scale the bar heights to the *actual* data range, not to the target.
-  // Previously maxVal included `target`, which meant a 30-day occupancy
-  // chart with target=80 and real values of 17–65% rendered all bars at
-  // 22–81% of chart height — visually flat because the top quarter of
-  // the chart was reserved for an unreached goal. Now bars fill the
-  // chart based on their own max, and the target is drawn as a reference
-  // line that may sit above the bars (with an indicator) when the data
-  // hasn't reached it yet.
+  // Bar-height scale resolution, in priority order:
+  //   1. Caller passed `ceiling` — use it verbatim (best for naturally
+  //      bounded values like occupancy %, where a fixed 0..100 scale
+  //      gives a stable visual reading regardless of outliers).
+  //   2. Otherwise scale to the actual data range with 10% headroom so
+  //      the tallest bar doesn't kiss the top edge of the chart. The
+  //      target is intentionally NOT included in the data-range case —
+  //      including it crushed every bar when the goal wasn't reached.
   const dataMax = Math.max(...data.map((d) => d.value), 0)
-  // Add 10% headroom so the tallest bar doesn't kiss the top edge.
-  const scaleMax = dataMax > 0 ? dataMax * 1.1 : 1
+  const scaleMax = ceiling !== undefined
+    ? ceiling
+    : dataMax > 0 ? dataMax * 1.1 : 1
   const targetWithinScale = target !== undefined && target <= scaleMax
-  const chartHeight = 120
+  const chartHeight = 140
   const isScrollable = data.length > 14
 
   return (
@@ -133,12 +145,25 @@ export function SparklineChart({
           {data.map((d, i) => {
             const height = scaleMax > 0 ? (d.value / scaleMax) * 100 : 0
             const aboveTarget = target ? d.value >= target : true
+            // Only label the bar if showValueLabels is on AND the bar
+            // isn't so squat it would overlap the day label below it.
+            const showLabel = showValueLabels && d.value > 0
             return (
               <div
                 key={i}
-                className="flex-1 flex flex-col items-center"
-                style={{ gap: 4, ...(isScrollable ? { minWidth: 24 } : {}) }}
+                className="flex-1 flex flex-col items-center justify-end"
+                style={{ height: '100%', gap: 4, ...(isScrollable ? { minWidth: 24 } : {}) }}
               >
+                {showLabel && (
+                  <span style={{
+                    fontSize: 9,
+                    color: 'var(--color-text-tertiary)',
+                    fontVariantNumeric: 'tabular-nums',
+                    lineHeight: 1,
+                  }}>
+                    {formatValue(d.value)}
+                  </span>
+                )}
                 <div
                   style={{
                     width: '100%',
