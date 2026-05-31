@@ -104,24 +104,48 @@ export function AccommodationEntryForm({ existing, target, totalRooms, knownRoom
     return { roomsFromBreakdown, revenueFromBreakdown, anyFilled }
   }, [breakdown])
 
-  // When any per-room row has data, the breakdown is the source of
-  // truth for hotel-wide totals — update them on every keystroke so
-  // edits flow through instantly. Top-level inputs become read-only
-  // while this is active (see hasAnyBreakdownData below). When all
-  // breakdown rows are emptied, the totals are cleared so the owner
-  // can resume manual entry without stale numbers in the way.
+  // Auto-fill top-level rooms_sold + revenue from breakdown ONLY when
+  // those fields are still empty. Owners who type their own totals
+  // (e.g. ฿28,640 including taxes/extras that don't appear in the
+  // breakdown rate × occupied math) are NOT overridden — their input
+  // wins. This was a real bug shipped earlier in this session: the
+  // form auto-overwrote ฿28,640 with the breakdown sum of ฿21,903
+  // because the read-only lock + every-keystroke effect ignored the
+  // user's prior manual entry.
+  //
+  // Dependency intentionally narrow (anyFilled only): we want this
+  // hook to fire when the owner first starts populating breakdown
+  // rows, not on every digit they type into a rate cell. The
+  // exhaustive-deps lint warning is acknowledged and intentional.
   useEffect(() => {
-    if (breakdownTotals.anyFilled) {
+    if (!breakdownTotals.anyFilled) return
+    if (roomsSold === '' && breakdownTotals.roomsFromBreakdown > 0) {
       setRoomsSold(String(breakdownTotals.roomsFromBreakdown))
-      setRevenue(String(Math.round(breakdownTotals.revenueFromBreakdown)))
-    } else {
-      // Only clear if the field is non-empty AND was set by us — but
-      // we can't distinguish "set by us" from "manually typed" without
-      // an extra flag. Simpler: don't auto-clear. If the owner emptied
-      // every breakdown row, they can clear the top-level inputs by
-      // hand.
     }
-  }, [breakdownTotals.anyFilled, breakdownTotals.roomsFromBreakdown, breakdownTotals.revenueFromBreakdown])
+    if (revenue === '' && breakdownTotals.revenueFromBreakdown > 0) {
+      setRevenue(String(Math.round(breakdownTotals.revenueFromBreakdown)))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [breakdownTotals.anyFilled])
+
+  // Mismatch detection — does the typed-in revenue differ materially
+  // from what the breakdown sums to? Surfaced as a soft warning in
+  // the form so the owner can either:
+  //   - acknowledge ("real total includes ฿X service charge", keep typing)
+  //   - reset to the breakdown sum via the "Reset to breakdown total"
+  //     button below
+  // 1% tolerance covers rounding (rates × occupied rounding to whole
+  // baht). Anything wider is a real mismatch worth surfacing.
+  const revenueMismatch = useMemo(() => {
+    if (!breakdownTotals.anyFilled) return null
+    const breakdownSum = Math.round(breakdownTotals.revenueFromBreakdown)
+    const enteredRev = parseFloat(revenue) || 0
+    if (enteredRev <= 0 || breakdownSum <= 0) return null
+    const diff = Math.abs(enteredRev - breakdownSum)
+    const tolerance = Math.max(10, breakdownSum * 0.01)  // 1% or ฿10, whichever is larger
+    if (diff <= tolerance) return null
+    return { entered: enteredRev, breakdownSum, diff: enteredRev - breakdownSum }
+  }, [breakdownTotals.anyFilled, breakdownTotals.revenueFromBreakdown, revenue])
 
   const occTarget = Number(target?.occupancy_target ?? target?.occ_target) || 80
 
@@ -191,17 +215,16 @@ export function AccommodationEntryForm({ existing, target, totalRooms, knownRoom
             onChange={(e) => setRoomsSold(e.target.value)}
             max={totalRooms}
             min={0}
-            className={`w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 touch-target ${
-              breakdownTotals.anyFilled
-                ? 'bg-slate-50 text-slate-600 cursor-not-allowed'
-                : 'text-slate-900'
-            }`}
+            className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 touch-target"
             placeholder={t('roomsSoldHint', { max: totalRooms })}
-            readOnly={breakdownTotals.anyFilled}
             required
           />
+          {/* When breakdown has data: subtle reminder that the breakdown
+              sum populates this by default, but the field is editable. */}
           {breakdownTotals.anyFilled && (
-            <p className="text-[11px] text-slate-500 mt-1">{t('autoCalculatedFromBreakdown')}</p>
+            <p className="text-[11px] text-slate-500 mt-1">
+              {t('breakdownSumsHint', { rooms: breakdownTotals.roomsFromBreakdown })}
+            </p>
           )}
         </div>
         <div>
@@ -213,17 +236,35 @@ export function AccommodationEntryForm({ existing, target, totalRooms, knownRoom
             onChange={(e) => setRevenue(e.target.value)}
             min={0}
             step="0.01"
-            className={`w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 touch-target ${
-              breakdownTotals.anyFilled
-                ? 'bg-slate-50 text-slate-600 cursor-not-allowed'
-                : 'text-slate-900'
-            }`}
+            className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 touch-target"
             placeholder="฿"
-            readOnly={breakdownTotals.anyFilled}
             required
           />
-          {breakdownTotals.anyFilled && (
-            <p className="text-[11px] text-slate-500 mt-1">{t('autoCalculatedFromBreakdown')}</p>
+          {/* Mismatch surfaces in two states:
+              - Match within 1% / ฿10: subtle "matches breakdown" tag
+              - Significant divergence: amber "your total differs from
+                breakdown sum by ฿X" with a reset button */}
+          {breakdownTotals.anyFilled && !revenueMismatch && parseFloat(revenue) > 0 && (
+            <p className="text-[11px] text-emerald-600 mt-1">
+              ✓ {t('revenueMatchesBreakdown')}
+            </p>
+          )}
+          {revenueMismatch && (
+            <div className="mt-1 text-[11px] flex items-start gap-2">
+              <p className="text-amber-700 flex-1">
+                {t('revenueOverride', {
+                  entered: formatCurrency(revenueMismatch.entered),
+                  breakdown: formatCurrency(revenueMismatch.breakdownSum),
+                })}
+              </p>
+              <button
+                type="button"
+                onClick={() => setRevenue(String(revenueMismatch.breakdownSum))}
+                className="text-blue-600 hover:underline whitespace-nowrap"
+              >
+                {t('resetToBreakdown')}
+              </button>
+            </div>
           )}
         </div>
       </div>

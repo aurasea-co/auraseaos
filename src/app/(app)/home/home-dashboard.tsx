@@ -6,6 +6,7 @@ import { useUser } from '@/providers/user-context'
 import { createClient } from '@/lib/supabase/client'
 import { KpiCard } from '@/components/kpi-card'
 import { SparklineChart } from '@/components/sparkline-chart'
+import { p95CeilingThb } from '@/lib/format/chart-ceiling'
 import { RecommendationCard } from '@/components/recommendation-card'
 import { EntryStatusPanel } from '@/components/entry-status-panel'
 import { PullToRefresh } from '@/components/pull-to-refresh'
@@ -521,7 +522,26 @@ export function HomeDashboard() {
 
         {/* Chart */}
         {isHotel ? (
-          <SparklineChart label={t('adr7days')} data={metrics.map((m) => ({ date: m.metric_date, value: m.adr || 0 }))} target={adrTarget} formatValue={(v) => formatCurrency(v)} />
+          (() => {
+            // Outlier-resistant Y-axis: a single bad data point (e.g.
+            // entry where revenue stayed at ฿28,640 but rooms_sold was
+            // 8 → ADR ฿3,580) would otherwise crush every normal day
+            // against the X-axis when SparklineChart auto-scales to
+            // dataMax. p95 + 30% headroom gives a humane scale that
+            // doesn't get dragged by outliers; the KPI cards above
+            // still show the raw value for any owner who needs it.
+            const adrSeries = metrics.map((m) => m.adr || 0)
+            const ceiling = p95CeilingThb(adrSeries)
+            return (
+              <SparklineChart
+                label={t('adr7days')}
+                data={metrics.map((m) => ({ date: m.metric_date, value: m.adr || 0 }))}
+                target={adrTarget}
+                ceiling={ceiling}
+                formatValue={(v) => formatCurrency(v)}
+              />
+            )
+          })()
         ) : (
           <SparklineChart
             label={t('margin7days')}
