@@ -12,6 +12,7 @@ export type HotelRecommendationType =
   | 'rate_hold'
   | 'low_occupancy_alert'
   | 'weekend_opportunity'
+  | 'competitor_undercut'
 
 export interface HotelRecommendation {
   type: HotelRecommendationType
@@ -39,6 +40,11 @@ export interface RecommendationInput {
   occupancyRate: number
   /** THB. */
   adrThb: number
+  /** Competitor rates captured on this date. Optional — many days
+   *  won't carry any (the owner hasn't logged that day yet). The
+   *  competitor signals require ≥3 days where this array is
+   *  non-empty before they fire. */
+  competitorRates?: ReadonlyArray<{ name: string; rateThb: number }>
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -196,6 +202,118 @@ export function forecastTomorrow(
   return { expectedOccupancy, suggestedRateThb: suggested }
 }
 
+// ── Competitor signals ────────────────────────────────────────────────────
+
+// Internal: shared per-day comparison block reused by the two
+// competitor-aware signals. Returns null when the input doesn't carry
+// at least 3 days with competitor data.
+function competitorComparison(days: RecommendationInput[]): null | {
+  ourAvgAdrThb: number
+  competitorAvgThb: number
+  topCompetitor: { name: string; rateThb: number }
+  gapRatio: number // (competitorAvg - ourAdr) / ourAdr; can be negative
+  daysWithCompetitor: number
+} {
+  const daysWithCompetitor = days.filter(
+    (d) => (d.competitorRates?.length ?? 0) > 0,
+  )
+  if (daysWithCompetitor.length < 3) return null
+  const recent = daysWithCompetitor.slice(-3)
+  const ourAvgAdrThb = recent.reduce((s, d) => s + d.adrThb, 0) / recent.length
+  const flatRates = recent.flatMap((d) => d.competitorRates ?? [])
+  if (flatRates.length === 0) return null
+  const competitorAvgThb = flatRates.reduce((s, r) => s + r.rateThb, 0) / flatRates.length
+  const topCompetitor = flatRates.reduce((max, r) => (r.rateThb > max.rateThb ? r : max))
+  const gapRatio = ourAvgAdrThb > 0 ? (competitorAvgThb - ourAvgAdrThb) / ourAvgAdrThb : 0
+  return {
+    ourAvgAdrThb,
+    competitorAvgThb,
+    topCompetitor,
+    gapRatio,
+    daysWithCompetitor: daysWithCompetitor.length,
+  }
+}
+
+export function detectCompetitorUndercutting(
+  days: RecommendationInput[],
+): HotelRecommendation[] {
+  const cmp = competitorComparison(days)
+  if (!cmp) return []
+  // Only fire when competitors are >15% higher than us for 3+ days.
+  // Smaller gaps are noise; a 5% delta isn't actionable.
+  if (cmp.gapRatio <= 0.15) return []
+  const latest = pickLatest(days)
+  const currentRate = Math.round(cmp.ourAvgAdrThb)
+  const gapThb = Math.round(cmp.competitorAvgThb - cmp.ourAvgAdrThb)
+  // Suggest closing ~60% of the gap. Conservative — don't chase
+  // parity in one move; reassess after the change beds in.
+  const suggested = Math.round(cmp.ourAvgAdrThb + (cmp.competitorAvgThb - cmp.ourAvgAdrThb) * 0.6)
+  const gapPct = Math.round(cmp.gapRatio * 100)
+  return [{
+    type: 'competitor_undercut',
+    date: addDays(latest.date, 1),
+    suggestedRateThb: suggested,
+    currentRateThb: currentRate,
+    messageTh: `${cmp.topCompetitor.name} ตั้งราคาสูงกว่าคุณ ฿${gapThb.toLocaleString('th-TH')} — มีโอกาสปรับราคาขึ้นได้ (แนะนำ ฿${suggested.toLocaleString('th-TH')})`,
+    messageEn: `${cmp.topCompetitor.name} is pricing ฿${gapThb.toLocaleString('en-US')} above you — opportunity to raise rates (suggested ฿${suggested.toLocaleString('en-US')})`,
+    // > 25% gap is loud; 15-25% is medium.
+    urgency: cmp.gapRatio > 0.25 ? 'high' : 'medium',
+    supportingData: {
+      ourAvgAdrThb: currentRate,
+      competitorAvgThb: Math.round(cmp.competitorAvgThb),
+      gapThb,
+      gapPercent: gapPct,
+      topCompetitor: cmp.topCompetitor.name,
+      daysOfData: cmp.daysWithCompetitor,
+    },
+    requiresMinDays: 3,
+  }]
+}
+
+// Inverse signal — we're priced ABOVE competitors AND occupancy is
+// soft, so we're risking bookings. Goes out as a rate_decrease so it
+// dedupes against the occupancy-driven rate_decrease from
+// suggestRates() (the composer keeps the highest-urgency rec per
+// type, so this only wins when this signal's urgency outranks).
+export function detectOverpricing(
+  days: RecommendationInput[],
+): HotelRecommendation[] {
+  const cmp = competitorComparison(days)
+  if (!cmp) return []
+  // Note we invert gapRatio here — for this signal we care about
+  // ourAvg > competitorAvg, i.e. negative gapRatio.
+  const ourGapRatio = cmp.competitorAvgThb > 0
+    ? (cmp.ourAvgAdrThb - cmp.competitorAvgThb) / cmp.competitorAvgThb
+    : 0
+  if (ourGapRatio <= 0.20) return []
+  // ...and only when occupancy is soft (≤60% over the recent 3-day
+  // competitor-data window). If occupancy is healthy at a premium,
+  // the premium is working — don't fight it.
+  const recent = days.slice(-3)
+  const recentAvgOcc = avgOccupancy(recent)
+  if (recentAvgOcc > 0.60) return []
+  const latest = pickLatest(days)
+  const currentRate = Math.round(cmp.ourAvgAdrThb)
+  const gapThb = Math.round(cmp.ourAvgAdrThb - cmp.competitorAvgThb)
+  const suggested = Math.round(cmp.competitorAvgThb * 1.05)
+  const occPct = Math.round(recentAvgOcc * 100)
+  return [{
+    type: 'rate_decrease',
+    date: addDays(latest.date, 1),
+    suggestedRateThb: suggested,
+    currentRateThb: currentRate,
+    messageTh: `ราคาของคุณสูงกว่าคู่แข่ง ฿${gapThb.toLocaleString('th-TH')} และ Occupancy อยู่ที่ ${occPct}% — พิจารณาปรับราคาลง`,
+    messageEn: `Your rate is ฿${gapThb.toLocaleString('en-US')} above competitors with ${occPct}% occupancy — consider lowering rate`,
+    urgency: 'medium',
+    supportingData: {
+      ourAvgAdrThb: currentRate,
+      competitorAvgThb: Math.round(cmp.competitorAvgThb),
+      recentOccupancy: recentAvgOcc,
+    },
+    requiresMinDays: 3,
+  }]
+}
+
 // ── Composition ────────────────────────────────────────────────────────────
 
 export function generateDailyRecommendations(
@@ -206,6 +324,8 @@ export function generateDailyRecommendations(
     ...suggestRates(days),
     ...detectLowOccupancy(days),
     ...detectWeekendOpportunity(days),
+    ...detectCompetitorUndercutting(days),
+    ...detectOverpricing(days),
   ]
   // Dedupe by type, keep highest urgency on collisions.
   const order: Record<HotelRecommendation['urgency'], number> = { high: 0, medium: 1, low: 2 }
@@ -249,4 +369,36 @@ export function toRecommendationInputs(
     })
   }
   return out.sort((a, b) => a.date.localeCompare(b.date))
+}
+
+// Merge competitor-rate rows from the `competitor_rates` table into
+// the engine's per-day input list. Caller already has the inputs
+// (from toRecommendationInputs above) and the raw competitor rows
+// (one row per competitor × room_type × captured_at, THB). We group
+// the rows by captured_at and decorate the matching input. Inputs
+// without competitor data for that day are returned unchanged —
+// the competitor-aware signals require ≥3 days with data before
+// firing, so undecorated inputs naturally don't contribute.
+export interface CompetitorRateRowForRec {
+  captured_at: string
+  competitor_name: string
+  rate: number | string | null
+}
+
+export function attachCompetitorRates(
+  inputs: RecommendationInput[],
+  rates: CompetitorRateRowForRec[],
+): RecommendationInput[] {
+  const byDate = new Map<string, Array<{ name: string; rateThb: number }>>()
+  for (const r of rates) {
+    const rateNum = Number(r.rate)
+    if (!Number.isFinite(rateNum) || rateNum <= 0) continue
+    const arr = byDate.get(r.captured_at) || []
+    arr.push({ name: r.competitor_name, rateThb: rateNum })
+    byDate.set(r.captured_at, arr)
+  }
+  return inputs.map((i) => {
+    const hits = byDate.get(i.date)
+    return hits && hits.length > 0 ? { ...i, competitorRates: hits } : i
+  })
 }
