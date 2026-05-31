@@ -35,6 +35,7 @@ import { SparklineChart } from '@/components/sparkline-chart'
 import {
   generateDailyRecommendations,
   toRecommendationInputs,
+  attachCompetitorRates,
   type HotelRecommendation,
 } from '@/lib/recommendations/hotel/engine'
 
@@ -160,10 +161,17 @@ export default function RateDeskPage() {
   // no need for a nightly cron + persisted table for the in-app view.
   // (If we add a LINE delivery channel later, that flow can persist
   //  via /api/notifications/morning-flash — separate ticket.)
-  const recommendations = useMemo(
-    () => generateDailyRecommendations(toRecommendationInputs(activeRows)),
-    [activeRows],
-  )
+  //
+  // Competitor rates collected from /settings/competitors are layered
+  // onto the engine inputs via attachCompetitorRates(). The two
+  // competitor-aware signals (undercut + overpricing) require ≥3 days
+  // with competitor data before firing, so the owner needs to log
+  // rates for a few days before those recs surface.
+  const recommendations = useMemo(() => {
+    const baseInputs = toRecommendationInputs(activeRows)
+    const inputsWithCompetitors = attachCompetitorRates(baseInputs, competitors)
+    return generateDailyRecommendations(inputsWithCompetitors)
+  }, [activeRows, competitors])
 
   // Active branch isn't a hotel → friendly redirect-ish notice.
   if (activeBranch && activeBranch.business_type !== 'accommodation') {

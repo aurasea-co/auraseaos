@@ -13,6 +13,7 @@ import {
   generateDailyRecommendations,
   forecastTomorrow,
   toRecommendationInputs,
+  attachCompetitorRates,
 } from '@/lib/recommendations/hotel/engine'
 
 async function handleMorningFlash(req: NextRequest) {
@@ -198,6 +199,7 @@ async function handleMorningFlash(req: NextRequest) {
     // one hotel branch (we'd need a carousel to show both, and Flex
     // bubbles are constrained — text path handles multi-branch).
     const hotelFlexInputs: Array<{
+      branchId: string
       branchName: string
       latest: Record<string, unknown>
       metrics: Record<string, unknown>[]
@@ -356,6 +358,7 @@ async function handleMorningFlash(req: NextRequest) {
       // fall through to the existing text-bundle path).
       if (isHotel) {
         hotelFlexInputs.push({
+          branchId: branch.id,
           branchName: branch.name,
           latest: latest as Record<string, unknown>,
           metrics: (metrics || []) as Record<string, unknown>[],
@@ -398,7 +401,7 @@ async function handleMorningFlash(req: NextRequest) {
           // Project the 30-day metric window into the engine's input
           // shape and run the recommendation + forecast layers.
           // Both are pure functions — no extra round-trips.
-          const recInputs = toRecommendationInputs(
+          const baseInputs = toRecommendationInputs(
             f.metrics.map((m) => ({
               metric_date: String((m as { metric_date: string }).metric_date),
               rooms_available: numOrNull(m.rooms_available),
@@ -406,6 +409,33 @@ async function handleMorningFlash(req: NextRequest) {
               revenue: numOrNull(m.revenue),
             })),
           )
+
+          // Fetch the competitor rates the owner logged at
+          // /settings/competitors over the same 30-day window. The
+          // undercut + overpricing signals require ≥3 days carrying
+          // competitor data before firing; without this fetch they'd
+          // never light up in the morning brief even when the owner
+          // has been logging diligently.
+          //
+          // 1.05× the metric window so a fresh entry made at 06:55
+          // BKK (just before the cron) still gets included if its
+          // captured_at is today's BKK calendar date.
+          const fromIso = (() => {
+            const d = new Date()
+            d.setUTCDate(d.getUTCDate() - 31)
+            return d.toISOString().slice(0, 10)
+          })()
+          const { data: compRows } = await supabase
+            .from('competitor_rates')
+            .select('competitor_name, rate, captured_at')
+            .eq('branch_id', f.branchId)
+            .gte('captured_at', fromIso)
+
+          const recInputs = attachCompetitorRates(
+            baseInputs,
+            (compRows || []) as Array<{ competitor_name: string; rate: number | string | null; captured_at: string }>,
+          )
+
           const recs = generateDailyRecommendations(recInputs)
             .filter((r) => r.urgency !== 'low')
             .slice(0, 2)
