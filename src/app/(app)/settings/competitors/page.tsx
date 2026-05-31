@@ -7,6 +7,7 @@ import { ArrowLeft, Trash2, Plus } from 'lucide-react'
 import { useUser } from '@/providers/user-context'
 import { createClient } from '@/lib/supabase/client'
 import type { RoomTypeOccupancy } from '@/lib/ingestion/types'
+import { deriveRoomTypesFromBreakdowns } from '@/lib/recommendations/hotel/room-types'
 
 // Settings → ราคาคู่แข่ง (Competitor rates). A 2-minute daily task for
 // the hotel owner. Two sections:
@@ -35,6 +36,7 @@ const CHANNEL_ORDER = ['ota', 'walk_in', 'package', 'promo'] as const
 type ChannelKey = (typeof CHANNEL_ORDER)[number]
 
 interface MetricRowForRoomTypes {
+  metric_date: string
   room_type_breakdown: RoomTypeOccupancy[] | null
 }
 
@@ -46,6 +48,11 @@ export default function CompetitorsPage() {
   const [competitors, setCompetitors] = useState<Competitor[]>([])
   const [maxCompetitors, setMaxCompetitors] = useState(5)
   const [roomTypes, setRoomTypes] = useState<string[]>([])
+  // "Our" rate per room type — the most recently observed rate from
+  // historical breakdowns. Used by the grid to compute the delta vs
+  // each competitor cell ("+฿X above ours" / "-฿X below ours"). Empty
+  // when the branch has no breakdown history yet (delta hidden).
+  const [myRateByType, setMyRateByType] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [showAddForm, setShowAddForm] = useState(false)
   const [addName, setAddName] = useState('')
@@ -71,7 +78,7 @@ export default function CompetitorsPage() {
         // /settings/rooms page.
         (supabase as ReturnType<typeof createClient>)
           .from('accommodation_daily_metrics')
-          .select('room_type_breakdown')
+          .select('metric_date, room_type_breakdown')
           .eq('branch_id', activeBranch.id)
           .order('metric_date', { ascending: false })
           .limit(30),
@@ -96,6 +103,21 @@ export default function CompetitorsPage() {
       // empty for a brand-new branch.
       if (types.size === 0) types.add('Standard')
       setRoomTypes(Array.from(types).sort())
+
+      // Derive "our" latest rate per room type. Reuses the same helper
+      // the daily-entry form uses to pre-fill rate inputs — single
+      // source of truth for "what was our last known rate".
+      const known = deriveRoomTypesFromBreakdowns(
+        rtsData.map((r) => ({
+          metric_date: r.metric_date,
+          room_type_breakdown: Array.isArray(r.room_type_breakdown) ? r.room_type_breakdown : null,
+        })),
+      )
+      const rateMap: Record<string, number> = {}
+      for (const k of known) {
+        if (k.latestRateThb > 0) rateMap[k.roomType] = k.latestRateThb
+      }
+      setMyRateByType(rateMap)
     } finally {
       setLoading(false)
     }
@@ -245,6 +267,7 @@ export default function CompetitorsPage() {
           <CompetitorList
             competitors={competitors}
             roomTypes={roomTypes}
+            myRateByType={myRateByType}
             openRateRow={openRateRow}
             setOpenRateRow={setOpenRateRow}
             savedRow={savedRow}
@@ -316,6 +339,7 @@ export default function CompetitorsPage() {
 function CompetitorList({
   competitors,
   roomTypes,
+  myRateByType,
   openRateRow,
   setOpenRateRow,
   savedRow,
@@ -328,6 +352,7 @@ function CompetitorList({
 }: {
   competitors: Competitor[]
   roomTypes: string[]
+  myRateByType: Record<string, number>
   openRateRow: string | null
   setOpenRateRow: (n: string | null) => void
   savedRow: string | null
@@ -428,6 +453,7 @@ function CompetitorList({
               competitorName={c.competitorName}
               roomTypes={roomTypes.length > 0 ? roomTypes : ['Standard']}
               todayRates={c.todayRates}
+              myRateByType={myRateByType}
               showAllChannels={showAllChannels}
               branchId={branchId}
               onSaved={() => {
@@ -468,6 +494,7 @@ function MultiChannelRateGrid({
   competitorName,
   roomTypes,
   todayRates,
+  myRateByType,
   showAllChannels,
   branchId,
   onSaved,
@@ -477,6 +504,7 @@ function MultiChannelRateGrid({
   competitorName: string
   roomTypes: string[]
   todayRates: Record<string, number>
+  myRateByType: Record<string, number>
   showAllChannels: boolean
   branchId: string
   onSaved: () => void
@@ -591,10 +619,46 @@ function MultiChannelRateGrid({
             alignItems: 'start',
           }}
         >
-          <div style={{ fontSize: 13, paddingTop: 6 }}>{rt}</div>
+          <div style={{ paddingTop: 6 }}>
+            <div style={{ fontSize: 13 }}>{rt}</div>
+            {/* "Our rate" reference — shown only when we have one for
+                this room type. Anchors the green/red delta cells to a
+                visible number rather than an invisible mental model. */}
+            {myRateByType[rt] > 0 && (
+              <div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginTop: 2 }}>
+                {t('ourRate')}: ฿{Math.round(myRateByType[rt]).toLocaleString('th-TH')}
+              </div>
+            )}
+          </div>
           {channels.map((ch) => {
             const key = `${rt}|${ch}`
             const state = cellState[key] ?? { status: 'idle' as const }
+            // Delta vs "our rate" for this room type — drives the
+            // colored border and the "+฿X / -฿X vs ours" caption.
+            // Only render the delta indicator when:
+            //   - we have a known rate for this room type
+            //   - the cell has a current valid value
+            //   - the channel is OTA (other channels aren't directly
+            //     comparable to our base rate — see channel notes in
+            //     i18n)
+            const ourRate = myRateByType[rt]
+            const parsedCellRate = (() => {
+              const v = values[key]
+              if (!v) return null
+              const n = Number(v)
+              return Number.isFinite(n) && n > 0 ? Math.round(n) : null
+            })()
+            const showDelta = ch === 'ota' && ourRate && ourRate > 0 && parsedCellRate != null
+            const deltaThb = showDelta ? parsedCellRate - Math.round(ourRate) : 0
+            const isAbove = showDelta && deltaThb > 0
+            const isBelow = showDelta && deltaThb < 0
+            const borderColor = state.status === 'error'
+              ? '#FECACA'
+              : isAbove
+                ? '#BBF7D0'
+                : isBelow
+                  ? '#FECACA'
+                  : 'var(--color-border)'
             return (
               <div key={key}>
                 <input
@@ -612,12 +676,25 @@ function MultiChannelRateGrid({
                     width: '100%',
                     padding: '6px 8px',
                     fontSize: 13,
-                    border: `1px solid ${state.status === 'error' ? '#FECACA' : 'var(--color-border)'}`,
+                    border: `1px solid ${borderColor}`,
                     borderRadius: 4,
                     background: 'var(--color-bg)',
                     color: 'var(--color-text-primary)',
                   }}
                 />
+                {/* Delta vs our rate — green when competitor priced
+                    above us (opportunity), red when below (risk). */}
+                {showDelta && deltaThb !== 0 && (
+                  <p
+                    style={{
+                      fontSize: 10,
+                      marginTop: 2,
+                      color: isAbove ? '#166534' : '#991B1B',
+                    }}
+                  >
+                    {isAbove ? '+' : ''}฿{deltaThb.toLocaleString('th-TH')} {t('vsOurs')}
+                  </p>
+                )}
                 {state.status === 'saving' && (
                   <p style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginTop: 2 }}>
                     {t('savingLabel')}

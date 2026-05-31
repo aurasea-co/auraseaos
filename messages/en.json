@@ -298,6 +298,8 @@
     "showAllChannels": "+ Show all channels",
     "showOtaOnly": "Show OTA only",
     "colRoomType": "Room type",
+    "ourRate": "Our rate",
+    "vsOurs": "vs ours",
     "done": "Done",
     "channel": {
       "ota": { "label": "OTA", "note": "Agoda, Booking, Expedia — what guests see online" },
