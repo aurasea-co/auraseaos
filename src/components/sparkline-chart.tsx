@@ -84,6 +84,14 @@ export function SparklineChart({
         {label}
       </p>
 
+      {/* Chart area — bars + target line live here. Day-of-week labels
+          live in a SEPARATE row below this container. Mixing them in
+          the same flex column meant the bar's `height: X%` was X% of
+          (chart_height - day_label_height), but the target line's
+          `bottom: 80%` was 80% of the full chart_height. The mismatch
+          shifted every bar up by ~12px relative to the line, so a 72%
+          bar visually exceeded the 80% line. Separating them ensures
+          bars and line share the exact same vertical reference. */}
       <div
         className={isScrollable ? 'overflow-x-auto scrollbar-hide' : ''}
         style={{ position: 'relative', height: chartHeight, minHeight: chartHeight }}
@@ -186,12 +194,37 @@ export function SparklineChart({
                     transition: 'height 0.2s',
                   }}
                 />
-                <span style={{ fontSize: 9, color: 'var(--color-text-tertiary)' }}>
-                  {formatWeekday(d.date)}
-                </span>
               </div>
             )
           })}
+        </div>
+      </div>
+
+      {/* Day-of-week labels — separate row, NOT inside the chart area.
+          Mirrors the gap/minWidth of the bar row above so labels stay
+          centered under their respective bars. */}
+      <div
+        className={isScrollable ? 'overflow-x-auto scrollbar-hide' : ''}
+        style={{ marginTop: 4 }}
+      >
+        <div
+          className="flex"
+          style={{
+            gap: 3,
+            ...(isScrollable ? { minWidth: data.length * 28 } : {}),
+          }}
+        >
+          {data.map((d, i) => (
+            <div
+              key={i}
+              className="flex-1 flex justify-center"
+              style={{ ...(isScrollable ? { minWidth: 24 } : {}) }}
+            >
+              <span style={{ fontSize: 9, color: 'var(--color-text-tertiary)' }}>
+                {formatWeekday(d.date)}
+              </span>
+            </div>
+          ))}
         </div>
       </div>
 
