@@ -456,6 +456,7 @@
     "topMoversHint": "เมนูที่ขายได้มากที่สุดในช่วงเวลานี้ ยอดรายได้แสดงเฉพาะ Owner",
     "topMoversUnits": "{units} หน่วย",
     "recsTitle": "ข้อเสนอแนะ",
+    "recsEmpty": "สัญญาณทุกตัวปกติดี — ดู KPIs และเมนูขายดีด้านล่างสำหรับภาพรวมทั้งหมด",
     "importBlurb": "อัพโหลดยอดขายรายวันจาก POS แบบกลุ่ม — ดาวน์โหลด template, กรอก units_sold ต่อ (วันที่ × เมนู), แล้วอัพโหลดกลับ",
     "downloadTemplate": "Template (CSV)",
     "importSales": "นำเข้ายอดขาย CSV",

@@ -95,13 +95,22 @@ describe('detectTopMover', () => {
     }))
   }
 
-  it('returns empty when fewer than 3 days carry itemSales', () => {
+  it('returns empty when fewer than 2 days carry itemSales', () => {
     const inputs = withItemSales(days([1000, 1000, 1000, 1000, 1000, 1000, 1000]), [
       [{ name: 'Pad Krapow', units: 5 }],
-      [{ name: 'Pad Krapow', units: 5 }],
-      // only 2 days have sales — not enough
+      // only 1 day has sales — not enough to call a "mover"
     ])
     expect(detectTopMover(inputs)).toEqual([])
+  })
+
+  it('fires when exactly 2 days carry itemSales (low-data floor)', () => {
+    const inputs = withItemSales(days([1000, 1000, 1000, 1000, 1000, 1000, 1000]), [
+      [{ name: 'Pad Krapow', units: 5 }],
+      [{ name: 'Pad Krapow', units: 7 }],
+    ])
+    const recs = detectTopMover(inputs)
+    expect(recs).toHaveLength(1)
+    expect(recs[0].messageEn).toContain('Pad Krapow')
   })
 
   it('picks the highest-volume item across the window', () => {

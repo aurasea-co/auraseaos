@@ -118,7 +118,10 @@ export function detectHighFoodCost(days: FnbRecommendationInput[]): FnbRecommend
 export function detectTopMover(days: FnbRecommendationInput[]): FnbRecommendation[] {
   const recent = days.slice(-7)
   const withSales = recent.filter((d) => Array.isArray(d.itemSales) && (d.itemSales?.length ?? 0) > 0)
-  if (withSales.length < 3) return []  // need ≥3 days of SKU data to call a "mover"
+  // Need ≥2 days of SKU data to call something a "mover" — one day
+  // could be a fluke. Earlier threshold was 3 but kept the signal
+  // hidden for branches that imported sparse historical data.
+  if (withSales.length < 2) return []
 
   // Aggregate units across the window.
   const byItem = new Map<string, { name: string; category: string | null; units: number }>()

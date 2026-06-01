@@ -669,29 +669,52 @@ export default function MenuDeskPage() {
         </section>
       )}
 
-      {/* F&B engine recommendations — high/medium urgency at top,
-          low at bottom (engine already sorts). Hidden when no recs
-          fired (early-stage branches with sparse data). */}
-      {!loading && recommendations.length > 0 && (
+      {/* F&B engine recommendations. Always rendered (with an "all
+          clear" empty state when no signals fire) so the owner sees
+          that the engine ran — hiding the card on empty made the
+          feature look broken when data variance was low. Engine
+          pre-sorts by urgency: high → medium → low. */}
+      {!loading && activeRows.length > 0 && (
         <section style={card}>
           <h3 style={cardTitle}>{t('recsTitle')}</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {recommendations.map((rec, i) => {
-              const urgencyColor = rec.urgency === 'high'
-                ? { dot: '#DC2626', tag: '#991B1B' }
-                : rec.urgency === 'medium'
-                  ? { dot: '#F59E0B', tag: '#92400E' }
-                  : { dot: '#9CA3AF', tag: 'var(--color-text-tertiary)' }
-              return (
-                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: 999, background: urgencyColor.dot, marginTop: 6, flexShrink: 0 }} />
-                  <div style={{ flex: 1, fontSize: 13, color: 'var(--color-text-primary)', lineHeight: 1.5 }}>
-                    {locale === 'th' ? rec.messageTh : rec.messageEn}
+          {recommendations.length === 0 ? (
+            <div style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 10,
+              padding: '4px 0',
+            }}>
+              <span style={{
+                width: 8,
+                height: 8,
+                borderRadius: 999,
+                background: 'var(--color-positive, #1D9E75)',
+                marginTop: 6,
+                flexShrink: 0,
+              }} />
+              <div style={{ flex: 1, fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
+                {t('recsEmpty')}
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {recommendations.map((rec, i) => {
+                const urgencyColor = rec.urgency === 'high'
+                  ? { dot: '#DC2626' }
+                  : rec.urgency === 'medium'
+                    ? { dot: '#F59E0B' }
+                    : { dot: '#9CA3AF' }
+                return (
+                  <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 999, background: urgencyColor.dot, marginTop: 6, flexShrink: 0 }} />
+                    <div style={{ flex: 1, fontSize: 13, color: 'var(--color-text-primary)', lineHeight: 1.5 }}>
+                      {locale === 'th' ? rec.messageTh : rec.messageEn}
+                    </div>
                   </div>
-                </div>
-              )
-            })}
-          </div>
+                )
+              })}
+            </div>
+          )}
         </section>
       )}
 
