@@ -73,24 +73,26 @@ export default function MenuSettingsPage() {
 
   useEffect(() => { reload() }, [reload])
 
-  // Filtered view based on the "show archived" toggle.
-  const visibleItems = useMemo(
-    () => (showArchived ? items : items.filter((it) => it.is_active)),
-    [items, showArchived],
-  )
+  // Split active vs archived so we can render them in distinct
+  // sections. Active items dominate the page grouped by category;
+  // archived items live in a dedicated section at the bottom when
+  // the "Show archived" toggle is on (so they don't blend into
+  // category groups as dimmed rows the user might miss).
+  const activeItems = useMemo(() => items.filter((it) => it.is_active), [items])
+  const archivedItems = useMemo(() => items.filter((it) => !it.is_active), [items])
 
-  // Group by category for visual structure. Items without a category
-  // bucket under "—" so they stay visible.
-  const byCategory = useMemo(() => {
+  // Group active items by category for visual structure. Items
+  // without a category bucket under "—" so they stay visible.
+  const activeByCategory = useMemo(() => {
     const groups = new Map<string, MenuItem[]>()
-    for (const it of visibleItems) {
+    for (const it of activeItems) {
       const key = it.category || '—'
       const arr = groups.get(key) ?? []
       arr.push(it)
       groups.set(key, arr)
     }
     return Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]))
-  }, [visibleItems])
+  }, [activeItems])
 
   async function handleAdd() {
     if (!activeBranch || submitting) return
@@ -275,13 +277,29 @@ export default function MenuSettingsPage() {
             {activeBranch.name} · {t('subtitle')}
           </p>
         </div>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--color-text-secondary)' }}>
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: 12,
+            color: archivedItems.length > 0 ? 'var(--color-text-secondary)' : 'var(--color-text-tertiary)',
+            cursor: archivedItems.length > 0 ? 'pointer' : 'default',
+          }}
+        >
           <input
             type="checkbox"
             checked={showArchived}
             onChange={(e) => setShowArchived(e.target.checked)}
+            disabled={archivedItems.length === 0}
           />
-          {t('showArchived')}
+          {/* Count appended so the owner can see at a glance whether
+              toggling this would actually reveal anything. Disabled
+              state when zero — clearer than a checkbox that "does
+              nothing" because there's nothing to show. */}
+          {archivedItems.length > 0
+            ? t('showArchivedWithCount', { count: archivedItems.length })
+            : t('noArchivedItems')}
         </label>
       </div>
 
@@ -410,7 +428,7 @@ export default function MenuSettingsPage() {
         </div>
       )}
 
-      {!loading && visibleItems.length === 0 && (
+      {!loading && activeItems.length === 0 && archivedItems.length === 0 && (
         <div style={{
           background: 'var(--color-bg-surface)',
           border: '1px solid var(--color-border)',
@@ -419,11 +437,24 @@ export default function MenuSettingsPage() {
           fontSize: 13,
           color: 'var(--color-text-tertiary)',
         }}>
-          {showArchived ? t('emptyAll') : t('emptyActive')}
+          {t('emptyActive')}
         </div>
       )}
 
-      {!loading && byCategory.map(([categoryName, rows]) => (
+      {!loading && activeItems.length === 0 && archivedItems.length > 0 && !showArchived && (
+        <div style={{
+          background: 'var(--color-bg-surface)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 8,
+          padding: '16px 18px',
+          fontSize: 13,
+          color: 'var(--color-text-tertiary)',
+        }}>
+          {t('emptyActiveButArchived', { count: archivedItems.length })}
+        </div>
+      )}
+
+      {!loading && activeByCategory.map(([categoryName, rows]) => (
         <section key={categoryName}>
           <h3 style={{
             fontSize: 11,
@@ -537,6 +568,78 @@ export default function MenuSettingsPage() {
           </div>
         </section>
       ))}
+
+      {/* Archived items section — only renders when the toggle is on
+          AND there's something to show. Lives in its own block at the
+          bottom (not interleaved with the active categories above) so
+          the visual difference between "show off" and "show on" is
+          obvious — was the original UX bug. */}
+      {!loading && showArchived && archivedItems.length > 0 && (
+        <section style={{ marginTop: 8 }}>
+          <h3 style={{
+            fontSize: 11,
+            fontWeight: 500,
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+            color: 'var(--color-text-tertiary)',
+            marginBottom: 6,
+          }}>
+            {t('archivedSectionTitle', { count: archivedItems.length })}
+          </h3>
+          <div style={{
+            background: 'var(--color-bg-surface)',
+            border: '1px dashed var(--color-border)',
+            borderRadius: 8,
+            overflow: 'hidden',
+          }}>
+            {/* Column headers — mirror the active table's columns. */}
+            <div style={{ ...rowStyle, fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-tertiary)', borderBottom: '1px solid var(--color-border)' }}>
+              <div style={{ flex: 2, minWidth: 0 }}>{t('colName')}</div>
+              <div style={{ flex: 1 }}>{t('colCategory')}</div>
+              <div style={{ flex: 1 }}>{t('colPrice')}</div>
+              <div style={{ flex: 1 }}>{t('colCost')}</div>
+              <div style={{ width: 80 }} />
+            </div>
+            {archivedItems.map((it) => (
+              <div
+                key={it.id}
+                style={{
+                  ...rowStyle,
+                  borderTop: '1px solid var(--color-border)',
+                  color: 'var(--color-text-tertiary)',
+                }}
+              >
+                <div style={{ flex: 2, minWidth: 0, fontSize: 13 }}>{it.name}</div>
+                <div style={{ flex: 1, fontSize: 12 }}>{it.category || '—'}</div>
+                <div style={{ flex: 1, fontSize: 13 }}>{it.price_thb}</div>
+                <div style={{ flex: 1, fontSize: 13 }}>{it.cost_thb ?? '—'}</div>
+                <div style={{ width: 80, display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                  <button
+                    type="button"
+                    onClick={() => toggleArchive(it)}
+                    disabled={submitting}
+                    style={iconBtn}
+                    title={t('restoreTitle')}
+                  >
+                    <ArchiveRestore size={14} />
+                  </button>
+                  {role === 'owner' && (
+                    <button
+                      type="button"
+                      onClick={() => hardDelete(it)}
+                      disabled={submitting}
+                      style={{ ...iconBtn, color: '#A32D2D' }}
+                      title={t('deleteTitle')}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   )
 }
