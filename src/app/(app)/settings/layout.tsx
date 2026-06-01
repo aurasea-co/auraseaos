@@ -18,6 +18,7 @@ import {
   BedDouble,
   LineChart,
   Plug,
+  UtensilsCrossed,
   ChevronRight,
 } from 'lucide-react'
 
@@ -39,6 +40,13 @@ const allSections = [
   // early-return inside the page. Owner-only: managers shouldn't
   // be able to point rates at a different PMS.
   { href: '/settings/pms', icon: Plug, labelKey: 'pms' as const, roles: ['owner'] },
+  // Menu catalog management (F&B branches) — feeds the
+  // menu_items table that POS adapters and CSV imports match
+  // against when writing fnb_daily_sales facts. Owner + manager
+  // (manager edits the menu day-to-day for seasonal items). F&B
+  // early-return inside the page; the link is harmless if a mixed
+  // owner clicks it while on a hotel branch.
+  { href: '/settings/menu', icon: UtensilsCrossed, labelKey: 'menu' as const, roles: ['owner', 'manager'] },
   { href: '/settings/targets', icon: Target, labelKey: 'targets' as const, roles: ['owner'] },
   { href: '/settings/team', icon: Users, labelKey: 'team' as const, roles: ['owner'] },
   { href: '/settings/billing', icon: CreditCard, labelKey: 'billing' as const, roles: ['owner'] },
