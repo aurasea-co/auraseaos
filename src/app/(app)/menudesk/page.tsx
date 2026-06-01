@@ -74,6 +74,16 @@ export default function MenuDeskPage() {
   // Catalog (active items only) — used for the count display, the
   // empty-state CTA, and the CSV template generator.
   const [menuItems, setMenuItems] = useState<Array<{ id: string; name: string; external_item_id: string | null }>>([])
+  // Top movers — top items by units sold across the window. Populated
+  // by aggregating fnb_daily_sales × menu_items client-side. Empty
+  // when there's no sales data yet for this branch (panel hides).
+  const [topMovers, setTopMovers] = useState<Array<{
+    id: string
+    name: string
+    category: string | null
+    unitsSold: number
+    revenueThb: number
+  }>>([])
   const [loading, setLoading] = useState(true)
 
   // CSV import state — single-shot: pick file → upload → show result.
@@ -104,7 +114,7 @@ export default function MenuDeskPage() {
     const priorStart = new Date(endDate.getTime() - 2 * window * 86_400_000)
     const iso = (d: Date) => d.toISOString().slice(0, 10)
 
-    const [currentRes, priorRes, menuRes] = await Promise.all([
+    const [currentRes, priorRes, menuRes, salesRes] = await Promise.all([
       db
         .from('fnb_daily_metrics')
         .select('metric_date, revenue, total_customers, cost_food, cost_nonfood')
@@ -124,14 +134,67 @@ export default function MenuDeskPage() {
       // /settings/menu).
       db
         .from('menu_items')
-        .select('id, name, external_item_id')
+        .select('id, name, category, external_item_id, price_thb')
         .eq('branch_id', activeBranch.id)
         .eq('is_active', true)
         .order('name', { ascending: true }),
+      // Sales facts for the window — used to compute top movers.
+      // Embed the menu_items row via the FK so we get name + price
+      // without a second round-trip. Capped at 5000 sales rows
+      // (30 days × ~150 items = 4500 — comfortable headroom).
+      db
+        .from('fnb_daily_sales')
+        .select('menu_item_id, units_sold, date')
+        .eq('branch_id', activeBranch.id)
+        .gte('date', iso(windowStart))
+        .lte('date', iso(endDate))
+        .limit(5000),
     ])
     setRows(currentRes.data || [])
     setPriorRows(priorRes.data || [])
-    setMenuItems(menuRes.data || [])
+
+    // Strip price_thb back out before storing — the rest of the page
+    // expects the narrower shape. Top-movers compute below uses the
+    // full row.
+    type MenuRow = {
+      id: string
+      name: string
+      category: string | null
+      external_item_id: string | null
+      price_thb: number
+    }
+    const menuRows: MenuRow[] = (menuRes.data || []) as MenuRow[]
+    setMenuItems(menuRows.map(({ id, name, external_item_id }) => ({ id, name, external_item_id })))
+
+    // Aggregate sales by menu_item_id, then top-5 by units. Doing it
+    // client-side because Supabase's REST API doesn't natively
+    // support GROUP BY + ORDER BY aggregation; the dataset is small
+    // (4500 rows max) so the cost is trivial and we avoid an RPC.
+    const salesData = (salesRes.data || []) as Array<{ menu_item_id: string; units_sold: number }>
+    const byMenuItem = new Map<string, { units: number }>()
+    for (const s of salesData) {
+      const entry = byMenuItem.get(s.menu_item_id) || { units: 0 }
+      entry.units += s.units_sold
+      byMenuItem.set(s.menu_item_id, entry)
+    }
+    const menuById = new Map(menuRows.map((m) => [m.id, m]))
+    const movers = Array.from(byMenuItem.entries())
+      .map(([id, agg]) => {
+        const item = menuById.get(id)
+        if (!item) return null  // sale references an archived/deleted item; skip
+        return {
+          id,
+          name: item.name,
+          category: item.category,
+          unitsSold: agg.units,
+          revenueThb: agg.units * item.price_thb,
+        }
+      })
+      .filter((m): m is NonNullable<typeof m> => m !== null)
+      .sort((a, b) => b.unitsSold - a.unitsSold)
+      .slice(0, 5)
+    setTopMovers(movers)
+
     setLoading(false)
   }, [activeBranch, window, supabase, isFnb])
 
@@ -423,9 +486,12 @@ export default function MenuDeskPage() {
           <div style={{ fontWeight: 500, marginBottom: 4 }}>
             {t('importSummary', { imported: importResult.imported, skipped: importResult.skipped })}
           </div>
-          {importResult.skippedUnknownItem && importResult.skippedUnknownItem > 0 && (
+          {/* Guard against JSX rendering literal 0 — `0 && ...` short-circuits
+              to the number 0 which React renders as text. Compare against
+              > 0 explicitly. */}
+          {(importResult.skippedUnknownItem ?? 0) > 0 && (
             <div style={{ marginTop: 4 }}>
-              {t('importSkippedUnknown', { count: importResult.skippedUnknownItem })}
+              {t('importSkippedUnknown', { count: importResult.skippedUnknownItem ?? 0 })}
             </div>
           )}
           {importResult.unmatchedSamples && importResult.unmatchedSamples.length > 0 && (
@@ -585,10 +651,58 @@ export default function MenuDeskPage() {
         />
       </section>
 
-      {/* Future: top movers panel — currently empty placeholder.
-          Will populate when fnb_daily_sales has data (CSV import or
-          POS adapter). Hidden until then to avoid a hollow "no data
-          yet" card every owner sees on day 1. */}
+      {/* Top movers — populated from fnb_daily_sales × menu_items
+          aggregated over the active window. Hidden when there's no
+          sales data yet (CSV import / POS sync hasn't populated
+          fnb_daily_sales) to avoid a hollow "no data" card on day 1. */}
+      {topMovers.length > 0 && (
+        <section style={card}>
+          <h3 style={cardTitle}>{t('topMovers', { days: window })}</h3>
+          <p style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: -8, marginBottom: 12 }}>
+            {t('topMoversHint')}
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {topMovers.map((m, i) => {
+              // Visual rank bar — width proportional to this item's
+              // units relative to #1. Gives a glance-level "how big
+              // is the gap between top sellers" cue.
+              const topUnits = topMovers[0].unitsSold
+              const barPct = topUnits > 0 ? Math.round((m.unitsSold / topUnits) * 100) : 0
+              return (
+                <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--color-text-tertiary)', width: 18 }}>
+                    #{i + 1}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {m.name}
+                        {m.category && (
+                          <span style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginLeft: 6, fontWeight: 400 }}>
+                            · {m.category}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                        {t('topMoversUnits', { units: m.unitsSold })}
+                        {showRevenue && (
+                          <span style={{ color: 'var(--color-text-tertiary)', marginLeft: 6 }}>
+                            · ฿{Math.round(m.revenueThb).toLocaleString('th-TH')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {/* Proportional bar */}
+                    <div style={{ height: 4, background: 'var(--color-bg-surface, #f4f4f2)', borderRadius: 2, marginTop: 4, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${barPct}%`, background: 'var(--color-accent, #534AB7)', borderRadius: 2 }} />
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
     </div>
   )
 }
