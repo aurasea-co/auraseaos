@@ -28,7 +28,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { useTranslations } from 'next-intl'
+import { useTranslations, useLocale } from 'next-intl'
 import { useUser } from '@/providers/user-context'
 import { createClient } from '@/lib/supabase/client'
 import { ArrowRight, Edit3, TrendingUp, TrendingDown, Minus, UtensilsCrossed, Upload, Download } from 'lucide-react'
@@ -36,6 +36,11 @@ import { SparklineChart } from '@/components/sparkline-chart'
 import { canSeeRevenue } from '@/lib/auth/ratedesk-permissions'
 import { getTodayBangkok } from '@/lib/businessDate'
 import { buildFnbSalesCsvTemplate } from '@/lib/ingestion/csv-fnb-sales'
+import {
+  generateFnbDailyRecommendations,
+  toFnbRecommendationInputs,
+  attachItemSales,
+} from '@/lib/recommendations/fnb/engine'
 
 interface MetricRow {
   metric_date: string
@@ -52,6 +57,7 @@ export default function MenuDeskPage() {
   const router = useRouter()
   const { activeBranch, role } = useUser()
   const t = useTranslations('menudesk')
+  const locale = useLocale()
   const supabase = createClient()
 
   // F&B-only — staff has no access; owner + manager only. Mirrors the
@@ -83,6 +89,18 @@ export default function MenuDeskPage() {
     category: string | null
     unitsSold: number
     revenueThb: number
+  }>>([])
+  // Per-day item sales — used by the F&B engine for top-mover and
+  // dead-item signals. Empty when fnb_daily_sales has no rows for
+  // this window (no CSV import / POS sync has populated it).
+  const [salesByDate, setSalesByDate] = useState<Array<{
+    date: string
+    menuItemId: string
+    name: string
+    category: string | null
+    unitsSold: number
+    priceThb: number
+    costThb: number | null
   }>>([])
   const [loading, setLoading] = useState(true)
 
@@ -134,14 +152,14 @@ export default function MenuDeskPage() {
       // /settings/menu).
       db
         .from('menu_items')
-        .select('id, name, category, external_item_id, price_thb')
+        .select('id, name, category, external_item_id, price_thb, cost_thb')
         .eq('branch_id', activeBranch.id)
         .eq('is_active', true)
         .order('name', { ascending: true }),
-      // Sales facts for the window — used to compute top movers.
-      // Embed the menu_items row via the FK so we get name + price
-      // without a second round-trip. Capped at 5000 sales rows
-      // (30 days × ~150 items = 4500 — comfortable headroom).
+      // Sales facts for the window — used by both the Top Movers
+      // panel and the F&B engine signals (top mover + dead item).
+      // Capped at 5000 sales rows (30 days × ~150 items = 4500 —
+      // comfortable headroom).
       db
         .from('fnb_daily_sales')
         .select('menu_item_id, units_sold, date')
@@ -153,15 +171,16 @@ export default function MenuDeskPage() {
     setRows(currentRes.data || [])
     setPriorRows(priorRes.data || [])
 
-    // Strip price_thb back out before storing — the rest of the page
-    // expects the narrower shape. Top-movers compute below uses the
-    // full row.
+    // Strip price_thb/cost_thb back out before storing — the rest of
+    // the page expects the narrower shape. Top-movers + engine recs
+    // computed below use the full row.
     type MenuRow = {
       id: string
       name: string
       category: string | null
       external_item_id: string | null
       price_thb: number
+      cost_thb: number | null
     }
     const menuRows: MenuRow[] = (menuRes.data || []) as MenuRow[]
     setMenuItems(menuRows.map(({ id, name, external_item_id }) => ({ id, name, external_item_id })))
@@ -170,14 +189,36 @@ export default function MenuDeskPage() {
     // client-side because Supabase's REST API doesn't natively
     // support GROUP BY + ORDER BY aggregation; the dataset is small
     // (4500 rows max) so the cost is trivial and we avoid an RPC.
-    const salesData = (salesRes.data || []) as Array<{ menu_item_id: string; units_sold: number }>
+    const salesData = (salesRes.data || []) as Array<{ menu_item_id: string; units_sold: number; date: string }>
+
+    // Build the per-day item-sales dataset for the engine. Joins
+    // sales rows to menu_items so each row carries name/category/
+    // price/cost — same shape the engine's attachItemSales adapter
+    // expects.
+    const menuById = new Map(menuRows.map((m) => [m.id, m]))
+    const salesPerDay = salesData
+      .map((s) => {
+        const item = menuById.get(s.menu_item_id)
+        if (!item) return null  // sale references archived/deleted item
+        return {
+          date: s.date,
+          menuItemId: s.menu_item_id,
+          name: item.name,
+          category: item.category,
+          unitsSold: s.units_sold,
+          priceThb: item.price_thb,
+          costThb: item.cost_thb,
+        }
+      })
+      .filter((s): s is NonNullable<typeof s> => s !== null)
+    setSalesByDate(salesPerDay)
+
     const byMenuItem = new Map<string, { units: number }>()
     for (const s of salesData) {
       const entry = byMenuItem.get(s.menu_item_id) || { units: 0 }
       entry.units += s.units_sold
       byMenuItem.set(s.menu_item_id, entry)
     }
-    const menuById = new Map(menuRows.map((m) => [m.id, m]))
     const movers = Array.from(byMenuItem.entries())
       .map(([id, agg]) => {
         const item = menuById.get(id)
@@ -272,6 +313,25 @@ export default function MenuDeskPage() {
     () => activeRows.map((r) => ({ date: r.metric_date, value: Number(r.revenue) || 0 })),
     [activeRows],
   )
+
+  // F&B recommendations from the engine. Pure pipeline:
+  //   rows → toFnbRecommendationInputs → attachItemSales →
+  //   generateFnbDailyRecommendations
+  // Memoised so the engine doesn't re-run on every render — only
+  // when the underlying data changes (window switch, fresh load).
+  const recommendations = useMemo(() => {
+    const inputs = toFnbRecommendationInputs(
+      activeRows.map((r) => ({
+        metric_date: r.metric_date,
+        revenue: r.revenue,
+        total_customers: r.total_customers,
+        cost_food: r.cost_food,
+        cost_nonfood: r.cost_nonfood,
+      })),
+    )
+    const withSales = attachItemSales(inputs, salesByDate)
+    return generateFnbDailyRecommendations(withSales)
+  }, [activeRows, salesByDate])
 
   // Today-missing CTA — mirrors /ratedesk's logic. If today's BKK
   // calendar date isn't in activeRows (either no row or row with no
@@ -606,6 +666,32 @@ export default function MenuDeskPage() {
           >
             {t('addMenuItems')} <ArrowRight size={14} />
           </Link>
+        </section>
+      )}
+
+      {/* F&B engine recommendations — high/medium urgency at top,
+          low at bottom (engine already sorts). Hidden when no recs
+          fired (early-stage branches with sparse data). */}
+      {!loading && recommendations.length > 0 && (
+        <section style={card}>
+          <h3 style={cardTitle}>{t('recsTitle')}</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {recommendations.map((rec, i) => {
+              const urgencyColor = rec.urgency === 'high'
+                ? { dot: '#DC2626', tag: '#991B1B' }
+                : rec.urgency === 'medium'
+                  ? { dot: '#F59E0B', tag: '#92400E' }
+                  : { dot: '#9CA3AF', tag: 'var(--color-text-tertiary)' }
+              return (
+                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 999, background: urgencyColor.dot, marginTop: 6, flexShrink: 0 }} />
+                  <div style={{ flex: 1, fontSize: 13, color: 'var(--color-text-primary)', lineHeight: 1.5 }}>
+                    {locale === 'th' ? rec.messageTh : rec.messageEn}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </section>
       )}
 

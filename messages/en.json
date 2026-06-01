@@ -455,6 +455,7 @@
     "topMovers": "Top movers ({days}d)",
     "topMoversHint": "Items with the highest units sold across the window. Revenue shown for owner role only.",
     "topMoversUnits": "{units, plural, one {# unit} other {# units}}",
+    "recsTitle": "Recommendations",
     "importBlurb": "Bulk-upload daily POS sales — download the template, fill units_sold per (date × item), upload back.",
     "downloadTemplate": "Template (CSV)",
     "importSales": "Import sales CSV",
