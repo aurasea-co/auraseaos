@@ -76,6 +76,65 @@ describe('parseFnbSalesCsv — happy paths', () => {
   })
 })
 
+describe('parseFnbSalesCsv — separator auto-detect', () => {
+  it('parses a semicolon-separated CSV (Thai/EU Excel default)', () => {
+    const csv = [
+      'date;item_name;external_item_id;units_sold',
+      '2026-06-01;Pad Krapow;;15',
+      '2026-06-01;Iced Coffee;COFFEE-001;32',
+    ].join('\n')
+    const out = parseFnbSalesCsv(csv)
+    expect(out.rows).toHaveLength(2)
+    expect(out.warnings).toHaveLength(0)
+    expect(out.rows[0]).toEqual({
+      date: '2026-06-01',
+      itemName: 'Pad Krapow',
+      externalItemId: null,
+      unitsSold: 15,
+    })
+  })
+
+  it('parses a tab-separated CSV (some POS exports)', () => {
+    const csv = [
+      'date\titem_name\tunits_sold',
+      '2026-06-01\tPad Krapow\t15',
+    ].join('\n')
+    const out = parseFnbSalesCsv(csv)
+    expect(out.rows).toHaveLength(1)
+    expect(out.warnings).toHaveLength(0)
+    expect(out.rows[0].itemName).toBe('Pad Krapow')
+  })
+
+  it('still parses standard comma CSV (default fallback)', () => {
+    const csv = [
+      'date,item_name,units_sold',
+      '2026-06-01,Pad Krapow,15',
+    ].join('\n')
+    const out = parseFnbSalesCsv(csv)
+    expect(out.rows).toHaveLength(1)
+  })
+
+  it('missing_columns warning surfaces the expected + found detail', () => {
+    // Random header that doesn't match any expected column.
+    const csv = ['a,b,c', '1,2,3'].join('\n')
+    const out = parseFnbSalesCsv(csv)
+    expect(out.warnings).toHaveLength(1)
+    expect(out.warnings[0].code).toBe('missing_columns')
+    // raw should include the expected list + what we actually saw
+    expect(out.warnings[0].raw).toContain('Expected columns')
+    expect(out.warnings[0].raw).toContain('Found')
+    expect(out.warnings[0].raw).toContain('date')
+  })
+
+  it('missing_columns warning shows the separator we picked', () => {
+    // Semicolon-delimited with WRONG column names so we hit the
+    // missing-columns path. We want the warning to say sep=";".
+    const csv = ['foo;bar;baz', '1;2;3'].join('\n')
+    const out = parseFnbSalesCsv(csv)
+    expect(out.warnings[0].raw).toContain('separator=";"')
+  })
+})
+
 describe('parseFnbSalesCsv — warnings + skips', () => {
   it('warns when required columns are missing in the header', () => {
     const csv = ['date,units_sold', '2026-06-01,15'].join('\n')

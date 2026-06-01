@@ -36,8 +36,29 @@ export interface FnbSalesCsvWarning {
     | 'invalid_date'
     | 'missing_item_identifier'
     | 'invalid_units'
-  /** Truncated raw line for the owner's reference. */
+  /** Truncated raw line for the owner's reference. For missing_columns
+   *  this carries the diagnostic detail (expected columns + columns we
+   *  actually found) so the operator can spot the mismatch quickly. */
   raw: string
+}
+
+// Auto-detect the field separator on the header line. Excel saves
+// CSVs with semicolons in locales that use comma as decimal separator
+// (Thai, German, French, etc); some POS exports use tabs. We try the
+// three common candidates and pick whichever produces the most fields
+// on the header line.
+//
+// Returns the comma if no clear winner (single-column file → comma
+// fallback gives a deterministic answer for the rest of the pipeline).
+function detectSeparator(headerLine: string): ',' | ';' | '\t' {
+  const counts = {
+    ',': (headerLine.match(/,/g) || []).length,
+    ';': (headerLine.match(/;/g) || []).length,
+    '\t': (headerLine.match(/\t/g) || []).length,
+  }
+  const best = (Object.entries(counts) as Array<[',' | ';' | '\t', number]>)
+    .sort((a, b) => b[1] - a[1])[0]
+  return best[1] > 0 ? best[0] : ','
 }
 
 export interface FnbSalesCsvParseResult {
@@ -46,11 +67,10 @@ export interface FnbSalesCsvParseResult {
   totalDataLines: number
 }
 
-// CSV splitter that handles quoted cells containing commas. Same
-// implementation as csv-competitor.ts — we accept the duplication
-// here to keep the ingestion files self-contained; can hoist to a
-// shared util later if a third parser shows up.
-function splitCsvLine(line: string): string[] {
+// CSV splitter that handles quoted cells containing the separator
+// character. Takes the separator as a parameter so we can auto-detect
+// comma / semicolon / tab on the header line.
+function splitCsvLine(line: string, sep: ',' | ';' | '\t'): string[] {
   const out: string[] = []
   let cur = ''
   let inQuotes = false
@@ -60,7 +80,7 @@ function splitCsvLine(line: string): string[] {
       inQuotes = !inQuotes
       continue
     }
-    if (c === ',' && !inQuotes) {
+    if (c === sep && !inQuotes) {
       out.push(cur)
       cur = ''
       continue
@@ -92,7 +112,14 @@ export function parseFnbSalesCsv(input: string): FnbSalesCsvParseResult {
     return { rows, warnings, totalDataLines }
   }
 
-  const header = splitCsvLine(lines[0] || '').map((h) => h.toLowerCase())
+  // Auto-detect separator: comma / semicolon / tab. Excel in Thai
+  // (and other comma-decimal locales) saves CSVs with semicolons by
+  // default — without this, those exports would all fail the header
+  // check below because the entire header lands in a single field.
+  const headerLine = lines[0] || ''
+  const sep = detectSeparator(headerLine)
+
+  const header = splitCsvLine(headerLine, sep).map((h) => h.toLowerCase())
   // Required: date + units_sold. EITHER item_name OR external_item_id
   // must be present in the header — the per-row identifier check
   // below catches "neither filled" warnings on a row-by-row basis.
@@ -101,11 +128,15 @@ export function parseFnbSalesCsv(input: string): FnbSalesCsvParseResult {
   const hasName = header.includes('item_name')
   const hasExternal = header.includes('external_item_id')
   if (missing.length > 0 || (!hasName && !hasExternal)) {
-    const missingFields = [...missing, ...(hasName || hasExternal ? [] : ['item_name or external_item_id'])]
+    // Diagnostic detail: what we expected vs what the file gave us,
+    // plus which separator the auto-detect picked. Surfaces the
+    // root cause when an owner's Excel exported with semicolons or
+    // when they hand-typed a different schema.
+    const sepLabel = sep === '\t' ? 'TAB' : `"${sep}"`
     warnings.push({
       lineNumber: 1,
       code: 'missing_columns',
-      raw: `missing: ${missingFields.join(', ')}`,
+      raw: `Expected columns: ${[...required, 'item_name or external_item_id'].join(', ')}. Found (separator=${sepLabel}): ${header.join(', ') || '(none — header line empty)'}`,
     })
     return { rows, warnings, totalDataLines: 0 }
   }
@@ -120,7 +151,7 @@ export function parseFnbSalesCsv(input: string): FnbSalesCsvParseResult {
     const line = lines[i] ?? ''
     if (line.trim() === '') continue
     totalDataLines += 1
-    const cells = splitCsvLine(line)
+    const cells = splitCsvLine(line, sep)
 
     if (cells.every((c) => c === '')) {
       warnings.push({ lineNumber, code: 'blank_row', raw: line.slice(0, 200) })

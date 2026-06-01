@@ -449,6 +449,15 @@ export default function MenuDeskPage() {
                 {importResult.warnings.slice(0, 20).map((w, i) => (
                   <li key={i}>
                     {t('importWarningLine', { line: w.lineNumber })} — {t(`importError.${w.code}`)}
+                    {/* Surface the raw diagnostic detail. For
+                        missing_columns this carries "expected vs found
+                        + separator" — the actionable info. For other
+                        codes it's the offending CSV line truncated. */}
+                    {w.raw && (
+                      <div style={{ marginTop: 2, fontFamily: 'ui-monospace, monospace', fontSize: 10, color: 'var(--color-text-tertiary)', wordBreak: 'break-word' }}>
+                        {w.raw}
+                      </div>
+                    )}
                   </li>
                 ))}
                 {importResult.warnings.length > 20 && (
