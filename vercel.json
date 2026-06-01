@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/push-approved-rates",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/sync-pos-sales",
+      "schedule": "0 2 * * *"
     }
   ]
 }
