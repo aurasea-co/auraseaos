@@ -468,7 +468,12 @@
       "invalid_date": "วันที่ไม่ถูกต้อง (ใช้ YYYY-MM-DD)",
       "missing_item_identifier": "ขาดทั้ง item_name และ external_item_id",
       "invalid_units": "units_sold ไม่ถูกต้อง (ต้องเป็นจำนวนที่ไม่ติดลบ)"
-    }
+    },
+    "missingColumnsHelpTitle": "สาเหตุที่พบบ่อย",
+    "missingColumnsHelpExcel": "ไฟล์เป็น .xlsx ที่ถูกเปลี่ยนนามสกุลเป็น .csv กรุณา Save As → \"CSV (Comma delimited) (*.csv)\" ใน Excel",
+    "missingColumnsHelpNumbers": "ไฟล์มาจาก Numbers / Pages / Google Sheets ให้ใช้ File → Export → CSV (อย่าเปลี่ยนนามสกุลไฟล์เฉยๆ)",
+    "missingColumnsHelpStub": "ไฟล์ว่างหรือมีแค่ชื่อไฟล์ ดาวน์โหลด template ใหม่ด้านล่างแล้วแก้ไขใน Excel / Sheets โดยตรง",
+    "redownloadTemplate": "ดาวน์โหลด template ใหม่"
   },
   "ratedesk": {
     "title": "RateDesk",

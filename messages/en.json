@@ -468,7 +468,12 @@
       "invalid_date": "Invalid date (use YYYY-MM-DD)",
       "missing_item_identifier": "Missing item_name AND external_item_id",
       "invalid_units": "Invalid units_sold (must be a non-negative number)"
-    }
+    },
+    "missingColumnsHelpTitle": "Common causes",
+    "missingColumnsHelpExcel": "The file is actually an .xlsx with a .csv extension. Re-save it as \"CSV (Comma delimited) (*.csv)\" in Excel.",
+    "missingColumnsHelpNumbers": "The file came from Numbers / Pages / Google Sheets. Use File → Export → CSV (don't just rename the file).",
+    "missingColumnsHelpStub": "The file is empty or only contains the filename. Re-download the template below and edit it directly in Excel / Sheets.",
+    "redownloadTemplate": "Re-download template"
   },
   "ratedesk": {
     "title": "RateDesk",

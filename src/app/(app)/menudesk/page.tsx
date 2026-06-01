@@ -451,7 +451,8 @@ export default function MenuDeskPage() {
                     {t('importWarningLine', { line: w.lineNumber })} — {t(`importError.${w.code}`)}
                     {/* Surface the raw diagnostic detail. For
                         missing_columns this carries "expected vs found
-                        + separator" — the actionable info. For other
+                        + separator + size + line count" — enough to
+                        diagnose without a back-and-forth. For other
                         codes it's the offending CSV line truncated. */}
                     {w.raw && (
                       <div style={{ marginTop: 2, fontFamily: 'ui-monospace, monospace', fontSize: 10, color: 'var(--color-text-tertiary)', wordBreak: 'break-word' }}>
@@ -467,6 +468,41 @@ export default function MenuDeskPage() {
                 )}
               </ul>
             </details>
+          )}
+
+          {/* Targeted help when missing_columns fires — operators hit
+              this most often with files that LOOK like CSVs but are
+              actually XLSX/Numbers exports, or stubs that got renamed.
+              The blurb lists the three common root causes + a fresh
+              template-download button so they can restart cleanly. */}
+          {importResult.warnings.some((w) => w.code === 'missing_columns') && (
+            <div style={{ marginTop: 10, padding: '8px 10px', background: 'var(--color-bg-surface)', borderRadius: 6, fontSize: 11, color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
+              <strong style={{ display: 'block', marginBottom: 4, color: 'var(--color-text-primary)' }}>
+                {t('missingColumnsHelpTitle')}
+              </strong>
+              <ul style={{ marginLeft: 16, listStyle: 'disc' }}>
+                <li>{t('missingColumnsHelpExcel')}</li>
+                <li>{t('missingColumnsHelpNumbers')}</li>
+                <li>{t('missingColumnsHelpStub')}</li>
+              </ul>
+              <div style={{ marginTop: 6 }}>
+                <button
+                  type="button"
+                  onClick={downloadTemplate}
+                  style={{
+                    padding: '4px 10px',
+                    fontSize: 11,
+                    background: 'transparent',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 4,
+                    color: 'var(--color-accent, #534AB7)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {t('redownloadTemplate')}
+                </button>
+              </div>
+            </div>
           )}
         </section>
       )}

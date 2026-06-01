@@ -133,6 +133,23 @@ describe('parseFnbSalesCsv — separator auto-detect', () => {
     const out = parseFnbSalesCsv(csv)
     expect(out.warnings[0].raw).toContain('separator=";"')
   })
+
+  it('missing_columns warning includes byte size + line count for diagnostics', () => {
+    // A single-line stub (mimics the real-world case where a file
+    // contained just a filename string). Should report 1 line.
+    const csv = 'fnb-sales-template-2026-06-01'
+    const out = parseFnbSalesCsv(csv)
+    expect(out.warnings).toHaveLength(1)
+    expect(out.warnings[0].raw).toMatch(/\d+ bytes/)
+    expect(out.warnings[0].raw).toMatch(/1 non-blank line/)
+  })
+
+  it('missing_columns warning pluralises lines correctly', () => {
+    // 3-line file with wrong column names — should say "3 non-blank lines"
+    const csv = ['a,b,c', '1,2,3', '4,5,6'].join('\n')
+    const out = parseFnbSalesCsv(csv)
+    expect(out.warnings[0].raw).toMatch(/3 non-blank lines/)
+  })
 })
 
 describe('parseFnbSalesCsv — warnings + skips', () => {

@@ -128,15 +128,22 @@ export function parseFnbSalesCsv(input: string): FnbSalesCsvParseResult {
   const hasName = header.includes('item_name')
   const hasExternal = header.includes('external_item_id')
   if (missing.length > 0 || (!hasName && !hasExternal)) {
-    // Diagnostic detail: what we expected vs what the file gave us,
-    // plus which separator the auto-detect picked. Surfaces the
-    // root cause when an owner's Excel exported with semicolons or
-    // when they hand-typed a different schema.
+    // Diagnostic detail: what we expected, what we read, separator
+    // picked, file size, line count. Operators have repeatedly hit
+    // this with files that look right but contain Excel binary,
+    // Numbers/Pages metadata, or just the filename string — the
+    // metadata lines make the root cause obvious in 2 seconds
+    // without a back-and-forth.
     const sepLabel = sep === '\t' ? 'TAB' : `"${sep}"`
+    const nonBlankLines = lines.filter((l) => l.trim().length > 0).length
+    const byteSize = new Blob([text]).size
     warnings.push({
       lineNumber: 1,
       code: 'missing_columns',
-      raw: `Expected columns: ${[...required, 'item_name or external_item_id'].join(', ')}. Found (separator=${sepLabel}): ${header.join(', ') || '(none — header line empty)'}`,
+      raw:
+        `Expected columns: ${[...required, 'item_name or external_item_id'].join(', ')}. ` +
+        `Found (separator=${sepLabel}, ${byteSize} bytes, ${nonBlankLines} non-blank line${nonBlankLines === 1 ? '' : 's'}): ` +
+        `${header.join(', ') || '(none — header line empty)'}`,
     })
     return { rows, warnings, totalDataLines: 0 }
   }
