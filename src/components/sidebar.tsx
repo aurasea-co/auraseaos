@@ -51,19 +51,14 @@ function getNavItems(role: AppRole, plan: string, branchType: string): (NavItem 
     // legacy /pricing route is preserved at its own URL for bookmarks
     // but is no longer the primary entry point.
     { href: '/ratedesk', icon: DollarSign, labelKey: 'rateDesk', roles: ['owner', 'manager', 'superadmin'], plans: ['growth', 'pro'], branchTypes: ['accommodation'], requiredPlan: 'growth' },
-    // MenuDesk slot (fnb analogue of RateDesk). The branch-type-aware
-    // nav mechanism above already supports this — when the MenuDesk
-    // dashboard ships, swap labelKey to 'menuDesk' and href to
-    // '/menudesk', reusing the DollarSign icon to mirror the
-    // RateDesk visual (the two are conceptually the same pricing
-    // surface, one per vertical). For now, fnb branches see /cost
-    // which is a separate concept (cost analysis, not menu pricing)
-    // and stays in the sidebar regardless.
-    //
-    // Schema for MenuDesk lives in migration 034 (menu_items,
-    // fnb_daily_sales, fnb_daily_rollup view) — see
-    // AURASEA_HOUSE_STYLE.md "Hotel data model" section + below for
-    // the F&B parallel.
+    // MenuDesk — F&B analogue of RateDesk. Daily revenue + covers
+    // trend, food cost %, per-window aggregates. Reads from
+    // fnb_daily_metrics today; will overlay fnb_daily_rollup data
+    // once the CSV import / POS adapter populates fnb_daily_sales.
+    { href: '/menudesk', icon: DollarSign, labelKey: 'menuDesk', roles: ['owner', 'manager', 'superadmin'], plans: ['growth', 'pro'], branchTypes: ['fnb'], requiredPlan: 'growth' },
+    // /cost stays — different concept (cost-side analytics with daily
+    // breakdowns + monthly summary). Complements MenuDesk's revenue
+    // + menu-economics view.
     { href: '/cost', icon: PieChart, labelKey: 'cost', roles: ['owner', 'manager', 'superadmin'], plans: ['growth', 'pro'], branchTypes: ['fnb'], requiredPlan: 'growth' },
     { href: '/labour', icon: Briefcase, labelKey: 'labour', roles: ['owner', 'superadmin'], plans: ['pro'], requiredPlan: 'pro' },
     { href: '/help', icon: HelpCircle, labelKey: 'help', roles: ['owner', 'manager', 'staff', 'superadmin'] },

@@ -62,6 +62,7 @@
     "trends": "Trends",
     "pricing": "Pricing",
     "rateDesk": "RateDesk",
+    "menuDesk": "MenuDesk",
     "cost": "Cost",
     "labour": "Labour",
     "portfolio": "Portfolio",
@@ -433,6 +434,24 @@
     "confirmDelete": "Remove {type}",
     "deletingLabel": "Deleting...",
     "deleteSuccess": "Removed \"{type}\" — {days} days updated"
+  },
+  "menudesk": {
+    "title": "MenuDesk",
+    "fnbOnly": "MenuDesk is only available for F&B branches. Switch to an F&B branch from the topbar.",
+    "windowLabel": "Last {days} days",
+    "daysWithData": "{count, plural, one {# day with data} other {# days with data}}",
+    "menuItemsCount": "{count, plural, one {# menu item} other {# menu items}}",
+    "totalRevenue": "Total revenue ({days}d)",
+    "covers": "Covers ({days}d)",
+    "avgPerCover": "Avg per cover ({days}d)",
+    "foodCostPct": "Food cost % ({days}d)",
+    "foodCostHint": "Enter cost_food daily to see this",
+    "revenueTrend": "Revenue trend ({days}d)",
+    "todayMissingTitle": "Today's data isn't logged yet",
+    "todayMissingBody": "Log today's sales + cost to keep MenuDesk numbers accurate.",
+    "logTodayCta": "Log today's data",
+    "noMenuYet": "Your menu catalog is empty. Add menu items so POS adapters and sales imports have something to match against.",
+    "addMenuItems": "Add menu items"
   },
   "ratedesk": {
     "title": "RateDesk",

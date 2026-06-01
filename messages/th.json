@@ -62,6 +62,7 @@
     "trends": "เทรนด์",
     "pricing": "ราคา",
     "rateDesk": "RateDesk",
+    "menuDesk": "MenuDesk",
     "cost": "ต้นทุน",
     "labour": "แรงงาน",
     "portfolio": "ภาพรวม",
@@ -433,6 +434,24 @@
     "confirmDelete": "ลบ {type} ออก",
     "deletingLabel": "กำลังลบ...",
     "deleteSuccess": "ลบ \"{type}\" เรียบร้อยแล้ว — แก้ไขทั้งหมด {days} วัน"
+  },
+  "menudesk": {
+    "title": "MenuDesk",
+    "fnbOnly": "MenuDesk ใช้ได้กับสาขา F&B เท่านั้น กรุณาเปลี่ยนสาขาจากแถบด้านบน",
+    "windowLabel": "{days} วันล่าสุด",
+    "daysWithData": "{count} วันที่มีข้อมูล",
+    "menuItemsCount": "{count} เมนู",
+    "totalRevenue": "รายได้รวม ({days}d)",
+    "covers": "จำนวนลูกค้า ({days}d)",
+    "avgPerCover": "เฉลี่ย/คน ({days}d)",
+    "foodCostPct": "Food cost % ({days}d)",
+    "foodCostHint": "ใส่ต้นทุนอาหารรายวันเพื่อดูตัวเลขนี้",
+    "revenueTrend": "แนวโน้มรายได้ ({days}d)",
+    "todayMissingTitle": "ยังไม่ได้บันทึกข้อมูลวันนี้",
+    "todayMissingBody": "บันทึกยอดขายและต้นทุนวันนี้เพื่อให้ตัวเลข MenuDesk แม่นยำ",
+    "logTodayCta": "บันทึกข้อมูลวันนี้",
+    "noMenuYet": "ยังไม่มีเมนูในแค็ตตาล็อก เพิ่มเมนูเพื่อให้ POS adapter และ CSV import จับคู่ได้",
+    "addMenuItems": "เพิ่มเมนู"
   },
   "ratedesk": {
     "title": "RateDesk",
