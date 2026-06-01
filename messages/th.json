@@ -451,7 +451,24 @@
     "todayMissingBody": "บันทึกยอดขายและต้นทุนวันนี้เพื่อให้ตัวเลข MenuDesk แม่นยำ",
     "logTodayCta": "บันทึกข้อมูลวันนี้",
     "noMenuYet": "ยังไม่มีเมนูในแค็ตตาล็อก เพิ่มเมนูเพื่อให้ POS adapter และ CSV import จับคู่ได้",
-    "addMenuItems": "เพิ่มเมนู"
+    "addMenuItems": "เพิ่มเมนู",
+    "importBlurb": "อัพโหลดยอดขายรายวันจาก POS แบบกลุ่ม — ดาวน์โหลด template, กรอก units_sold ต่อ (วันที่ × เมนู), แล้วอัพโหลดกลับ",
+    "downloadTemplate": "Template (CSV)",
+    "importSales": "นำเข้ายอดขาย CSV",
+    "importing": "กำลังนำเข้า…",
+    "importSummary": "บันทึก {imported} แถว · ข้าม {skipped} แถว",
+    "importSkippedUnknown": "{count} แถวถูกข้าม — ไม่พบเมนูใน catalog ดูรายการที่ไม่ตรงด้านล่าง เพิ่มเมนูที่ /settings/menu แล้วอัพโหลดใหม่",
+    "importUnmatchedToggle": "รายละเอียดเมนูที่ไม่ตรง",
+    "importWarningsToggle": "{count} คำเตือน — ดูรายละเอียด",
+    "importWarningsMore": "+ อีก {count} แถว",
+    "importWarningLine": "บรรทัด {line}",
+    "importError": {
+      "missing_columns": "ขาดคอลัมน์ที่จำเป็นใน header",
+      "blank_row": "แถวว่าง",
+      "invalid_date": "วันที่ไม่ถูกต้อง (ใช้ YYYY-MM-DD)",
+      "missing_item_identifier": "ขาดทั้ง item_name และ external_item_id",
+      "invalid_units": "units_sold ไม่ถูกต้อง (ต้องเป็นจำนวนที่ไม่ติดลบ)"
+    }
   },
   "ratedesk": {
     "title": "RateDesk",

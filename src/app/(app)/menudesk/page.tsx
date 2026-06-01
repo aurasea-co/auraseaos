@@ -31,10 +31,11 @@ import Link from 'next/link'
 import { useTranslations } from 'next-intl'
 import { useUser } from '@/providers/user-context'
 import { createClient } from '@/lib/supabase/client'
-import { ArrowRight, Edit3, TrendingUp, TrendingDown, Minus, UtensilsCrossed } from 'lucide-react'
+import { ArrowRight, Edit3, TrendingUp, TrendingDown, Minus, UtensilsCrossed, Upload, Download } from 'lucide-react'
 import { SparklineChart } from '@/components/sparkline-chart'
 import { canSeeRevenue } from '@/lib/auth/ratedesk-permissions'
 import { getTodayBangkok } from '@/lib/businessDate'
+import { buildFnbSalesCsvTemplate } from '@/lib/ingestion/csv-fnb-sales'
 
 interface MetricRow {
   metric_date: string
@@ -70,8 +71,24 @@ export default function MenuDeskPage() {
   const [window, setWindow] = useState<WindowKey>(30)
   const [rows, setRows] = useState<MetricRow[]>([])
   const [priorRows, setPriorRows] = useState<MetricRow[]>([])
-  const [menuItemCount, setMenuItemCount] = useState<number>(0)
+  // Catalog (active items only) — used for the count display, the
+  // empty-state CTA, and the CSV template generator.
+  const [menuItems, setMenuItems] = useState<Array<{ id: string; name: string; external_item_id: string | null }>>([])
   const [loading, setLoading] = useState(true)
+
+  // CSV import state — single-shot: pick file → upload → show result.
+  const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState<
+    | null
+    | {
+        imported: number
+        skipped: number
+        skippedUnknownItem?: number
+        unmatchedSamples?: Array<{ lineHint: number; reason: string }>
+        warnings: Array<{ lineNumber: number; code: string; raw: string }>
+      }
+  >(null)
+  const [importError, setImportError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!activeBranch || !isFnb) {
@@ -101,19 +118,79 @@ export default function MenuDeskPage() {
         .eq('branch_id', activeBranch.id)
         .gte('metric_date', iso(priorStart))
         .lt('metric_date', iso(windowStart)),
-      // Active menu items count — small fact for the header pill.
-      // Counts only is_active=true.
+      // Active menu items — used for the count pill, the empty-state
+      // CTA, and the CSV template generator (name + optional
+      // external_item_id is enough; full catalog edit lives at
+      // /settings/menu).
       db
         .from('menu_items')
-        .select('id', { count: 'exact', head: true })
+        .select('id, name, external_item_id')
         .eq('branch_id', activeBranch.id)
-        .eq('is_active', true),
+        .eq('is_active', true)
+        .order('name', { ascending: true }),
     ])
     setRows(currentRes.data || [])
     setPriorRows(priorRes.data || [])
-    setMenuItemCount(menuRes.count ?? 0)
+    setMenuItems(menuRes.data || [])
     setLoading(false)
   }, [activeBranch, window, supabase, isFnb])
+
+  // Convenience accessor matching the previous count-only shape.
+  const menuItemCount = menuItems.length
+
+  // CSV template download. Uses the branch's active menu items as
+  // the row scaffold; owner fills units_sold per (date × item) and
+  // re-uploads via the picker below.
+  function downloadTemplate() {
+    if (!activeBranch || menuItems.length === 0) return
+    const tmrw = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Bangkok',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date())
+    const csv = buildFnbSalesCsvTemplate({
+      items: menuItems.map((m) => ({ name: m.name, external_item_id: m.external_item_id })),
+      startDate: tmrw,
+      days: 7,
+    })
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `fnb-sales-template-${tmrw}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  async function handleImportFile(file: File) {
+    if (!activeBranch) return
+    setImporting(true)
+    setImportResult(null)
+    setImportError(null)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const res = await fetch(`/api/branches/${activeBranch.id}/fnb-sales/import`, {
+        method: 'POST',
+        body: form,
+      })
+      const json = await res.json().catch(() => null)
+      if (!res.ok) {
+        setImportError((json?.error as string) || res.statusText)
+        return
+      }
+      setImportResult(json)
+      // Refresh the dashboard data — the new sales rows will start
+      // flowing into the rollup view (and the chart will react when
+      // future slices wire fnb_daily_rollup as a data source).
+      await load()
+    } finally {
+      setImporting(false)
+    }
+  }
 
   useEffect(() => { load() }, [load])
 
@@ -244,6 +321,144 @@ export default function MenuDeskPage() {
           >
             {t('logTodayCta')} <ArrowRight size={14} />
           </Link>
+        </section>
+      )}
+
+      {/* CSV sales import — only renders when the branch has menu
+          items. Without a catalog, sales rows have nothing to match
+          against, so the empty-state CTA below takes precedence. */}
+      {!loading && menuItemCount > 0 && (
+        <section
+          style={{
+            background: 'var(--color-bg-surface)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 8,
+            padding: '10px 14px',
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: 10,
+            fontSize: 12,
+          }}
+        >
+          <span style={{ color: 'var(--color-text-secondary)', flex: 1, minWidth: 200 }}>
+            {t('importBlurb')}
+          </span>
+          <button
+            type="button"
+            onClick={downloadTemplate}
+            style={{
+              padding: '6px 10px',
+              fontSize: 12,
+              background: 'transparent',
+              border: '1px solid var(--color-border)',
+              borderRadius: 6,
+              color: 'var(--color-text-secondary)',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            <Download size={12} /> {t('downloadTemplate')}
+          </button>
+          <label
+            style={{
+              padding: '6px 10px',
+              fontSize: 12,
+              background: 'var(--color-accent, #534AB7)',
+              color: 'white',
+              border: 'none',
+              borderRadius: 6,
+              cursor: importing ? 'not-allowed' : 'pointer',
+              opacity: importing ? 0.5 : 1,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            <Upload size={12} /> {importing ? t('importing') : t('importSales')}
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              disabled={importing}
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) {
+                  handleImportFile(file)
+                  // Allow re-upload of same file by resetting the input.
+                  e.target.value = ''
+                }
+              }}
+            />
+          </label>
+        </section>
+      )}
+
+      {importError && (
+        <section style={{
+          background: '#FBEAEA',
+          border: '1px solid #F5C6C6',
+          color: '#A32D2D',
+          borderRadius: 8,
+          padding: '10px 14px',
+          fontSize: 13,
+        }}>
+          {importError}
+        </section>
+      )}
+
+      {importResult && (
+        <section
+          style={{
+            background: importResult.imported > 0 ? '#F0FDF4' : '#FFFBEB',
+            border: `1px solid ${importResult.imported > 0 ? '#BBF7D0' : '#FCD34D'}`,
+            borderRadius: 8,
+            padding: '10px 14px',
+            fontSize: 12,
+            color: importResult.imported > 0 ? '#166534' : '#92400E',
+          }}
+        >
+          <div style={{ fontWeight: 500, marginBottom: 4 }}>
+            {t('importSummary', { imported: importResult.imported, skipped: importResult.skipped })}
+          </div>
+          {importResult.skippedUnknownItem && importResult.skippedUnknownItem > 0 && (
+            <div style={{ marginTop: 4 }}>
+              {t('importSkippedUnknown', { count: importResult.skippedUnknownItem })}
+            </div>
+          )}
+          {importResult.unmatchedSamples && importResult.unmatchedSamples.length > 0 && (
+            <details style={{ marginTop: 6 }}>
+              <summary style={{ cursor: 'pointer' }}>{t('importUnmatchedToggle')}</summary>
+              <ul style={{ marginTop: 6, paddingLeft: 18, fontSize: 11, lineHeight: 1.5 }}>
+                {importResult.unmatchedSamples.map((u, i) => (
+                  <li key={i}>
+                    {t('importWarningLine', { line: u.lineHint })} — {u.reason}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {importResult.warnings.length > 0 && (
+            <details style={{ marginTop: 6 }}>
+              <summary style={{ cursor: 'pointer' }}>
+                {t('importWarningsToggle', { count: importResult.warnings.length })}
+              </summary>
+              <ul style={{ marginTop: 6, paddingLeft: 18, fontSize: 11, lineHeight: 1.5 }}>
+                {importResult.warnings.slice(0, 20).map((w, i) => (
+                  <li key={i}>
+                    {t('importWarningLine', { line: w.lineNumber })} — {t(`importError.${w.code}`)}
+                  </li>
+                ))}
+                {importResult.warnings.length > 20 && (
+                  <li style={{ color: 'var(--color-text-tertiary)' }}>
+                    {t('importWarningsMore', { count: importResult.warnings.length - 20 })}
+                  </li>
+                )}
+              </ul>
+            </details>
+          )}
         </section>
       )}
 

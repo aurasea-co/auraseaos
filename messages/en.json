@@ -451,7 +451,24 @@
     "todayMissingBody": "Log today's sales + cost to keep MenuDesk numbers accurate.",
     "logTodayCta": "Log today's data",
     "noMenuYet": "Your menu catalog is empty. Add menu items so POS adapters and sales imports have something to match against.",
-    "addMenuItems": "Add menu items"
+    "addMenuItems": "Add menu items",
+    "importBlurb": "Bulk-upload daily POS sales — download the template, fill units_sold per (date × item), upload back.",
+    "downloadTemplate": "Template (CSV)",
+    "importSales": "Import sales CSV",
+    "importing": "Importing…",
+    "importSummary": "{imported} rows saved · {skipped} skipped",
+    "importSkippedUnknown": "{count} rows skipped — item not found in your menu catalog. Check the unmatched list below, add missing items at /settings/menu, re-upload.",
+    "importUnmatchedToggle": "Unmatched item details",
+    "importWarningsToggle": "{count} parse warnings — show details",
+    "importWarningsMore": "+ {count} more",
+    "importWarningLine": "Line {line}",
+    "importError": {
+      "missing_columns": "Missing required columns in header",
+      "blank_row": "Blank row",
+      "invalid_date": "Invalid date (use YYYY-MM-DD)",
+      "missing_item_identifier": "Missing item_name AND external_item_id",
+      "invalid_units": "Invalid units_sold (must be a non-negative number)"
+    }
   },
   "ratedesk": {
     "title": "RateDesk",
