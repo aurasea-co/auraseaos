@@ -1,9 +1,10 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useTranslations } from 'next-intl'
-import { ArrowLeft, Plus, Trash2, Archive, ArchiveRestore } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Archive, ArchiveRestore, Pencil, Upload, Download } from 'lucide-react'
+import { buildMenuItemsCsvTemplate } from '@/lib/ingestion/csv-menu-items'
 import { useUser } from '@/providers/user-context'
 
 // Settings → Menu items
@@ -53,6 +54,23 @@ export default function MenuSettingsPage() {
   // Per-row edit state. Maps id → in-progress changes (string-typed so
   // empty / 0 stay distinguishable). Save-on-blur.
   const [edits, setEdits] = useState<Record<string, Partial<Record<keyof MenuItem, string>>>>({})
+
+  // Full-row edit mode — opened by the pencil icon. Shows ALL four
+  // fields (name + category + price + cost) in an inline form below
+  // the row so the owner can edit everything atomically without
+  // hunting for inline cells.
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editCategory, setEditCategory] = useState('')
+  const [editPrice, setEditPrice] = useState('')
+  const [editCost, setEditCost] = useState('')
+
+  // CSV import state.
+  const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState<
+    | null
+    | { imported: number; updated: number; skipped: number; warnings: Array<{ lineNumber: number; code: string; raw: string }> }
+  >(null)
 
   const reload = useCallback(async () => {
     if (!activeBranch) return
@@ -133,6 +151,98 @@ export default function MenuSettingsPage() {
       await reload()
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  // ── Edit-row (pencil icon) handlers ──────────────────────────────
+
+  function openEdit(it: MenuItem) {
+    setEditingId(it.id)
+    setEditName(it.name)
+    setEditCategory(it.category || '')
+    setEditPrice(String(it.price_thb))
+    setEditCost(it.cost_thb == null ? '' : String(it.cost_thb))
+    setError(null)
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setEditName('')
+    setEditCategory('')
+    setEditPrice('')
+    setEditCost('')
+  }
+
+  async function saveEdit() {
+    if (!editingId) return
+    const trimmedName = editName.trim()
+    if (!trimmedName) {
+      setError(t('errorNameRequired'))
+      return
+    }
+    const priceNum = Number(editPrice)
+    if (!Number.isFinite(priceNum) || priceNum < 0) {
+      setError(t('errorPriceRequired'))
+      return
+    }
+    let costPatch: number | null | undefined
+    if (editCost.trim() === '') {
+      costPatch = null
+    } else {
+      const costNum = Number(editCost)
+      if (!Number.isFinite(costNum) || costNum < 0) {
+        setError(t('errorCostInvalid'))
+        return
+      }
+      costPatch = Math.round(costNum)
+    }
+    await patchItem(editingId, {
+      name: trimmedName,
+      category: editCategory.trim() || null,
+      price_thb: Math.round(priceNum),
+      cost_thb: costPatch ?? null,
+    })
+    setToast(t('toastUpdated', { name: trimmedName }))
+    window.setTimeout(() => setToast(null), 2500)
+    cancelEdit()
+  }
+
+  // ── CSV import handlers ──────────────────────────────────────────
+
+  function downloadTemplate() {
+    const csv = buildMenuItemsCsvTemplate()
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'menu-items-template.csv'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  async function handleImportFile(file: File) {
+    if (!activeBranch || importing) return
+    setImporting(true)
+    setImportResult(null)
+    setError(null)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const res = await fetch(`/api/branches/${activeBranch.id}/menu-items/import`, {
+        method: 'POST',
+        body: form,
+      })
+      const json = await res.json().catch(() => null)
+      if (!res.ok) {
+        setError((json?.error as string) || res.statusText)
+        return
+      }
+      setImportResult(json)
+      await reload()
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -329,28 +439,81 @@ export default function MenuSettingsPage() {
         </div>
       )}
 
-      {/* Inline add-item form. Persistent at the top during bulk
-          onboarding so 30 items is 30 enters, not 30 clicks. */}
+      {/* Two entry paths side-by-side: single-item add OR bulk CSV
+          import. Most owners start with CSV at onboarding (50+ items),
+          then use Add for seasonal additions later. */}
       {!showAdd ? (
-        <button
-          type="button"
-          onClick={() => { setShowAdd(true); setError(null) }}
-          style={{
-            alignSelf: 'flex-start',
-            padding: '8px 14px',
-            fontSize: 13,
-            background: 'var(--color-accent, #534AB7)',
-            color: 'white',
-            border: 'none',
-            borderRadius: 6,
-            cursor: 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-          }}
-        >
-          <Plus size={14} /> {t('addItem')}
-        </button>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+          <button
+            type="button"
+            onClick={() => { setShowAdd(true); setError(null) }}
+            style={{
+              padding: '8px 14px',
+              fontSize: 13,
+              background: 'var(--color-accent, #534AB7)',
+              color: 'white',
+              border: 'none',
+              borderRadius: 6,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            <Plus size={14} /> {t('addItem')}
+          </button>
+
+          <label
+            style={{
+              padding: '8px 14px',
+              fontSize: 13,
+              background: 'transparent',
+              border: '1px solid var(--color-border)',
+              color: 'var(--color-text-primary)',
+              borderRadius: 6,
+              cursor: importing ? 'not-allowed' : 'pointer',
+              opacity: importing ? 0.5 : 1,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+            title={t('importHint')}
+          >
+            <Upload size={14} /> {importing ? t('importing') : t('importCsv')}
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              disabled={importing}
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) {
+                  handleImportFile(file)
+                  e.target.value = ''  // allow re-upload of same file
+                }
+              }}
+            />
+          </label>
+
+          <button
+            type="button"
+            onClick={downloadTemplate}
+            title={t('templateHint')}
+            style={{
+              padding: '8px 12px',
+              fontSize: 12,
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--color-accent, #534AB7)',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            <Download size={12} /> {t('downloadTemplate')}
+          </button>
+        </div>
       ) : (
         <div style={{
           background: 'var(--color-bg)',
@@ -428,16 +591,69 @@ export default function MenuSettingsPage() {
         </div>
       )}
 
+      {/* CSV import result panel — surfaces above the list when an
+          upload completes. Green when at least one row imported or
+          updated, amber otherwise. */}
+      {importResult && (
+        <section
+          style={{
+            background: (importResult.imported + importResult.updated) > 0 ? '#F0FDF4' : '#FFFBEB',
+            border: `1px solid ${(importResult.imported + importResult.updated) > 0 ? '#BBF7D0' : '#FCD34D'}`,
+            borderRadius: 8,
+            padding: '10px 14px',
+            fontSize: 12,
+            color: (importResult.imported + importResult.updated) > 0 ? '#166534' : '#92400E',
+          }}
+        >
+          <div style={{ fontWeight: 500, marginBottom: 4 }}>
+            {t('importSummary', {
+              imported: importResult.imported,
+              updated: importResult.updated,
+              skipped: importResult.skipped,
+            })}
+          </div>
+          {importResult.warnings.length > 0 && (
+            <details style={{ marginTop: 6 }}>
+              <summary style={{ cursor: 'pointer' }}>
+                {t('importWarningsToggle', { count: importResult.warnings.length })}
+              </summary>
+              <ul style={{ marginTop: 6, paddingLeft: 18, fontSize: 11, lineHeight: 1.5 }}>
+                {importResult.warnings.slice(0, 20).map((w, i) => (
+                  <li key={i}>
+                    {t('importWarningLine', { line: w.lineNumber })} — {t(`importError.${w.code}`)}
+                    {w.raw && (
+                      <div style={{ marginTop: 2, fontFamily: 'ui-monospace, monospace', fontSize: 10, color: 'var(--color-text-tertiary)', wordBreak: 'break-word' }}>
+                        {w.raw}
+                      </div>
+                    )}
+                  </li>
+                ))}
+                {importResult.warnings.length > 20 && (
+                  <li style={{ color: 'var(--color-text-tertiary)' }}>
+                    {t('importWarningsMore', { count: importResult.warnings.length - 20 })}
+                  </li>
+                )}
+              </ul>
+            </details>
+          )}
+        </section>
+      )}
+
       {!loading && activeItems.length === 0 && archivedItems.length === 0 && (
         <div style={{
           background: 'var(--color-bg-surface)',
-          border: '1px solid var(--color-border)',
+          border: '1px dashed var(--color-border)',
           borderRadius: 8,
-          padding: '16px 18px',
+          padding: '20px',
           fontSize: 13,
-          color: 'var(--color-text-tertiary)',
+          color: 'var(--color-text-secondary)',
+          textAlign: 'center',
+          lineHeight: 1.7,
         }}>
-          {t('emptyActive')}
+          <div style={{ marginBottom: 10, fontWeight: 500, color: 'var(--color-text-primary)' }}>
+            {t('emptyActive')}
+          </div>
+          <div style={{ fontSize: 12 }}>{t('emptyActiveHint')}</div>
         </div>
       )}
 
@@ -472,13 +688,22 @@ export default function MenuSettingsPage() {
             borderRadius: 8,
             overflow: 'hidden',
           }}>
-            {/* Column headers */}
+            {/* Column headers. MARGIN gets a hover tooltip explaining
+                the formula — owners often ask "why is this red?" without
+                knowing the threshold; the tooltip explains the math
+                up-front. `title` attribute is enough — visible on hover
+                on desktop, and a long-press shows it on mobile. */}
             <div style={{ ...rowStyle, fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-tertiary)', borderBottom: '1px solid var(--color-border)' }}>
               <div style={{ flex: 2, minWidth: 0 }}>{t('colName')}</div>
               <div style={{ flex: 1 }}>{t('colPrice')}</div>
               <div style={{ flex: 1 }}>{t('colCost')}</div>
-              <div style={{ flex: 1 }}>{t('colMargin')}</div>
-              <div style={{ width: 80 }} />
+              <div
+                style={{ flex: 1, cursor: 'help', textDecoration: 'underline dotted', textUnderlineOffset: 2 }}
+                title={t('marginTooltip')}
+              >
+                {t('colMargin')}
+              </div>
+              <div style={{ width: 110 }} />
             </div>
             {rows.map((it) => {
               const editRow = edits[it.id] ?? {}
@@ -490,8 +715,8 @@ export default function MenuSettingsPage() {
                 : null
               const dimmed = !it.is_active
               return (
+                <Fragment key={it.id}>
                 <div
-                  key={it.id}
                   style={{
                     ...rowStyle,
                     borderTop: '1px solid var(--color-border)',
@@ -540,13 +765,30 @@ export default function MenuSettingsPage() {
                   <div style={{ flex: 1, fontSize: 13, color: margin != null && margin >= 50 ? '#166534' : margin != null && margin < 30 ? '#A32D2D' : 'var(--color-text-secondary)' }}>
                     {margin != null ? `${margin}%` : '—'}
                   </div>
-                  <div style={{ width: 80, display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                  <div style={{ width: 110, display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                    {/* Pencil — opens the row-expansion full edit form
+                        (name+category+price+cost). The inline cells
+                        above edit price/cost only, so the pencil is
+                        the path for name/category changes. */}
+                    <button
+                      type="button"
+                      onClick={() => openEdit(it)}
+                      disabled={submitting}
+                      style={iconBtn}
+                      title={t('editTitle')}
+                      aria-label={t('editAria', { name: it.name })}
+                    >
+                      <Pencil size={14} />
+                    </button>
                     <button
                       type="button"
                       onClick={() => toggleArchive(it)}
                       disabled={submitting}
                       style={iconBtn}
                       title={it.is_active ? t('archiveTitle') : t('restoreTitle')}
+                      aria-label={it.is_active
+                        ? t('archiveAria', { name: it.name })
+                        : t('restoreAria', { name: it.name })}
                     >
                       {it.is_active ? <Archive size={14} /> : <ArchiveRestore size={14} />}
                     </button>
@@ -557,12 +799,93 @@ export default function MenuSettingsPage() {
                         disabled={submitting}
                         style={{ ...iconBtn, color: '#A32D2D' }}
                         title={t('deleteTitle')}
+                        aria-label={t('deleteAria', { name: it.name })}
                       >
                         <Trash2 size={14} />
                       </button>
                     )}
                   </div>
                 </div>
+                {editingId === it.id && (
+                  <div
+                    style={{
+                      borderTop: '1px solid var(--color-border)',
+                      background: 'var(--color-bg-surface)',
+                      padding: 12,
+                      display: 'grid',
+                      gap: 8,
+                    }}
+                  >
+                    <div style={{ fontSize: 11, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-tertiary)' }}>
+                      {t('editPanelTitle')}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 8 }}>
+                      <div>
+                        <label style={miniLabel}>{t('colName')}</label>
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          maxLength={120}
+                          style={input}
+                          autoFocus
+                        />
+                      </div>
+                      <div>
+                        <label style={miniLabel}>{t('colCategory')}</label>
+                        <input
+                          type="text"
+                          value={editCategory}
+                          onChange={(e) => setEditCategory(e.target.value)}
+                          maxLength={60}
+                          style={input}
+                        />
+                      </div>
+                      <div>
+                        <label style={miniLabel}>{t('colPrice')}</label>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          value={editPrice}
+                          onChange={(e) => setEditPrice(e.target.value)}
+                          style={input}
+                        />
+                      </div>
+                      <div>
+                        <label style={miniLabel}>{t('colCost')}</label>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          value={editCost}
+                          onChange={(e) => setEditCost(e.target.value)}
+                          placeholder={t('costOptional')}
+                          style={input}
+                        />
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                      <button
+                        type="button"
+                        onClick={cancelEdit}
+                        disabled={submitting}
+                        style={secondaryBtn}
+                      >
+                        {t('cancel')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={saveEdit}
+                        disabled={submitting}
+                        style={primaryBtn}
+                      >
+                        {submitting ? t('saving') : t('save')}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </Fragment>
               )
             })}
           </div>
@@ -620,6 +943,7 @@ export default function MenuSettingsPage() {
                     disabled={submitting}
                     style={iconBtn}
                     title={t('restoreTitle')}
+                    aria-label={t('restoreAria', { name: it.name })}
                   >
                     <ArchiveRestore size={14} />
                   </button>
@@ -630,6 +954,7 @@ export default function MenuSettingsPage() {
                       disabled={submitting}
                       style={{ ...iconBtn, color: '#A32D2D' }}
                       title={t('deleteTitle')}
+                      aria-label={t('deleteAria', { name: it.name })}
                     >
                       <Trash2 size={14} />
                     </button>
