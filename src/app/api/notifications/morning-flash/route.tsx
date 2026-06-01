@@ -5,6 +5,13 @@ import { EMAIL_SENDERS } from '@/lib/email/resend'
 import MorningFlash, { type MorningFlashBranchData } from '@/lib/email/templates/morningFlash'
 import { buildMorningFlashLine, sendLineMessage, sendLineFlexMessage, sendLineMixed } from '@/lib/line/messaging'
 import { buildHotelBriefFlexMessage } from '@/lib/line/hotel-brief'
+import { buildFnbBriefFlexMessage } from '@/lib/line/menudesk-brief'
+import {
+  generateFnbDailyRecommendations,
+  toFnbRecommendationInputs,
+  attachItemSales,
+  type FnbDailySaleRow,
+} from '@/lib/recommendations/fnb/engine'
 import { getTodayBangkok } from '@/lib/businessDate'
 import { calculateGrossMarginStrict } from '@/lib/calculations/fnb'
 import { periodAvgMargin, type MarginInputRow } from '@/lib/calculations/marginAggregates'
@@ -212,6 +219,16 @@ async function handleMorningFlash(req: NextRequest) {
       latest: Record<string, unknown>
       metrics: Record<string, unknown>[]
     }> = []
+    // F&B Flex inputs — populated alongside fnbSnippets so a
+    // recipient with exactly one F&B branch (no hotels) can receive
+    // the new MenuDesk Flex bubble instead of the legacy text. Mixed
+    // hotel+F&B recipients keep getting hotel Flex + F&B text via
+    // the existing path until we generalise.
+    const fnbFlexInputs: Array<{
+      branchId: string
+      branchName: string
+      latest: Record<string, unknown>
+    }> = []
     let totalRevenue = 0
     let latestMetricDate = today
 
@@ -375,6 +392,13 @@ async function handleMorningFlash(req: NextRequest) {
       } else {
         // Last entry pushed to lineSnippets is this F&B branch's text.
         fnbSnippets.push(lineSnippets[lineSnippets.length - 1])
+        // ALSO stash for the F&B Flex path — used below when this
+        // recipient has exactly one F&B branch and zero hotels.
+        fnbFlexInputs.push({
+          branchId: branch.id,
+          branchName: branch.name,
+          latest: latest as Record<string, unknown>,
+        })
       }
     }
 
@@ -586,6 +610,116 @@ async function handleMorningFlash(req: NextRequest) {
             ok = await sendLineFlexMessage(profile.line_id as string, flex.altText, flex.contents)
             channelLabel = 'flex'
           }
+        } else if (fnbFlexInputs.length === 1 && hotelFlexInputs.length === 0) {
+          // Single F&B branch, no hotels → MenuDesk Flex bubble.
+          // Mirrors the hasSingleHotel path's structure: build engine
+          // inputs from fnb_daily_metrics + fnb_daily_sales (last 30
+          // days), run the engine, build the Flex.
+          const f = fnbFlexInputs[0]
+          const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.auraseaos.com'
+
+          // Fetch the engine-ready data inline. Two queries — the
+          // hot path is single-branch so the cost is bounded.
+          const fromIso = (() => {
+            const d = new Date()
+            d.setUTCDate(d.getUTCDate() - 31)
+            return d.toISOString().slice(0, 10)
+          })()
+          const [metricsRes, salesRes] = await Promise.all([
+            supabase
+              .from('fnb_daily_metrics')
+              .select('metric_date, revenue, total_customers, cost_food, cost_nonfood')
+              .eq('branch_id', f.branchId)
+              .gte('metric_date', fromIso)
+              .order('metric_date', { ascending: true }),
+            supabase
+              .from('fnb_daily_sales')
+              .select('date, menu_item_id, units_sold, menu_items!inner(id, name, category, price_thb, cost_thb)')
+              .eq('branch_id', f.branchId)
+              .gte('date', fromIso),
+          ])
+
+          const baseInputs = toFnbRecommendationInputs(
+            (metricsRes.data || []) as Array<{
+              metric_date: string
+              revenue: number | null
+              total_customers: number | null
+              cost_food: number | null
+              cost_nonfood: number | null
+            }>,
+          )
+
+          // Reshape sales+join into the engine's FnbDailySaleRow shape.
+          interface JoinedSalesRow {
+            date: string
+            menu_item_id: string
+            units_sold: number
+            menu_items: {
+              id: string
+              name: string
+              category: string | null
+              price_thb: number
+              cost_thb: number | null
+            } | Array<{
+              id: string
+              name: string
+              category: string | null
+              price_thb: number
+              cost_thb: number | null
+            }>
+          }
+          const salesRows: FnbDailySaleRow[] = ((salesRes.data || []) as JoinedSalesRow[])
+            .map((s) => {
+              // Supabase types the joined relation as either single
+              // object or array; narrow defensively.
+              const item = Array.isArray(s.menu_items) ? s.menu_items[0] : s.menu_items
+              if (!item) return null
+              return {
+                date: s.date,
+                menuItemId: s.menu_item_id,
+                name: item.name,
+                category: item.category,
+                unitsSold: s.units_sold,
+                priceThb: item.price_thb,
+                costThb: item.cost_thb,
+              }
+            })
+            .filter((r): r is FnbDailySaleRow => r !== null)
+
+          const withSales = attachItemSales(baseInputs, salesRows)
+          const recs = generateFnbDailyRecommendations(withSales)
+            .filter((r) => r.urgency !== 'low')
+            .slice(0, 2)
+
+          // Yesterday's KPIs — from f.latest (the most recent row).
+          const yLatest = f.latest as {
+            revenue?: number | null
+            total_customers?: number | null
+            cost_food?: number | null
+            metric_date?: string
+          }
+          const yRevenue = Number(yLatest.revenue) || 0
+          const yCovers = yLatest.total_customers != null ? Number(yLatest.total_customers) : null
+          const yAvgPerCover = yCovers && yCovers > 0 ? yRevenue / yCovers : 0
+          const yFoodCost = yLatest.cost_food != null && yRevenue > 0
+            ? (Number(yLatest.cost_food) / yRevenue) * 100
+            : null
+
+          const flex = buildFnbBriefFlexMessage({
+            branchName: f.branchName,
+            yesterday: {
+              date: String(yLatest.metric_date || today),
+              revenueThb: yRevenue,
+              totalCovers: yCovers,
+              avgPerCoverThb: yAvgPerCover,
+              foodCostPct: yFoodCost,
+            },
+            topRecs: recs,
+            dashboardUrl: `${baseUrl}/menudesk`,
+          })
+
+          ok = await sendLineFlexMessage(profile.line_id as string, flex.altText, flex.contents)
+          channelLabel = 'fnb-flex'
         } else {
           const combined = lineSnippets.join('\n===================\n')
           ok = await sendLineMessage(profile.line_id as string, combined)
