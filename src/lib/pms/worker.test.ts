@@ -49,6 +49,7 @@ function makeFakeSupabase(opts: {
 function makeProvider(result: PushRateResult, name = 'mock'): PmsProvider {
   return {
     name: name as PmsProvider['name'],
+    supportsWriteBack: false,  // tests don't care about the capability flag — false is the safe default
     // No parameter — interface satisfied via TS's contravariant
     // param rules. Avoids the no-unused-vars rule.
     pushRate: async () => result,
@@ -171,6 +172,7 @@ describe('processApprovalsList — provider error handling', () => {
     const { client, updates } = makeFakeSupabase()
     const throwingProvider: PmsProvider = {
       name: 'mock',
+      supportsWriteBack: false,
       pushRate: async () => {
         throw new Error('network down')
       },
@@ -194,6 +196,7 @@ describe('processApprovalsList — provider error handling', () => {
     const summary = await processApprovalsList(client, rows, {
       providerFactory: () => ({
         name: 'mock',
+        supportsWriteBack: false,
         pushRate: async () => {
           if (call++ === 1) throw new Error('mid-batch boom')
           return { status: 'success', externalRef: 'cb-ok' }
@@ -249,6 +252,7 @@ describe('processApprovalsList — provider factory uses config row', () => {
     await processApprovalsList(client, [sampleRow], {
       providerFactory: () => ({
         name: 'mock',
+        supportsWriteBack: false,
         pushRate: async (input) => {
           seenInputs.push(input)
           return { status: 'success', externalRef: 'cb-1' }

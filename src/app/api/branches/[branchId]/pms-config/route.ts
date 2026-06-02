@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
+import { PROVIDER_CAPABILITIES } from '@/lib/pms/types'
 
 // /api/branches/[branchId]/pms-config
 //
@@ -68,7 +69,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ branchId: s
   const sb = svc as any
   const { data, error } = await sb
     .from('branch_pms_config')
-    .select('id, provider, external_property_id, is_active, created_at, updated_at')
+    .select('id, provider, external_property_id, is_active, supports_write_back, created_at, updated_at')
     .eq('branch_id', branchId)
     .order('created_at', { ascending: true })
 
@@ -122,6 +123,17 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ branchId: 
 
   const isActive = payload.is_active !== false  // default true
 
+  // Capability flag denormalised onto the row at write time. The morning
+  // brief reads this column directly so it doesn't have to instantiate
+  // a provider just to decide whether to render the live approve button
+  // (the factory would also have to load env credentials, which the
+  // morning-flash route shouldn't depend on at gating-decision time).
+  // PROVIDER_CAPABILITIES is keyed by the same ALLOWED_PROVIDERS set, so
+  // — having already validated `provider` against ALLOWED_PROVIDERS
+  // above — this lookup is guaranteed to hit.
+  const supportsWriteBack =
+    PROVIDER_CAPABILITIES[provider as AllowedProvider]?.supportsWriteBack ?? false
+
   const svc = createServiceClient()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sb = svc as any
@@ -133,10 +145,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ branchId: 
         provider,
         external_property_id: externalPropertyId,
         is_active: isActive,
+        supports_write_back: supportsWriteBack,
       },
       { onConflict: 'branch_id,provider' },
     )
-    .select('id, provider, external_property_id, is_active, created_at, updated_at')
+    .select('id, provider, external_property_id, is_active, supports_write_back, created_at, updated_at')
     .single()
 
   if (error) {
@@ -155,6 +168,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ branchId: 
       provider,
       external_property_id: externalPropertyId,
       is_active: isActive,
+      supports_write_back: supportsWriteBack,
     },
   })
 

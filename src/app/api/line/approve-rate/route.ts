@@ -16,9 +16,23 @@
 
 import { NextRequest } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
-import { hasFeature } from '@/lib/auth/plan-features'
+import { canShowLiveApproveButton } from '@/lib/ratedesk/auto-push-gating'
 
-type ResultState = 'success' | 'already' | 'expired' | 'not_found' | 'plan_invalid' | 'error'
+type ResultState =
+  | 'success'
+  | 'already'
+  | 'expired'
+  | 'not_found'
+  | 'plan_invalid'
+  | 'adapter_invalid'
+  | 'error'
+
+interface RoomRate {
+  roomType: string
+  currentRateThb: number
+  suggestedRateThb: number
+  reasonTh?: string
+}
 
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get('token')
@@ -39,7 +53,7 @@ export async function GET(req: NextRequest) {
   // and the code is immune to the embedding quirk.
   const { data: approval, error: fetchErr } = await supabase
     .from('rate_approvals')
-    .select('id, branch_id, room_type, date, suggested_rate_thb, approved_at, expires_at')
+    .select('id, branch_id, room_type, date, suggested_rate_thb, room_rates, approved_at, expires_at')
     .eq('token', token)
     .maybeSingle()
 
@@ -75,19 +89,73 @@ export async function GET(req: NextRequest) {
     plan = (orgRow?.plan as string | null) ?? null
   }
 
-  // Re-check plan at click time. If the org downgraded between brief and
-  // tap, the button is dead. We use the same hasFeature() the dashboard
-  // and morning-flash route use — one source of truth.
-  if (!hasFeature(plan, 'auto_push')) {
+  // Re-check BOTH gates at click time (plan + adapter supports_write_back).
+  // The button is dead if either side regressed between brief and tap:
+  //   - Pro → Growth downgrade nukes the plan side.
+  //   - Owner disabled or removed the PMS config nukes the adapter side.
+  // canShowLiveApproveButton is the shared source of truth used at
+  // brief-build time and here — keeps the two ends of the flow honest.
+  const { data: pmsConfigRow } = await supabase
+    .from('branch_pms_config')
+    .select('is_active, supports_write_back')
+    .eq('branch_id', approval.branch_id)
+    .eq('is_active', true)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const pmsConfig = (pmsConfigRow ?? null) as
+    | { is_active: boolean; supports_write_back: boolean }
+    | null
+
+  const liveOk = canShowLiveApproveButton({ plan, pmsConfig })
+  if (!liveOk) {
+    // Disambiguate the two failure modes so the owner knows which side
+    // changed. If the plan no longer pays for auto_push it's a billing
+    // question; if the adapter went away it's a settings/PMS question.
+    const planSideOk = (() => {
+      // Inline check mirrors lib/auth/plan-features.hasFeature, kept
+      // local to avoid re-importing it solely for this branch.
+      const proLike = plan === 'pro' || plan === 'enterprise'
+      return proLike
+    })()
+    if (!planSideOk) {
+      return htmlResponse(
+        'plan_invalid',
+        'แพ็คเกจของคุณไม่รองรับ Auto Push',
+        'Your plan no longer supports Auto Push',
+        403,
+      )
+    }
     return htmlResponse(
-      'plan_invalid',
-      'แพ็คเกจของคุณไม่รองรับ Auto Push',
-      'Your plan no longer supports Auto Push',
-      403,
+      'adapter_invalid',
+      'PMS ของสาขานี้ยังไม่รองรับการส่งราคากลับโดยอัตโนมัติ',
+      'This branch\'s PMS adapter no longer supports write-back',
+      409,
     )
   }
 
+  // Detect multi-room set up-front so the success/already copy is
+  // sensible. When room_rates is a non-empty array, we're approving the
+  // whole set rather than a single rate. Cast defensively — Postgres
+  // jsonb can come back as null, an empty array, or a malformed shape.
+  const roomRates: RoomRate[] = Array.isArray(approval.room_rates)
+    ? (approval.room_rates as RoomRate[]).filter(
+        (r) =>
+          r != null &&
+          typeof r === 'object' &&
+          typeof (r as RoomRate).roomType === 'string' &&
+          typeof (r as RoomRate).suggestedRateThb === 'number',
+      )
+    : []
+  const isMultiSet = roomRates.length > 0
+
   const rateStr = approval.suggested_rate_thb.toLocaleString('th-TH')
+  const setSummaryTh = isMultiSet
+    ? `อัปเดตราคา ${roomRates.length} ประเภทห้องสำหรับ ${branchName}`
+    : `อนุมัติราคา ฿${rateStr} สำหรับ ${branchName}`
+  const setSummaryEn = isMultiSet
+    ? `Updated rates for ${roomRates.length} room types at ${branchName}`
+    : `Rate ฿${rateStr} for ${branchName}`
 
   // Already approved → idempotent success. We return 200, not 409, so
   // the user sees a green checkmark on re-tap (they don't care that we
@@ -95,8 +163,8 @@ export async function GET(req: NextRequest) {
   if (approval.approved_at) {
     return htmlResponse(
       'already',
-      `อนุมัติราคา ฿${rateStr} สำหรับ ${branchName} แล้ว`,
-      `Rate ฿${rateStr} for ${branchName} already approved`,
+      `${setSummaryTh} แล้ว`,
+      `${setSummaryEn} already approved`,
       200,
     )
   }
@@ -131,6 +199,11 @@ export async function GET(req: NextRequest) {
   // The token's randomness is the integrity guarantee; the row's id is
   // the trace. organization_id stays NULL only if branch join failed;
   // in the normal case it's set so the org's audit view scopes correctly.
+  //
+  // For multi-room: room_rates carries the whole set so /audit and the
+  // dashboard's "approval history" can show "approved 4 room types"
+  // with the actual rates. Phase R3's PMS worker reads room_rates and
+  // iterates pushes per-room.
   await supabase.from('audit_log').insert({
     actor_user_id: null,
     organization_id: organizationId,
@@ -143,14 +216,15 @@ export async function GET(req: NextRequest) {
       date: approval.date,
       room_type: approval.room_type,
       rate_thb: approval.suggested_rate_thb,
+      room_rates: isMultiSet ? roomRates : null,
       approved_via: 'line',
     },
   })
 
   return htmlResponse(
     'success',
-    `✓ อนุมัติราคา ฿${rateStr} สำหรับ ${branchName} แล้ว`,
-    `✓ Rate ฿${rateStr} approved for ${branchName}`,
+    `✓ ${setSummaryTh} แล้ว`,
+    `✓ ${setSummaryEn} approved`,
     200,
   )
 }
@@ -171,12 +245,13 @@ function htmlResponse(state: ResultState, messageTh: string, messageEn: string, 
 // English owners both feel addressed.
 function buildResultHTML(state: ResultState, messageTh: string, messageEn: string): string {
   const palette: Record<ResultState, { icon: string; bg: string; color: string; border: string }> = {
-    success:       { icon: '✓', bg: '#F0FDF4', color: '#166534', border: '#BBF7D0' },
-    already:       { icon: '✓', bg: '#F0FDF4', color: '#166534', border: '#BBF7D0' },
-    expired:       { icon: '⏱', bg: '#FFFBEB', color: '#92400E', border: '#FCD34D' },
-    not_found:     { icon: '✕', bg: '#FEF2F2', color: '#991B1B', border: '#FECACA' },
-    plan_invalid:  { icon: '⚠', bg: '#FEF2F2', color: '#991B1B', border: '#FECACA' },
-    error:         { icon: '✕', bg: '#FEF2F2', color: '#991B1B', border: '#FECACA' },
+    success:          { icon: '✓', bg: '#F0FDF4', color: '#166534', border: '#BBF7D0' },
+    already:          { icon: '✓', bg: '#F0FDF4', color: '#166534', border: '#BBF7D0' },
+    expired:          { icon: '⏱', bg: '#FFFBEB', color: '#92400E', border: '#FCD34D' },
+    not_found:        { icon: '✕', bg: '#FEF2F2', color: '#991B1B', border: '#FECACA' },
+    plan_invalid:     { icon: '⚠', bg: '#FEF2F2', color: '#991B1B', border: '#FECACA' },
+    adapter_invalid:  { icon: '⚠', bg: '#FFFBEB', color: '#92400E', border: '#FCD34D' },
+    error:            { icon: '✕', bg: '#FEF2F2', color: '#991B1B', border: '#FECACA' },
   }
   const cfg = palette[state]
 

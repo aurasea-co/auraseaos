@@ -21,31 +21,46 @@ export interface HotelBriefData {
   topRecs: HotelRecommendation[]
   /** Output of forecastTomorrow(); pass null when not enough data. */
   forecast: { expectedOccupancy: number; suggestedRateThb: number } | null
-  /** Auto Push approval — Pro plan only. Both fields are passed by the
-   *  caller (route knows the base URL, locale, and rate); the builder
-   *  just renders. Pass either both or neither — the button only shows
-   *  when both are non-empty AND the property is single-room-type (a
-   *  single suggested rate is meaningless for a 4-room-type hotel
-   *  where each type prices differently). */
+  /** Auto Push approval button. Caller is responsible for the gating
+   *  decision — the builder just renders whatever it gets. Pass this ONLY
+   *  when BOTH gates pass: the branch is on a plan with auto_push AND a
+   *  connected PMS adapter advertises supports_write_back=true. Crystal
+   *  Resort today (Pro plan, no live PMS) gets no approveButton — only
+   *  the dashboardUrl link. See lib/ratedesk/auto-push-gating.ts.
+   *
+   *  For multi-room hotels the button represents "approve the WHOLE set
+   *  of per-room-type recommendations for today" — the underlying
+   *  rate_approvals row carries room_rates jsonb and the approve-rate
+   *  endpoint applies them all. The label text should reflect that
+   *  (e.g. "✓ อนุมัติทั้งหมด" not a single ฿X). */
   approveButton?: {
     /** Full URL the LINE in-app browser will GET (token already in qs). */
     url: string
     /** Locale-aware label. LINE caps at 20 chars — caller is responsible
-     *  for picking a short form like "✓ อนุมัติราคาคืนนี้" when the
-     *  rate string would overflow. */
+     *  for picking a short form like "✓ อนุมัติทั้งหมด" when a single
+     *  rate string would overflow or be meaningless. */
     label: string
   }
-  /** Deep-link URL to /ratedesk on the dashboard. When provided, the
-   *  bubble footer renders an "Open RateDesk" button (always — single
-   *  AND multi-room properties). This is the only on-bubble action for
-   *  multi-room hotels since the approve button is hidden there. */
+  /** Deep-link URL to /ratedesk on the dashboard. ALWAYS render the
+   *  "Review in RateDesk" button when this is provided — it's the
+   *  always-available secondary action and the only on-bubble action
+   *  when the live approve button is gated off. */
   dashboardUrl?: string
+  /** Optional subtle note in the footer when the plan includes Auto Push
+   *  but no write-back-capable PMS is connected yet. Shows up as a small
+   *  muted line under the buttons telling the owner that the live
+   *  approve button will activate once a supported PMS is wired in.
+   *  Caller decides when this should appear — see
+   *  lib/ratedesk/auto-push-gating.ts shouldShowAwaitingPmsNote(). */
+  awaitingPmsNote?: string
   /** True when yesterday's row carried 2+ distinct room types in its
-   *  breakdown jsonb. Controls (1) whether the approve button renders
-   *  and (2) which "tonight" panel the bubble body shows. Caller is
-   *  responsible for setting this; the builder doesn't re-derive it
-   *  from topRecs because some single-room-type hotels also have
-   *  per-room recs (degenerate case). */
+   *  breakdown jsonb. Controls which "tonight" panel the bubble body
+   *  shows (rooms-to-adjust panel vs blended forecast strip). Does NOT
+   *  gate the approve button anymore — the button is always controlled
+   *  by the caller via approveButton presence (which encodes the
+   *  plan+adapter gate). Caller is responsible for setting this; the
+   *  builder doesn't re-derive it from topRecs because some single-room
+   *  hotels also have per-room recs (degenerate case). */
   hasMultipleRoomTypes?: boolean
 }
 
@@ -296,11 +311,12 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
         paddingAll: '12px',
         spacing: 'sm',
         contents: [
-          // Pro-tier approve button. Suppressed for multi-room hotels
-          // because a single ฿X label can't represent 4 different room-
-          // type rates — the per-room recs are in the body panel above,
-          // and approval has to be a per-room action on the dashboard.
-          ...(data.approveButton && !data.hasMultipleRoomTypes
+          // Auto Push approve button. Renders whenever the caller
+          // supplies one — the caller is the gate (plan + adapter
+          // supports_write_back). Multi-room hotels CAN show this; the
+          // underlying approval row carries the full per-room rate set
+          // (room_rates jsonb) and one tap approves the whole set.
+          ...(data.approveButton
             ? [
                 {
                   type: 'button',
@@ -315,12 +331,12 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
                 } as Record<string, unknown>,
               ]
             : []),
-          // "Open RateDesk" deep-link — always present when caller
-          // provides a URL. Single-room hotels get it below the approve
-          // button (low-friction "see more"); multi-room hotels get it
-          // INSTEAD of the approve button (the only action). Secondary
-          // style keeps it visually subordinate to the approve button
-          // when both render.
+          // "Review in RateDesk" deep-link — always present when caller
+          // provides a URL. Sits below the approve button when both
+          // render, replaces it when the live button is gated off
+          // (e.g. plan paid for Auto Push but no live PMS adapter).
+          // Secondary style keeps it visually subordinate to the
+          // approve button when both render.
           ...(data.dashboardUrl
             ? [
                 {
@@ -329,9 +345,26 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
                   height: 'sm',
                   action: {
                     type: 'uri',
-                    label: 'ดู RateDesk',
+                    label: 'ดูใน RateDesk',
                     uri: data.dashboardUrl,
                   },
+                } as Record<string, unknown>,
+              ]
+            : []),
+          // Awaiting-PMS hint: rendered when the plan paid for Auto
+          // Push but no write-back adapter is connected (e.g. Crystal
+          // Resort waiting on Cloudbeds in Phase R3). Subtle muted line
+          // under the buttons so the owner understands why no live
+          // approve action is offered.
+          ...(data.awaitingPmsNote
+            ? [
+                {
+                  type: 'text',
+                  text: data.awaitingPmsNote,
+                  size: 'xxs',
+                  color: COLORS.textMuted,
+                  wrap: true,
+                  align: 'center',
                 } as Record<string, unknown>,
               ]
             : []),

@@ -22,7 +22,10 @@ import {
   toRecommendationInputs,
   attachCompetitorRates,
 } from '@/lib/recommendations/hotel/engine'
-import { hasFeature } from '@/lib/auth/plan-features'
+import {
+  canShowLiveApproveButton,
+  shouldShowAwaitingPmsNote,
+} from '@/lib/ratedesk/auto-push-gating'
 
 async function handleMorningFlash(req: NextRequest) {
   // Allowed callers:
@@ -518,30 +521,73 @@ async function handleMorningFlash(req: NextRequest) {
           )
           const hasMultipleRoomTypes = distinctRoomTypes.size > 1
 
-          // Auto Push approval (Pro plan only, single-room only). We
-          // create a single-use token bound to this branch + today +
-          // the suggested rate, and pass the click-through URL to the
-          // Flex builder. Re-running the job for the same branch/date
-          // first deletes any unexpired, unapproved token so we don't
-          // multiply rows.
+          // Auto Push gating — TWO independent conditions, both required:
+          //   (a) plan includes auto_push (read from organizations.plan)
+          //   (b) connected adapter advertises supports_write_back=true
+          // Source-of-truth helpers live in lib/ratedesk/auto-push-gating.
+          // Brief RICHNESS is NOT gated by tier — every hotel/accommodation
+          // branch with data gets the full Flex bubble (KPIs + per-type
+          // headline moves). The Flex card is platform value; only the
+          // live approve BUTTON is the paid add-on.
           //
-          // Multi-room properties skip token creation entirely — a
-          // single ฿X rate doesn't represent 4 different room types,
-          // so the button is hidden in the Flex render. Owner goes to
-          // /ratedesk (dashboard deep-link button) to act per-room.
-          //
-          // Re-checks the plan at delivery time (rather than caching at
-          // org fetch) so a Pro→Growth downgrade between fetch and send
-          // doesn't leak the button. The /api/line/approve-rate endpoint
-          // re-checks again at click time for the same reason.
-          let approveButton: { url: string; label: string } | undefined
-          if (forecast && hasFeature(org.plan, 'auto_push') && !hasMultipleRoomTypes) {
-            const rateThb = Math.round(forecast.suggestedRateThb)
-            const adminSb = createServiceClient()
+          // We fetch the most recently-updated active PMS config row for
+          // the branch (a branch can theoretically have multiple — e.g.
+          // a half-migrated swap — but treat the most-recent-active as
+          // canonical). When none exists, pmsConfig stays null and the
+          // gate falls back to "no live button".
+          const { data: pmsConfigRow } = await supabase
+            .from('branch_pms_config')
+            .select('is_active, supports_write_back')
+            .eq('branch_id', f.branchId)
+            .eq('is_active', true)
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
 
-            // Drop any previous unapproved token for this branch+date so
-            // re-running the cron doesn't leave orphaned rows. Approved
-            // rows are preserved (audit trail).
+          const pmsConfig = pmsConfigRow as
+            | { is_active: boolean; supports_write_back: boolean }
+            | null
+
+          const canShowApprove = canShowLiveApproveButton({
+            plan: org.plan as string | null,
+            pmsConfig,
+          })
+          const showAwaitingPmsNote = shouldShowAwaitingPmsNote({
+            plan: org.plan as string | null,
+            pmsConfig,
+          })
+
+          // Build the per-room rate set from topRecs. Filter to actual
+          // rate-move recommendations (increase/decrease only — holds and
+          // alerts don't carry a suggestedRateThb). Multi-room hotels
+          // carry this whole array on the approval row; single-room
+          // hotels leave it null and use the legacy single-rate columns.
+          const perRoomRateSet = recs
+            .filter(
+              (r) =>
+                Boolean(r.roomType) &&
+                (r.type === 'rate_increase' || r.type === 'rate_decrease') &&
+                typeof r.currentRateThb === 'number' &&
+                typeof r.suggestedRateThb === 'number',
+            )
+            .map((r) => ({
+              roomType: r.roomType as string,
+              currentRateThb: r.currentRateThb as number,
+              suggestedRateThb: r.suggestedRateThb as number,
+              reasonTh: r.messageTh,
+            }))
+
+          // Create the approval row only when the live button will
+          // render. Skipping the insert saves a wasted DB round-trip
+          // every morning for the (currently) most common case: Pro
+          // plan, no live adapter yet.
+          //
+          // Re-running the cron same-branch+same-day first deletes any
+          // unexpired, unapproved row so we don't multiply tokens.
+          // Approved rows are preserved (audit trail).
+          let approveButton: { url: string; label: string } | undefined
+          if (canShowApprove) {
+            const adminSb = createServiceClient()
             await adminSb
               .from('rate_approvals')
               .delete()
@@ -549,37 +595,83 @@ async function handleMorningFlash(req: NextRequest) {
               .eq('date', today)
               .is('approved_at', null)
 
-            const { data: created, error: createErr } = await adminSb
-              .from('rate_approvals')
-              .insert({
-                branch_id: f.branchId,
-                room_type: 'all',
-                date: today,
-                suggested_rate_thb: rateThb,
-                push_status: 'pending',
-                expires_at: new Date(Date.now() + 20 * 60 * 60 * 1000).toISOString(),
-              })
-              .select('token')
-              .single()
+            // Determine the row's payload. For multi-room: room_type =
+            // 'multi', suggested_rate_thb carries the highest-impact
+            // headline rate (so legacy worker iteration still has a
+            // sensible single number until R3 teaches it to expand
+            // room_rates), and room_rates holds the full set.
+            //
+            // For single-room: legacy shape — room_type='all',
+            // suggested_rate_thb from the forecast, room_rates NULL.
+            const isMulti = hasMultipleRoomTypes && perRoomRateSet.length > 0
 
-            if (createErr) {
-              console.error(`[morning-flash] failed to create approval token for branch=${f.branchId}:`, createErr)
-            } else if (created?.token) {
-              // LINE caps button labels at 20 chars. "✓ อนุมัติราคา ฿" is
-              // already 14 visual chars; "฿9,999" pushes us to 20 exactly,
-              // anything bigger overflows. Fall back to a generic label
-              // when the rate would push us over.
-              const rateStr = rateThb.toLocaleString('th-TH')
-              const fullLabel = `✓ อนุมัติราคา ฿${rateStr}`
-              const label = fullLabel.length <= 20 ? fullLabel : '✓ อนุมัติราคาคืนนี้'
-              approveButton = {
-                url: `${baseUrl}/api/line/approve-rate?token=${created.token}`,
-                label,
+            // Pick the headline rec: the rate-move with the largest
+            // absolute delta. Falls back to forecast.suggestedRateThb
+            // for the single-room path; if neither is available we
+            // skip token creation entirely (nothing to approve).
+            const headlineThb = isMulti
+              ? Math.round(
+                  perRoomRateSet
+                    .slice()
+                    .sort(
+                      (a, b) =>
+                        Math.abs(b.suggestedRateThb - b.currentRateThb) -
+                        Math.abs(a.suggestedRateThb - a.currentRateThb),
+                    )[0]?.suggestedRateThb ?? 0,
+                )
+              : forecast
+                  ? Math.round(forecast.suggestedRateThb)
+                  : null
+
+            if (headlineThb != null) {
+              const { data: created, error: createErr } = await adminSb
+                .from('rate_approvals')
+                .insert({
+                  branch_id: f.branchId,
+                  room_type: isMulti ? 'multi' : 'all',
+                  date: today,
+                  suggested_rate_thb: headlineThb,
+                  room_rates: isMulti ? perRoomRateSet : null,
+                  push_status: 'pending',
+                  expires_at: new Date(Date.now() + 20 * 60 * 60 * 1000).toISOString(),
+                })
+                .select('token')
+                .single()
+
+              if (createErr) {
+                console.error(`[morning-flash] failed to create approval token for branch=${f.branchId}:`, createErr)
+              } else if (created?.token) {
+                // Label rules:
+                //   - Multi-room: a single ฿X is misleading (4 rates).
+                //     Use "✓ อนุมัติทั้งหมด (Nห้อง)" — N = count of
+                //     per-room recommendations. LINE caps labels at 20
+                //     chars; the Thai+digits form fits comfortably.
+                //   - Single-room: legacy form "✓ อนุมัติราคา ฿X" if
+                //     it fits, else "✓ อนุมัติราคาคืนนี้".
+                let label: string
+                if (isMulti) {
+                  label = `✓ อนุมัติทั้งหมด (${perRoomRateSet.length})`
+                } else {
+                  const rateStr = headlineThb.toLocaleString('th-TH')
+                  const fullLabel = `✓ อนุมัติราคา ฿${rateStr}`
+                  label = fullLabel.length <= 20 ? fullLabel : '✓ อนุมัติราคาคืนนี้'
+                }
+                approveButton = {
+                  url: `${baseUrl}/api/line/approve-rate?token=${created.token}`,
+                  label,
+                }
               }
             }
           }
 
           const dashboardUrl = `${baseUrl}/ratedesk`
+
+          // Awaiting-PMS hint shown when (a) is true but (b) is false.
+          // Caller decides via shouldShowAwaitingPmsNote(); the brief
+          // builder just renders the string we pass.
+          const awaitingPmsNote = showAwaitingPmsNote
+            ? 'Auto Push จะเริ่มทำงานเมื่อเชื่อมต่อ PMS ที่รองรับ'
+            : undefined
 
           const flex = buildHotelBriefFlexMessage({
             branchName: f.branchName,
@@ -594,21 +686,42 @@ async function handleMorningFlash(req: NextRequest) {
             forecast,
             approveButton,
             dashboardUrl,
+            awaitingPmsNote,
             hasMultipleRoomTypes,
           })
 
           // Mixed-vertical recipients: Flex(hotel) + text(F&B) in one
           // push. Single-hotel recipients: just the Flex bubble.
-          if (fnbSnippets.length > 0) {
-            const combinedFnb = fnbSnippets.join('\n===================\n')
-            ok = await sendLineMixed(profile.line_id as string, [
-              { type: 'flex', altText: flex.altText, contents: flex.contents },
-              { type: 'text', text: combinedFnb },
-            ])
-            channelLabel = 'flex+text'
-          } else {
-            ok = await sendLineFlexMessage(profile.line_id as string, flex.altText, flex.contents)
-            channelLabel = 'flex'
+          //
+          // The Flex render itself is pure — it cannot throw — so the
+          // only failure mode is the LINE API rejecting the payload.
+          // When that happens we fall back to the plain-text path
+          // (buildMorningFlashLine output) so the owner still receives
+          // a brief. Plain-text is the ERROR fallback, never a tier
+          // signal.
+          let flexFailed = false
+          try {
+            if (fnbSnippets.length > 0) {
+              const combinedFnb = fnbSnippets.join('\n===================\n')
+              ok = await sendLineMixed(profile.line_id as string, [
+                { type: 'flex', altText: flex.altText, contents: flex.contents },
+                { type: 'text', text: combinedFnb },
+              ])
+              channelLabel = 'flex+text'
+            } else {
+              ok = await sendLineFlexMessage(profile.line_id as string, flex.altText, flex.contents)
+              channelLabel = 'flex'
+            }
+            if (!ok) flexFailed = true
+          } catch (err) {
+            console.error(`[morning-flash] Flex send threw for user=${setting.user_id}:`, err)
+            flexFailed = true
+          }
+          if (flexFailed) {
+            console.warn(`[morning-flash] Flex send failed for user=${setting.user_id} — falling back to plain text`)
+            const combined = lineSnippets.join('\n===================\n')
+            ok = await sendLineMessage(profile.line_id as string, combined)
+            channelLabel = 'text-fallback'
           }
         } else if (fnbFlexInputs.length === 1 && hotelFlexInputs.length === 0) {
           // Single F&B branch, no hotels → MenuDesk Flex bubble.

@@ -54,9 +54,41 @@ export interface PmsProvider {
   /** Display name for logs + dashboard. */
   readonly name: ProviderName
 
+  /** Capability flag: does this adapter actually write back to the PMS?
+   *  Read by the morning-flash brief at brief-build time AND mirrored
+   *  into branch_pms_config.supports_write_back at config-set time. The
+   *  former is the live source of truth; the latter is a denormalised
+   *  copy so the LINE brief code path doesn't have to instantiate every
+   *  provider just to ask whether the button should render.
+   *
+   *  MockProvider returns false — it logs 'skipped' on every push so
+   *  there's no point teasing the owner with a live approve button.
+   *  Future Cloudbeds/Mews/etc. implementations flip this to true once
+   *  the real API call is wired. */
+  readonly supportsWriteBack: boolean
+
   /** Push a single rate update to the PMS. Idempotent at the worker
    *  level (the worker filters on push_status='pending') but
    *  individual providers may also need idempotency keys if their
    *  API doesn't natively deduplicate. */
   pushRate(input: PushRateInput): Promise<PushRateResult>
+}
+
+/** Map of provider name → capability flags. Single source of truth for
+ *  "when an owner picks provider X in /settings, what can it do?" The
+ *  PMS config write path reads this so it can populate
+ *  branch_pms_config.supports_write_back without instantiating the
+ *  adapter (no env creds, no construction side effects).
+ *
+ *  Until a real adapter for a given provider is wired in factory.ts,
+ *  supportsWriteBack stays false here — matches what the runtime
+ *  adapter (MockProvider) would advertise. */
+export const PROVIDER_CAPABILITIES: Record<
+  Exclude<ProviderName, 'mock'>,
+  { supportsWriteBack: boolean }
+> = {
+  cloudbeds:  { supportsWriteBack: false },  // adapter deferred to Phase R3
+  mews:       { supportsWriteBack: false },
+  siteminder: { supportsWriteBack: false },
+  opera:      { supportsWriteBack: false },
 }

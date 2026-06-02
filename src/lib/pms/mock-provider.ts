@@ -14,6 +14,11 @@ import type { PmsProvider, PushRateInput, PushRateResult } from './types'
 
 export class MockProvider implements PmsProvider {
   readonly name = 'mock' as const
+  /** Mock cannot write to a real PMS — it skips every push. The morning
+   *  brief reads this (via branch_pms_config.supports_write_back) to
+   *  suppress the live approve button on branches whose adapter isn't
+   *  capable of acting on the approval. */
+  readonly supportsWriteBack = false
   private readonly reason: string
 
   constructor(reason = 'PMS integration is not yet configured for this branch.') {
