@@ -19,21 +19,11 @@ import { generateHotelRecommendation, generateFnbRecommendation } from '@/lib/no
 import {
   generateDailyRecommendations,
   forecastTomorrow,
-  toRecommendationInputs,
-  attachCompetitorRates,
-  recommendPerRoomTypeRates,
-  summarizePerRoomRates,
+  type DailyAction,
 } from '@/lib/recommendations/hotel/engine'
-import {
-  upsertBranchRateRecommendations,
-  toPerRoomTypeRate,
-  type BranchRateRecommendationRow,
-} from '@/lib/recommendations/hotel/persistence'
+import { loadPerRoomRecsForBranch, type PerBranchHotelRecs } from '@/lib/recommendations/hotel/per-branch-loader'
+import { canSeeRevenue } from '@/lib/auth/ratedesk-permissions'
 import { randomUUID } from 'crypto'
-import {
-  canShowLiveApproveButton,
-  shouldShowAwaitingPmsNote,
-} from '@/lib/ratedesk/auto-push-gating'
 
 async function handleMorningFlash(req: NextRequest) {
   // Allowed callers:
@@ -131,6 +121,14 @@ async function handleMorningFlash(req: NextRequest) {
       continue
     }
 
+    // Revenue gate: managers don't see THB totals (same rule as the
+    // dashboard, LINE brief, and exports). canSeeRevenue() is the
+    // shared source of truth — owner/superadmin true; manager/staff
+    // false. Passed to the email template so revenue cards + the
+    // portfolio total are hidden for manager recipients.
+    const recipientRole = isOwner ? 'owner' : 'manager'
+    const recipientCanSeeRevenue = canSeeRevenue(recipientRole)
+
     // Per-channel dedup. A successful row on a channel blocks that channel
     // only — LINE and email are tracked independently so a partial failure
     // (e.g. LINE succeeded, email Resend was down) can be retried for the
@@ -224,11 +222,17 @@ async function handleMorningFlash(req: NextRequest) {
     // gated Flex on lineSnippets.length === 1 which downgraded any
     // mixed-vertical owner to text — hiding the Auto Push ✓ button.
     const fnbSnippets: string[] = []
+    // Hotel branch stash. Each entry now also carries the result of
+    // loadPerRoomRecsForBranch (engine output + DB-sourced rate sheet
+    // + gating). Both the LINE single-hotel path AND the email build
+    // step read from here so neither recomputes — single source of
+    // truth for "what rates does this branch suggest today?".
     const hotelFlexInputs: Array<{
       branchId: string
       branchName: string
       latest: Record<string, unknown>
       metrics: Record<string, unknown>[]
+      hotelRecs: PerBranchHotelRecs
     }> = []
     // F&B Flex inputs — populated alongside fnbSnippets so a
     // recipient with exactly one F&B branch (no hotels) can receive
@@ -339,6 +343,34 @@ async function handleMorningFlash(req: NextRequest) {
       // latest.margin value untouched per spec ("do not touch hotel logic").
       const branchMargin = isHotel ? (latest.margin || undefined) : latestMargin
 
+      // Per-branch per-room rate sheet (single source of truth for both
+      // LINE and email). Runs the engine, persists to
+      // branch_rate_recommendations, reads back, and computes the daily
+      // action + auto-push gating. For F&B branches we skip — there's
+      // no rate sheet concept.
+      const fromIso = (() => {
+        const d = new Date()
+        d.setUTCDate(d.getUTCDate() - 31)
+        return d.toISOString().slice(0, 10)
+      })()
+      let hotelRecs: PerBranchHotelRecs | null = null
+      if (isHotel) {
+        hotelRecs = await loadPerRoomRecsForBranch(supabase, {
+          branchId: branch.id,
+          today,
+          fromIso,
+          metrics: (metrics || []) as Record<string, unknown>[],
+          plan: org.plan as string | null,
+        })
+        console.log(
+          `[morning-flash] loaded ${hotelRecs.perRoomRates.length} per-room rec(s) for branch=${branch.id}` +
+          ` canApprove=${hotelRecs.canShowApprove} awaitingPms=${hotelRecs.showAwaitingPmsNote}`,
+        )
+      }
+
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.auraseaos.com'
+      const branchDashboardUrl = isHotel ? `${baseUrl}/ratedesk` : undefined
+
       branchDataList.push({
         branchName: branch.name,
         businessDate: dateStr,
@@ -357,6 +389,20 @@ async function handleMorningFlash(req: NextRequest) {
         sales: latest.revenue,
         avgSpend,
         recommendationText: recommendation,
+        // New per-room rate sheet + action + auto-push fields for the
+        // email template. Only populated for accommodation branches.
+        // Project the engine output to the email-friendly shape (THB
+        // only — the satang fields are an implementation detail of the
+        // persistence layer).
+        perRoomRates: hotelRecs?.perRoomRates.map((r) => ({
+          roomType: r.roomType,
+          currentRateThb: r.currentRateThb,
+          suggestedRateThb: r.suggestedRateThb,
+          direction: r.direction,
+        })),
+        dailyAction: hotelRecs?.dailyAction ?? undefined,
+        showAwaitingPmsNote: hotelRecs?.showAwaitingPmsNote ?? false,
+        dashboardUrl: branchDashboardUrl,
       })
 
       totalRevenue += revenueNum
@@ -394,11 +440,18 @@ async function handleMorningFlash(req: NextRequest) {
       // We never get to the text-bundle path for mixed-vertical owners
       // any more — they receive Flex(hotel) + text(F&B) together.
       if (isHotel) {
+        // hotelRecs is guaranteed non-null here (isHotel branch ran
+        // the loader above) but TS doesn't narrow across the long
+        // intermediate block — assert defensively.
+        if (!hotelRecs) {
+          throw new Error('[morning-flash] hotelRecs missing for hotel branch — internal invariant violated')
+        }
         hotelFlexInputs.push({
           branchId: branch.id,
           branchName: branch.name,
           latest: latest as Record<string, unknown>,
           metrics: (metrics || []) as Record<string, unknown>[],
+          hotelRecs,
         })
       } else {
         // Last entry pushed to lineSnippets is this F&B branch's text.
@@ -449,184 +502,25 @@ async function handleMorningFlash(req: NextRequest) {
         if (hasSingleHotel) {
           const f = hotelFlexInputs[0]
 
-          // 31-day window — shared by the room-type breakdown fetch
-          // below AND the competitor_rates fetch further down. Computed
-          // once so the two queries are guaranteed to align (we used
-          // to inline two separate copies of this, which would drift
-          // if anyone tweaked one).
-          const fromIso = (() => {
-            const d = new Date()
-            d.setUTCDate(d.getUTCDate() - 31)
-            return d.toISOString().slice(0, 10)
-          })()
+          // Per-room rate sheet + action + gating already computed in
+          // the per-branch loop above and stashed on f.hotelRecs. Read
+          // back from there — never recompute (single source of truth
+          // shared with the email path).
+          const { perRoomRates, canShowApprove, showAwaitingPmsNote, recInputs } = f.hotelRecs
+          // dailyAction is `DailyAction | null` from the loader; the
+          // brief interface uses `?: DailyAction` so coerce null →
+          // undefined at the boundary.
+          const dailyAction: DailyAction | undefined = f.hotelRecs.dailyAction ?? undefined
 
-          // ROOM-TYPE BREAKDOWN — sourced from accommodation_daily_
-          // metrics, NOT branch_daily_metrics. branch_daily_metrics is
-          // the rolled-up KPI view (revenue, rooms_sold, rooms_available)
-          // and does NOT carry room_type_breakdown — reading it off
-          // m.room_type_breakdown in the toRecommendationInputs map
-          // below used to always return undefined, which silently made
-          // recommendPerRoomTypeRates fall back to a single blended row.
-          //
-          // The breakdown jsonb lives on accommodation_daily_metrics
-          // (migration 029) with shape:
-          //   [{ roomType, totalRooms, occupiedRooms, rateThb }, ...]
-          // — exactly what the engine expects. We pull the same 31-day
-          // window the metrics fetch used, build a Map keyed by
-          // metric_date, and merge into the engine inputs below.
-          interface BreakdownEntry {
-            roomType: string
-            totalRooms: number
-            occupiedRooms: number
-            rateThb: number
-          }
-          const { data: accomBreakdownRows } = await supabase
-            .from('accommodation_daily_metrics')
-            .select('metric_date, room_type_breakdown')
-            .eq('branch_id', f.branchId)
-            .gte('metric_date', fromIso)
-
-          // Defensive normalisation: jsonb can come back null, [], or
-          // (legacy) malformed. Drop rows whose breakdown isn't a
-          // non-empty array, and within each row drop entries that
-          // don't carry a string roomType + finite numbers. Engine
-          // (toRecommendationInputs) does its own filtering, but
-          // failing here means /sets/ of types stay consistent instead
-          // of half-bad days slipping through.
-          const breakdownByDate = new Map<string, BreakdownEntry[]>()
-          for (const row of (accomBreakdownRows ?? []) as Array<{
-            metric_date: string
-            room_type_breakdown: unknown
-          }>) {
-            const raw = row.room_type_breakdown
-            if (!Array.isArray(raw) || raw.length === 0) continue
-            const cleaned: BreakdownEntry[] = []
-            for (const b of raw as Array<Record<string, unknown>>) {
-              if (!b || typeof b !== 'object') continue
-              const roomType = typeof b.roomType === 'string' ? b.roomType : null
-              const totalRooms = Number(b.totalRooms)
-              const occupiedRooms = Number(b.occupiedRooms)
-              const rateThb = Number(b.rateThb)
-              if (
-                !roomType ||
-                !Number.isFinite(totalRooms) ||
-                !Number.isFinite(occupiedRooms) ||
-                !Number.isFinite(rateThb)
-              ) {
-                continue
-              }
-              cleaned.push({ roomType, totalRooms, occupiedRooms, rateThb })
-            }
-            if (cleaned.length > 0) {
-              breakdownByDate.set(String(row.metric_date), cleaned)
-            }
-          }
-
-          // Project the 30-day metric window into the engine's input
-          // shape and run the recommendation + forecast layers.
-          // Both are pure functions — no extra round-trips.
-          //
-          // room_type_breakdown is sourced from breakdownByDate (built
-          // from accommodation_daily_metrics above) keyed by the same
-          // metric_date as the branch_daily_metrics row. Days without
-          // a breakdown entry get null — the engine treats them as
-          // "no per-type signal for this day".
-          const baseInputs = toRecommendationInputs(
-            f.metrics.map((m) => {
-              const metricDate = String((m as { metric_date: string }).metric_date)
-              const breakdown = breakdownByDate.get(metricDate) ?? null
-              return {
-                metric_date: metricDate,
-                rooms_available: numOrNull(m.rooms_available),
-                rooms_sold: numOrNull(m.rooms_sold),
-                revenue: numOrNull(m.revenue),
-                room_type_breakdown: breakdown,
-              }
-            }),
-          )
-
-          // Fetch the competitor rates the owner logged at
-          // /settings/competitors over the same 30-day window. The
-          // undercut + overpricing signals require ≥3 days carrying
-          // competitor data before firing; without this fetch they'd
-          // never light up in the morning brief even when the owner
-          // has been logging diligently.
-          //
-          // 1.05× the metric window so a fresh entry made at 06:55
-          // BKK (just before the cron) still gets included if its
-          // captured_at is today's BKK calendar date.
-          const { data: compRows } = await supabase
-            .from('competitor_rates')
-            .select('competitor_name, rate, captured_at')
-            .eq('branch_id', f.branchId)
-            .gte('captured_at', fromIso)
-
-          const recInputs = attachCompetitorRates(
-            baseInputs,
-            (compRows || []) as Array<{ competitor_name: string; rate: number | string | null; captured_at: string }>,
-          )
-
+          // Property-level signals (weekend, undercut, low-occupancy,
+          // etc.) + forecast. These remain LINE-only — the email
+          // template doesn't render the property-level rec strip.
+          // Engine functions are pure so calling them twice is cheap;
+          // we use the engine inputs already built by the loader.
           const recs = generateDailyRecommendations(recInputs)
             .filter((r) => r.urgency !== 'low')
             .slice(0, 2)
           const forecast = forecastTomorrow(recInputs)
-          // Per-room-type rate sheet — one row per active room type
-          // including holds. Engine output is in-memory; we PERSIST it
-          // to branch_rate_recommendations below (single source of
-          // truth for the dashboard + the brief).
-          const engineRecs = recommendPerRoomTypeRates(recInputs)
-
-          // Persist the recs for today. The morning-flash job runs at
-          // 07:00 BKK; the engine targets the night the owner is about
-          // to sell, so metric_date = today (BKK) is the right anchor.
-          const persistAdmin = createServiceClient()
-          if (engineRecs.length > 0) {
-            const upsertResult = await upsertBranchRateRecommendations(
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              persistAdmin as any,
-              {
-                branchId: f.branchId,
-                metricDate: today,
-                recs: engineRecs,
-              },
-            )
-            if (upsertResult.error) {
-              console.error(
-                `[morning-flash] failed to persist branch_rate_recommendations for branch=${f.branchId}:`,
-                upsertResult.error,
-              )
-            } else {
-              console.log(
-                `[morning-flash] persisted ${upsertResult.inserted} rec(s) for branch=${f.branchId} on ${today}`,
-              )
-            }
-          }
-
-          // READ-BACK: brief renders from branch_rate_recommendations,
-          // not from the in-memory engine output. The table is the
-          // source of truth so a future hand-edit (e.g. an owner
-          // manually overriding tomorrow's Suite rate from the
-          // dashboard) is what the LINE brief reflects. Falls back to
-          // the in-memory engine output if the read fails so the brief
-          // still goes out on a transient DB hiccup.
-          let perRoomRates = engineRecs
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const persistDb = persistAdmin as any
-          const { data: persistedRows, error: persistedErr } = await persistDb
-            .from('branch_rate_recommendations')
-            .select(
-              'branch_id, metric_date, room_type, current_rate_satang, suggested_rate_satang, direction, reason_th, reason_en',
-            )
-            .eq('branch_id', f.branchId)
-            .eq('metric_date', today)
-          if (persistedErr) {
-            console.warn(
-              `[morning-flash] read-back from branch_rate_recommendations failed for branch=${f.branchId} — using in-memory engine output:`,
-              persistedErr,
-            )
-          } else if (persistedRows && persistedRows.length > 0) {
-            perRoomRates = (persistedRows as BranchRateRecommendationRow[]).map(toPerRoomTypeRate)
-          }
 
           const yRevenue = Number((f.latest as { revenue: unknown }).revenue) || 0
           const yRoomsSold = Number((f.latest as { rooms_sold: unknown }).rooms_sold) || 0
@@ -636,64 +530,13 @@ async function handleMorningFlash(req: NextRequest) {
 
           const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.auraseaos.com'
 
-          // Multi-room detection — computed up here so the approval-
-          // token block below can skip insert/delete when the button
-          // won't render (saves a wasted DB round-trip every morning).
-          //
-          // Sourced from the same breakdownByDate Map the engine reads
-          // from, keyed by the latest day's metric_date. Reading
-          // (f.latest as ...).room_type_breakdown — what this block
-          // used to do — always returned undefined because f.latest is
-          // a branch_daily_metrics row and that view doesn't expose
-          // the column. Result: hasMultipleRoomTypes was always false,
-          // and the per-type sheet + approve-set logic disagreed
-          // silently.
-          const latestMetricDate = String(
-            (f.latest as { metric_date?: unknown }).metric_date ?? '',
-          )
-          const latestBreakdown = breakdownByDate.get(latestMetricDate) ?? []
-          const distinctRoomTypes = new Set(
-            latestBreakdown
-              .map((b) => b.roomType)
-              .filter((rt): rt is string => typeof rt === 'string' && rt.length > 0),
-          )
+          // Multi-room detection — derived from the perRoomRates the
+          // loader returned (each entry has roomType set, never 'all').
+          // Used here only to label the approve button (set-size > 1 →
+          // "อนุมัติทั้งหมด (N)"); the brief's body rendering doesn't
+          // depend on it.
+          const distinctRoomTypes = new Set(perRoomRates.map((r) => r.roomType))
           const hasMultipleRoomTypes = distinctRoomTypes.size > 1
-
-          // Auto Push gating — TWO independent conditions, both required:
-          //   (a) plan includes auto_push (read from organizations.plan)
-          //   (b) connected adapter advertises supports_write_back=true
-          // Source-of-truth helpers live in lib/ratedesk/auto-push-gating.
-          // Brief RICHNESS is NOT gated by tier — every hotel/accommodation
-          // branch with data gets the full Flex bubble (KPIs + per-type
-          // headline moves). The Flex card is platform value; only the
-          // live approve BUTTON is the paid add-on.
-          //
-          // We fetch the most recently-updated active PMS config row for
-          // the branch (a branch can theoretically have multiple — e.g.
-          // a half-migrated swap — but treat the most-recent-active as
-          // canonical). When none exists, pmsConfig stays null and the
-          // gate falls back to "no live button".
-          const { data: pmsConfigRow } = await supabase
-            .from('branch_pms_config')
-            .select('is_active, supports_write_back')
-            .eq('branch_id', f.branchId)
-            .eq('is_active', true)
-            .order('updated_at', { ascending: false })
-            .limit(1)
-            .maybeSingle()
-
-          const pmsConfig = pmsConfigRow as
-            | { is_active: boolean; supports_write_back: boolean }
-            | null
-
-          const canShowApprove = canShowLiveApproveButton({
-            plan: org.plan as string | null,
-            pmsConfig,
-          })
-          const showAwaitingPmsNote = shouldShowAwaitingPmsNote({
-            plan: org.plan as string | null,
-            pmsConfig,
-          })
 
           // Per-room rate approval rows. The new model is:
           //   - ONE rate_approvals row per recommended room type
@@ -771,19 +614,12 @@ async function handleMorningFlash(req: NextRequest) {
 
           const dashboardUrl = `${baseUrl}/ratedesk`
 
-          // Awaiting-PMS hint shown when (a) is true but (b) is false.
-          // Caller decides via shouldShowAwaitingPmsNote(); the brief
-          // builder just renders the string we pass.
+          // Awaiting-PMS hint string — boolean gate already on
+          // f.hotelRecs.showAwaitingPmsNote; flatten to the localized
+          // Thai string the brief renderer expects.
           const awaitingPmsNote = showAwaitingPmsNote
             ? 'Auto Push จะเริ่มทำงานเมื่อเชื่อมต่อ PMS ที่รองรับ'
             : undefined
-
-          // "What to do today" synthesised from the final rate sheet
-          // (which is already DB-sourced via the read-back above, so
-          // a dashboard edit would change the action prompt too).
-          // Returns null only when the rate sheet itself is empty, in
-          // which case the brief omits the callout.
-          const dailyAction = summarizePerRoomRates(perRoomRates) ?? undefined
 
           const flex = buildHotelBriefFlexMessage({
             branchName: f.branchName,
@@ -993,6 +829,7 @@ async function handleMorningFlash(req: NextRequest) {
                 totalRevenue={totalRevenue}
                 entryUrl="https://auraseaos.com/entry"
                 plan={org.plan as 'starter' | 'growth' | 'pro'}
+                canSeeRevenue={recipientCanSeeRevenue}
               />
             ),
           })
@@ -1032,12 +869,6 @@ export async function POST(req: NextRequest) {
   return handleMorningFlash(req)
 }
 
-// Narrow unknown jsonb-ish values to a number-or-null for the engine
-// adapter. Empty strings, NaN, and false-y non-zero values all coerce
-// to null so toRecommendationInputs skips the day instead of treating
-// it as a real zero (which would distort occupancy averages).
-function numOrNull(v: unknown): number | null {
-  if (v == null) return null
-  const n = Number(v)
-  return Number.isFinite(n) ? n : null
-}
+// numOrNull was inlined here; now lives in the per-branch-loader
+// module since it's the only caller (the LINE branch reads from the
+// loader's stash instead of doing its own projection).
