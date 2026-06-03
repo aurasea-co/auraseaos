@@ -21,6 +21,7 @@ import {
   forecastTomorrow,
   toRecommendationInputs,
   attachCompetitorRates,
+  recommendPerRoomTypeRates,
 } from '@/lib/recommendations/hotel/engine'
 import {
   canShowLiveApproveButton,
@@ -498,6 +499,11 @@ async function handleMorningFlash(req: NextRequest) {
             .filter((r) => r.urgency !== 'low')
             .slice(0, 2)
           const forecast = forecastTomorrow(recInputs)
+          // Per-room-type rate sheet — one row per active room type
+          // including holds. The new "Today's recommended rates" block
+          // in the brief renders this; it also feeds the bulk-approval
+          // room_rates payload when the approve button is shown.
+          const perRoomRates = recommendPerRoomTypeRates(recInputs)
 
           const yRevenue = Number((f.latest as { revenue: unknown }).revenue) || 0
           const yRoomsSold = Number((f.latest as { rooms_sold: unknown }).rooms_sold) || 0
@@ -557,25 +563,18 @@ async function handleMorningFlash(req: NextRequest) {
             pmsConfig,
           })
 
-          // Build the per-room rate set from topRecs. Filter to actual
-          // rate-move recommendations (increase/decrease only — holds and
-          // alerts don't carry a suggestedRateThb). Multi-room hotels
-          // carry this whole array on the approval row; single-room
-          // hotels leave it null and use the legacy single-rate columns.
-          const perRoomRateSet = recs
-            .filter(
-              (r) =>
-                Boolean(r.roomType) &&
-                (r.type === 'rate_increase' || r.type === 'rate_decrease') &&
-                typeof r.currentRateThb === 'number' &&
-                typeof r.suggestedRateThb === 'number',
-            )
-            .map((r) => ({
-              roomType: r.roomType as string,
-              currentRateThb: r.currentRateThb as number,
-              suggestedRateThb: r.suggestedRateThb as number,
-              reasonTh: r.messageTh,
-            }))
+          // Build the per-room rate set for the rate_approvals.room_rates
+          // jsonb payload. Sourced from recommendPerRoomTypeRates() so it
+          // mirrors what the bubble displays — one entry per active room
+          // type, including holds. The PMS write-back worker (Phase R3)
+          // can skip holds (no-op pushes) by checking direction.
+          const perRoomRateSet = perRoomRates.map((r) => ({
+            roomType: r.roomType,
+            currentRateThb: r.currentRateThb,
+            suggestedRateThb: r.suggestedRateThb,
+            direction: r.direction,
+            reasonTh: r.reasonTh,
+          }))
 
           // Create the approval row only when the live button will
           // render. Skipping the insert saves a wasted DB round-trip
@@ -683,6 +682,7 @@ async function handleMorningFlash(req: NextRequest) {
               revenueThb: yRevenue,
             },
             topRecs: recs,
+            perRoomRates,
             forecast,
             approveButton,
             dashboardUrl,

@@ -4,7 +4,10 @@
 // Money is THB integers throughout (matches every other consumer in
 // this codebase; satang doesn't apply).
 
-import type { HotelRecommendation } from '@/lib/recommendations/hotel/engine'
+import type {
+  HotelRecommendation,
+  PerRoomTypeRate,
+} from '@/lib/recommendations/hotel/engine'
 
 export interface HotelBriefData {
   branchName: string
@@ -17,9 +20,24 @@ export interface HotelBriefData {
     revparThb: number
     revenueThb: number
   }
-  /** Filtered to high/medium urgency. Builder slices to max 2. */
+  /** Filtered to high/medium urgency. Builder slices the property-level
+   *  entries (no roomType) to max 2 and renders them under the per-
+   *  room rate block (weekend signal, undercut, etc). Per-room rate
+   *  entries from this array are NOT rendered separately — they're
+   *  subsumed by perRoomRates which carries the full sheet. */
   topRecs: HotelRecommendation[]
-  /** Output of forecastTomorrow(); pass null when not enough data. */
+  /** Output of recommendPerRoomTypeRates() — one row per active room
+   *  type, including holds. Used to render the "แนะนำราคาวันนี้ /
+   *  Today's recommended rates" block. Builder caps to the top 6 by
+   *  impact and tags the rest as "+M more in RateDesk" so the bubble
+   *  height stays bounded on properties with many room types. Pass an
+   *  empty array (or omit) for legacy single-room properties that
+   *  have no breakdown — the brief then falls back to the blended
+   *  forecast strip. */
+  perRoomRates?: PerRoomTypeRate[]
+  /** Output of forecastTomorrow(); used ONLY when perRoomRates is
+   *  empty/absent (legacy single-room properties with no breakdown
+   *  jsonb). Pass null when not enough data. */
   forecast: { expectedOccupancy: number; suggestedRateThb: number } | null
   /** Auto Push approval button. Caller is responsible for the gating
    *  decision — the builder just renders whatever it gets. Pass this ONLY
@@ -54,13 +72,11 @@ export interface HotelBriefData {
    *  lib/ratedesk/auto-push-gating.ts shouldShowAwaitingPmsNote(). */
   awaitingPmsNote?: string
   /** True when yesterday's row carried 2+ distinct room types in its
-   *  breakdown jsonb. Controls which "tonight" panel the bubble body
-   *  shows (rooms-to-adjust panel vs blended forecast strip). Does NOT
-   *  gate the approve button anymore — the button is always controlled
-   *  by the caller via approveButton presence (which encodes the
-   *  plan+adapter gate). Caller is responsible for setting this; the
-   *  builder doesn't re-derive it from topRecs because some single-room
-   *  hotels also have per-room recs (degenerate case). */
+   *  breakdown jsonb. No longer read by the brief renderer — the per-
+   *  room-rates block is driven entirely by perRoomRates.length. Kept
+   *  on the interface for backward compatibility with the morning-flash
+   *  route, which still uses it as the source of truth for the approval
+   *  row's room_type ('multi' vs 'all') and approve button label. */
   hasMultipleRoomTypes?: boolean
 }
 
@@ -143,32 +159,58 @@ function recRow(rec: HotelRecommendation): Record<string, unknown> {
   }
 }
 
-// Compact per-room rate signal row used inside the "Rooms to adjust"
-// panel for multi-room hotels. Render shape:
-//   ↑ Suite: ฿1,920 → ฿2,112    (green arrow, rate_increase)
-//   ↓ Deluxe2: ฿950 → ฿893      (red arrow, rate_decrease)
-// Skips the urgency emoji — the arrow + colour already encode the
-// direction, and bubble width is tight on multi-room rows.
-function perRoomLine(rec: HotelRecommendation): Record<string, unknown> {
-  const isIncrease = rec.type === 'rate_increase'
-  const arrow = isIncrease ? '↑' : '↓'
-  const arrowColor = isIncrease ? COLORS.success : COLORS.warn
-  const current = rec.currentRateThb ?? 0
-  const suggested = rec.suggestedRateThb ?? 0
-  const label = `${rec.roomType ?? '—'}: ฿${fmtThb(current)} → ฿${fmtThb(suggested)}`
+// Per-room-type rate row for the "Today's recommended rates" block.
+//
+// Layout — two cells per row:
+//   [ roomType label ]                    [ ฿current → ฿suggested ]    (right-aligned)
+//   [ Deluxe2        ]                    [ ฿950 → ฿1,045          ]
+//   [ Suite          ]                    [ ฿1,200 · คงเดิม         ]
+//
+// Direction encoding via the right cell:
+//   - increase: ฿current → ฿suggested  in green
+//   - decrease: ฿current → ฿suggested  in red
+//   - hold:     ฿current · คงเดิม       in muted grey (no arrow — the
+//                                       "considered, no change" signal
+//                                       is the marker itself)
+function perRoomRateRow(row: PerRoomTypeRate): Record<string, unknown> {
+  const currentStr = `฿${fmtThb(row.currentRateThb)}`
+  const suggestedStr = `฿${fmtThb(row.suggestedRateThb)}`
+  let rightText: string
+  let rightColor: string
+  if (row.direction === 'hold') {
+    rightText = `${currentStr} · คงเดิม`
+    rightColor = COLORS.textMuted
+  } else if (row.direction === 'increase') {
+    rightText = `${currentStr} → ${suggestedStr}`
+    rightColor = COLORS.success
+  } else {
+    rightText = `${currentStr} → ${suggestedStr}`
+    rightColor = COLORS.warn
+  }
   return {
     type: 'box',
     layout: 'horizontal',
     margin: 'xs',
     contents: [
-      { type: 'text', text: arrow, size: 'xs', flex: 0, weight: 'bold', color: arrowColor },
+      // Room type label — flex 1 so it grows to fill, fontWeight bold
+      // to make scanning the column easy at 7am on a phone.
       {
         type: 'text',
-        text: label,
+        text: row.roomType,
         size: 'xs',
         color: COLORS.text,
+        weight: 'bold',
         flex: 1,
-        margin: 'sm',
+      },
+      // Rate cell — flex 0 (sized to content) + align:end so it pins
+      // to the right edge. Color-coded by direction.
+      {
+        type: 'text',
+        text: rightText,
+        size: 'xs',
+        color: rightColor,
+        align: 'end',
+        flex: 0,
       },
     ],
   }
@@ -195,35 +237,70 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
     },
   ]
 
-  // Split recs into per-room and property-level. Multi-room hotels
-  // get a dedicated "rooms to adjust" panel showing per-room rate
-  // signals (Suite ฿1,920 → ฿2,112); single-room hotels keep the
-  // blended forecast strip from the original layout.
-  const perRoomRecs = data.topRecs.filter((r) => Boolean(r.roomType) && (r.type === 'rate_increase' || r.type === 'rate_decrease'))
-  const propertyRecs = data.topRecs.filter((r) => !r.roomType)
+  // "แนะนำราคาวันนี้ / Today's recommended rates" block — replaces
+  // the old single-blended-rate forecast strip. Renders one row per
+  // active room type (currentRate → suggestedRate, or "คงเดิม" for
+  // holds). Caps to MAX_PER_ROOM_ROWS in the bubble; sorting picks the
+  // top N by impact so the owner sees the most actionable moves first,
+  // then we restore the engine's natural (input) order for display so
+  // the room list reads consistently with /settings.
+  //
+  // The blended forecast strip stays as a fallback for properties
+  // whose breakdown jsonb is empty (legacy single-room imports that
+  // never went through the per-type entry form).
+  const perRoomRates = data.perRoomRates ?? []
+  const MAX_PER_ROOM_ROWS = 6
+  let renderedRates: PerRoomTypeRate[] = perRoomRates
+  let overflowCount = 0
+  if (perRoomRates.length > MAX_PER_ROOM_ROWS) {
+    // Pick the highest-impact rows; preserve their original order in
+    // the breakdown when rendering so the columns stack predictably.
+    const byImpact = perRoomRates
+      .map((r, i) => ({ r, i }))
+      .sort((a, b) => {
+        if (b.r.impactThb !== a.r.impactThb) return b.r.impactThb - a.r.impactThb
+        return a.i - b.i
+      })
+      .slice(0, MAX_PER_ROOM_ROWS)
+      .sort((a, b) => a.i - b.i)
+    renderedRates = byImpact.map((x) => x.r)
+    overflowCount = perRoomRates.length - MAX_PER_ROOM_ROWS
+  }
 
-  if (data.hasMultipleRoomTypes && perRoomRecs.length > 0) {
-    // "Rooms to adjust" panel — per-room rate signals, max 3 to keep
-    // the bubble height bounded.
+  if (renderedRates.length > 0) {
+    const blockContents: Array<Record<string, unknown>> = [
+      {
+        type: 'text',
+        text: 'แนะนำราคาวันนี้ · Today\'s recommended rates',
+        size: 'xs',
+        weight: 'bold',
+        color: COLORS.forecastFg,
+        wrap: true,
+      },
+      ...renderedRates.map((row) => perRoomRateRow(row)),
+    ]
+    if (overflowCount > 0) {
+      blockContents.push({
+        type: 'text',
+        text: `+${overflowCount} ห้องอื่นใน RateDesk · +${overflowCount} more in RateDesk`,
+        size: 'xxs',
+        color: COLORS.textMuted,
+        wrap: true,
+        margin: 'sm',
+      })
+    }
     bodyContents.push({
       type: 'box',
       layout: 'vertical',
       backgroundColor: COLORS.forecastBg,
       cornerRadius: '6px',
       paddingAll: '10px',
-      contents: [
-        {
-          type: 'text',
-          text: 'ห้องที่ควรปรับราคา',
-          size: 'xs',
-          weight: 'bold',
-          color: COLORS.forecastFg,
-        },
-        ...perRoomRecs.slice(0, 3).map((rec) => perRoomLine(rec)),
-      ],
+      contents: blockContents,
     })
-  } else if (data.forecast && !data.hasMultipleRoomTypes) {
-    // Single-room / no-breakdown path — keep the blended forecast strip.
+  } else if (data.forecast) {
+    // Legacy single-room fallback — no breakdown jsonb at all. The
+    // blended forecast strip is the right shape here because there's
+    // only one rate to suggest.
     const forecastOcc = Math.round(data.forecast.expectedOccupancy * 100)
     const suggested = `฿${fmtThb(data.forecast.suggestedRateThb)}`
     bodyContents.push({
@@ -243,29 +320,13 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
         },
       ],
     })
-  } else if (data.hasMultipleRoomTypes) {
-    // Multi-room property but no per-room rec fired — every room sits
-    // comfortably in the hold band. Tell the owner so the silence
-    // doesn't read as "engine isn't working".
-    bodyContents.push({
-      type: 'box',
-      layout: 'vertical',
-      backgroundColor: '#F0FDF4',
-      cornerRadius: '6px',
-      paddingAll: '10px',
-      contents: [
-        {
-          type: 'text',
-          text: 'ราคาทุกประเภทห้องเหมาะสม',
-          size: 'xs',
-          color: COLORS.success,
-        },
-      ],
-    })
   }
 
-  // Up to 2 property-level recs (weekend signal, undercut, etc.).
-  // Per-room recs already rendered inside the panel above.
+  // Property-level recs (weekend signal, undercut, etc.) render below
+  // the rate block. Per-room rate moves from topRecs are dropped —
+  // the perRoomRates block above already displays them, and double-
+  // rendering wastes precious bubble height.
+  const propertyRecs = data.topRecs.filter((r) => !r.roomType)
   for (const rec of propertyRecs.slice(0, 2)) {
     bodyContents.push(recRow(rec))
   }

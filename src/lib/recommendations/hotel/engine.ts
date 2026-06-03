@@ -303,6 +303,137 @@ export function detectWeekendOpportunity(days: RecommendationInput[]): HotelReco
   }]
 }
 
+// Per-room-type rate recommendation, one row per active room type.
+// Distinct from `suggestRatesPerRoomType` (which only emits
+// increase/decrease signals into the property-level recommendation
+// stream): this output always lists EVERY active room type, including
+// holds, because the morning brief now displays the full rate sheet
+// rather than a single blended number.
+//
+// Shape:
+//   - currentRateThb: rack rate captured on the latest day
+//   - suggestedRateThb: engine's tomorrow rate; equals currentRateThb
+//                       when direction = 'hold'
+//   - direction: 'increase' | 'hold' | 'decrease'
+//   - reasonTh/reasonEn: short, scannable Thai/English copy
+//   - impactThb: |suggested − current|; used by the brief builder
+//                to pick the top N when capping for bubble overflow
+//                (Crystal Resort: 4 types → all 4 fit; an 8-type
+//                property gets the 6 biggest moves + "+2 more")
+export interface PerRoomTypeRate {
+  roomType: string
+  currentRateThb: number
+  suggestedRateThb: number
+  direction: 'increase' | 'hold' | 'decrease'
+  reasonTh: string
+  reasonEn: string
+  impactThb: number
+}
+
+export function recommendPerRoomTypeRates(
+  days: RecommendationInput[],
+): PerRoomTypeRate[] {
+  if (days.length === 0) return []
+  const latest = pickLatest(days)
+  const types = latest.roomTypeBreakdown ?? []
+  if (types.length === 0) return []
+
+  // 3-day window mirrors the property-level engine. We don't gate on
+  // a hard "≥3 days" quorum like suggestRates() because for the per-
+  // type output a 'hold' is still useful information when data is
+  // thin — we just tag the reason copy accordingly.
+  const recent = days.slice(-3)
+
+  const rows: PerRoomTypeRate[] = []
+  for (const rt of types) {
+    const currentRate = Math.round(rt.rateThb)
+    // Skip types whose rack rate isn't captured — we can't render a
+    // sensible "฿X → ฿Y" line without a baseline. These are usually
+    // import errors that the dashboard surfaces separately.
+    if (currentRate <= 0) continue
+
+    // Per-type occupancy over the recent window. Days where the type
+    // has no row (e.g. mid-week when only Standard was booked) don't
+    // contribute — we don't want a sparse type to read 0% just because
+    // its rows are missing.
+    const occs: number[] = []
+    for (const d of recent) {
+      const row = (d.roomTypeBreakdown ?? []).find((r) => r.roomType === rt.roomType)
+      if (!row || row.totalRooms <= 0) continue
+      occs.push(row.occupiedRooms / row.totalRooms)
+    }
+
+    if (occs.length === 0) {
+      // No occupancy data for this type yet — hold at current with a
+      // reason copy that calls out the data gap so the owner knows
+      // why no move is being suggested.
+      rows.push({
+        roomType: rt.roomType,
+        currentRateThb: currentRate,
+        suggestedRateThb: currentRate,
+        direction: 'hold',
+        reasonTh: 'ข้อมูลยังไม่พอ — คงราคาไว้ก่อน',
+        reasonEn: 'Not enough data yet — hold current rate',
+        impactThb: 0,
+      })
+      continue
+    }
+
+    const avgOcc = occs.reduce((s, v) => s + v, 0) / occs.length
+    const occPct = Math.round(avgOcc * 100)
+
+    if (avgOcc > 0.85) {
+      // High-demand band — same 10% lift the property-level engine
+      // uses, applied to this type's own rack rate.
+      const lift = Math.round(currentRate * 0.10)
+      const suggested = currentRate + lift
+      rows.push({
+        roomType: rt.roomType,
+        currentRateThb: currentRate,
+        suggestedRateThb: suggested,
+        direction: 'increase',
+        reasonTh: `Occupancy ${occPct}% สูง — แนะนำขึ้น`,
+        reasonEn: `${occPct}% occupancy — suggest raise`,
+        impactThb: Math.abs(suggested - currentRate),
+      })
+    } else if (avgOcc < 0.35) {
+      // Low-demand band. Slightly tighter than the 40% threshold the
+      // blended path uses — a single bad night in a sparse type can
+      // drag a 3-day avg under 40% even when demand is healthy on the
+      // other two days. 35% keeps the decrease signal high-quality.
+      const drop = Math.round(currentRate * 0.06)
+      const suggested = Math.max(0, currentRate - drop)
+      rows.push({
+        roomType: rt.roomType,
+        currentRateThb: currentRate,
+        suggestedRateThb: suggested,
+        direction: 'decrease',
+        reasonTh: `Occupancy ${occPct}% ต่ำ — พิจารณาลด`,
+        reasonEn: `${occPct}% occupancy — consider lower`,
+        impactThb: Math.abs(suggested - currentRate),
+      })
+    } else {
+      // Comfortable middle band — explicit hold so the owner sees the
+      // type was considered. impactThb = 0 means this row sorts last
+      // when the brief caps to top N by impact.
+      rows.push({
+        roomType: rt.roomType,
+        currentRateThb: currentRate,
+        suggestedRateThb: currentRate,
+        direction: 'hold',
+        reasonTh: `Occupancy ${occPct}% — ราคาเหมาะสม`,
+        reasonEn: `${occPct}% occupancy — current rate is appropriate`,
+        impactThb: 0,
+      })
+    }
+  }
+  // Preserve breakdown input order (matches the order the owner sees
+  // on the dashboard / settings rooms page). Brief builder is free to
+  // sort by impact for the cap decision, but the natural order is what
+  // we hand back so non-capped renders read consistently.
+  return rows
+}
+
 export function forecastTomorrow(
   days: RecommendationInput[],
 ): { expectedOccupancy: number; suggestedRateThb: number } | null {

@@ -1,6 +1,22 @@
 import { describe, it, expect } from 'vitest'
 import { buildHotelBriefFlexMessage, type HotelBriefData } from './hotel-brief'
-import type { HotelRecommendation } from '@/lib/recommendations/hotel/engine'
+import type {
+  HotelRecommendation,
+  PerRoomTypeRate,
+} from '@/lib/recommendations/hotel/engine'
+
+function makePerRoomRate(partial: Partial<PerRoomTypeRate> = {}): PerRoomTypeRate {
+  return {
+    roomType: 'Deluxe',
+    currentRateThb: 1000,
+    suggestedRateThb: 1100,
+    direction: 'increase',
+    reasonTh: 'Occupancy 88% สูง — แนะนำขึ้น',
+    reasonEn: '88% occupancy — suggest raise',
+    impactThb: 100,
+    ...partial,
+  }
+}
 
 const BASE: HotelBriefData = {
   branchName: 'Crystal Resort',
@@ -82,7 +98,10 @@ describe('buildHotelBriefFlexMessage', () => {
     expect(texts).not.toContain('คืนนี้คาด')
   })
 
-  it('renders the forecast strip with expected occupancy + suggested rate when present', () => {
+  it('renders the legacy blended forecast strip as fallback when no perRoomRates is passed', () => {
+    // No breakdown jsonb (legacy single-room property without per-type
+    // entry) → perRoomRates absent, forecast present → blended strip
+    // is the right shape.
     const env = buildHotelBriefFlexMessage({
       ...BASE,
       forecast: { expectedOccupancy: 0.78, suggestedRateThb: 912 },
@@ -91,6 +110,22 @@ describe('buildHotelBriefFlexMessage', () => {
     expect(texts).toContain('คืนนี้คาด')
     expect(texts).toContain('Occupancy 78%')
     expect(texts).toContain('฿912')
+  })
+
+  it('prefers the per-room rate block over the blended forecast strip when perRoomRates is non-empty', () => {
+    // Even if forecast IS passed, perRoomRates wins — we don't want
+    // a multi-room property to also show a meaningless blended ฿X.
+    const env = buildHotelBriefFlexMessage({
+      ...BASE,
+      forecast: { expectedOccupancy: 0.78, suggestedRateThb: 912 },
+      perRoomRates: [
+        makePerRoomRate({ roomType: 'Suite', currentRateThb: 1200, suggestedRateThb: 1320, impactThb: 120 }),
+      ],
+    })
+    const texts = allText(env.contents).join(' ')
+    expect(texts).not.toContain('คืนนี้คาด')
+    expect(texts).toContain('แนะนำราคาวันนี้')
+    expect(texts).toContain('Suite')
   })
 
   it('renders up to 2 recommendations even when more are passed', () => {
@@ -158,42 +193,135 @@ describe('buildHotelBriefFlexMessage', () => {
     expect(c.footer).toBeDefined()
   })
 
-  // ── Multi-room bubble: rooms-to-adjust panel + approve-all button ─────
+  // ── "Today's recommended rates" block — one row per room type ─────────
 
-  it('renders per-room rate signals in the rooms-to-adjust panel for multi-room hotels', () => {
+  it('renders the bilingual block title above the rate rows', () => {
     const env = buildHotelBriefFlexMessage({
       ...BASE,
-      hasMultipleRoomTypes: true,
-      topRecs: [
-        makeRec({
+      perRoomRates: [
+        makePerRoomRate({ roomType: 'Deluxe2', currentRateThb: 950, suggestedRateThb: 1045 }),
+      ],
+    })
+    const texts = allText(env.contents).join(' ')
+    expect(texts).toContain('แนะนำราคาวันนี้')
+    expect(texts).toContain('Today')  // "Today's recommended rates"
+    expect(texts).toContain('recommended rates')
+  })
+
+  it('renders all 4 Crystal Resort room types each with their own current → suggested rate', () => {
+    const env = buildHotelBriefFlexMessage({
+      ...BASE,
+      perRoomRates: [
+        makePerRoomRate({
+          roomType: 'Deluxe2',
+          currentRateThb: 950,
+          suggestedRateThb: 1045,
+          direction: 'increase',
+          impactThb: 95,
+        }),
+        makePerRoomRate({
+          roomType: 'Deluxe5',
+          currentRateThb: 790,
+          suggestedRateThb: 790,
+          direction: 'hold',
+          impactThb: 0,
+        }),
+        makePerRoomRate({
+          roomType: 'Deluxe6',
+          currentRateThb: 850,
+          suggestedRateThb: 799,
+          direction: 'decrease',
+          impactThb: 51,
+        }),
+        makePerRoomRate({
           roomType: 'Suite',
           currentRateThb: 1200,
-          suggestedRateThb: 1080,
-          type: 'rate_decrease',
-        }),
-        makeRec({
-          roomType: 'Deluxe5',
-          currentRateThb: 950,
-          suggestedRateThb: 998,
-          type: 'rate_increase',
+          suggestedRateThb: 1320,
+          direction: 'increase',
+          impactThb: 120,
         }),
       ],
     })
     const texts = allText(env.contents).join(' ')
-    expect(texts).toContain('ห้องที่ควรปรับราคา')
-    expect(texts).toContain('Suite: ฿1,200 → ฿1,080')
-    expect(texts).toContain('Deluxe5: ฿950 → ฿998')
-    // Single blended forecast strip must NOT appear when per-room is shown.
+    // Each room type renders.
+    expect(texts).toContain('Deluxe2')
+    expect(texts).toContain('Deluxe5')
+    expect(texts).toContain('Deluxe6')
+    expect(texts).toContain('Suite')
+    // Each carries its own rate transition (increase + decrease cases).
+    expect(texts).toContain('฿950 → ฿1,045')
+    expect(texts).toContain('฿850 → ฿799')
+    expect(texts).toContain('฿1,200 → ฿1,320')
+    // Hold case shows "คงเดิม" instead of an arrow.
+    expect(texts).toContain('฿790 · คงเดิม')
+    // No single blended ฿X anywhere.
     expect(texts).not.toContain('คืนนี้คาด')
   })
+
+  it('shows "คงเดิม" marker for hold rows with no rate transition arrow', () => {
+    const env = buildHotelBriefFlexMessage({
+      ...BASE,
+      perRoomRates: [
+        makePerRoomRate({
+          roomType: 'Standard',
+          currentRateThb: 800,
+          suggestedRateThb: 800,
+          direction: 'hold',
+          impactThb: 0,
+        }),
+      ],
+    })
+    const texts = allText(env.contents).join(' ')
+    expect(texts).toContain('฿800 · คงเดิม')
+    expect(texts).not.toContain('฿800 → ฿800')
+  })
+
+  it('caps to top 6 by impact and renders "+M more in RateDesk" when many room types', () => {
+    // 8 room types — 6 fit in the bubble, 2 overflow.
+    const perRoomRates: PerRoomTypeRate[] = [
+      makePerRoomRate({ roomType: 'TypeA', currentRateThb: 1000, suggestedRateThb: 1000, direction: 'hold',  impactThb: 0 }),
+      makePerRoomRate({ roomType: 'TypeB', currentRateThb: 1000, suggestedRateThb: 1100, direction: 'increase', impactThb: 100 }),
+      makePerRoomRate({ roomType: 'TypeC', currentRateThb: 1000, suggestedRateThb: 1300, direction: 'increase', impactThb: 300 }),
+      makePerRoomRate({ roomType: 'TypeD', currentRateThb: 1000, suggestedRateThb: 1000, direction: 'hold',  impactThb: 0 }),
+      makePerRoomRate({ roomType: 'TypeE', currentRateThb: 1000, suggestedRateThb: 1200, direction: 'increase', impactThb: 200 }),
+      makePerRoomRate({ roomType: 'TypeF', currentRateThb: 1000, suggestedRateThb:  800, direction: 'decrease', impactThb: 200 }),
+      makePerRoomRate({ roomType: 'TypeG', currentRateThb: 1000, suggestedRateThb:  900, direction: 'decrease', impactThb: 100 }),
+      makePerRoomRate({ roomType: 'TypeH', currentRateThb: 1000, suggestedRateThb: 1000, direction: 'hold',  impactThb: 0 }),
+    ]
+    const env = buildHotelBriefFlexMessage({ ...BASE, perRoomRates })
+    const texts = allText(env.contents).join(' ')
+    // Top by impact: TypeC (300), TypeE (200), TypeF (200), TypeB (100), TypeG (100), and one of the holds.
+    // The "+2 more" tail covers the rest.
+    expect(texts).toContain('+2 ห้องอื่นใน RateDesk')
+    expect(texts).toContain('+2 more in RateDesk')
+    // High-impact ones must appear.
+    expect(texts).toContain('TypeC')
+    expect(texts).toContain('TypeE')
+    expect(texts).toContain('TypeF')
+  })
+
+  it('renders all rooms without the overflow tail when count ≤ 6', () => {
+    const perRoomRates: PerRoomTypeRate[] = [
+      makePerRoomRate({ roomType: 'A', currentRateThb: 1000, suggestedRateThb: 1100 }),
+      makePerRoomRate({ roomType: 'B', currentRateThb: 1000, suggestedRateThb: 1100 }),
+      makePerRoomRate({ roomType: 'C', currentRateThb: 1000, suggestedRateThb: 1100 }),
+      makePerRoomRate({ roomType: 'D', currentRateThb: 1000, suggestedRateThb: 1100 }),
+    ]
+    const env = buildHotelBriefFlexMessage({ ...BASE, perRoomRates })
+    const texts = allText(env.contents).join(' ')
+    expect(texts).not.toContain('more in RateDesk')
+    expect(texts).not.toContain('ห้องอื่นใน RateDesk')
+  })
+
+  // ── Footer button gating unchanged ─────────────────────────────────────
 
   it('shows the approve button on MULTI-ROOM bubbles when caller passes one (set-wide approval)', () => {
     const env = buildHotelBriefFlexMessage({
       ...BASE,
       hasMultipleRoomTypes: true,
-      topRecs: [
-        makeRec({ roomType: 'Suite', currentRateThb: 1200, suggestedRateThb: 1080, type: 'rate_decrease' }),
-        makeRec({ roomType: 'Deluxe5', currentRateThb: 950, suggestedRateThb: 998, type: 'rate_increase' }),
+      perRoomRates: [
+        makePerRoomRate({ roomType: 'Suite', currentRateThb: 1200, suggestedRateThb: 1080, direction: 'decrease', impactThb: 120 }),
+        makePerRoomRate({ roomType: 'Deluxe5', currentRateThb: 950, suggestedRateThb: 998, direction: 'increase', impactThb: 48 }),
       ],
       approveButton: {
         url: 'https://example.test/api/line/approve-rate?token=multi-token-123',
@@ -214,31 +342,37 @@ describe('buildHotelBriefFlexMessage', () => {
 
   // ── Crystal Resort case: rich Flex, but no live approve button ─────────
 
-  it('renders rich Flex (KPIs + per-room moves) WITHOUT approve button when plan-paid but no live PMS', () => {
-    // Crystal Resort: Pro plan (could approve), no Cloudbeds connected
-    // → no approveButton, dashboardUrl present, awaitingPmsNote present.
+  it('Crystal Resort: 4 rate rows + review link + awaiting-PMS note, no live approve', () => {
     const env = buildHotelBriefFlexMessage({
       ...BASE,
       hasMultipleRoomTypes: true,
-      topRecs: [
-        makeRec({ roomType: 'Suite', currentRateThb: 1200, suggestedRateThb: 1080, type: 'rate_decrease' }),
+      perRoomRates: [
+        makePerRoomRate({ roomType: 'Deluxe2', currentRateThb: 950, suggestedRateThb: 1045, direction: 'increase', impactThb: 95 }),
+        makePerRoomRate({ roomType: 'Deluxe5', currentRateThb: 790, suggestedRateThb: 790, direction: 'hold', impactThb: 0 }),
+        makePerRoomRate({ roomType: 'Deluxe6', currentRateThb: 850, suggestedRateThb: 850, direction: 'hold', impactThb: 0 }),
+        makePerRoomRate({ roomType: 'Suite', currentRateThb: 1200, suggestedRateThb: 1320, direction: 'increase', impactThb: 120 }),
       ],
       dashboardUrl: 'https://example.test/ratedesk',
       awaitingPmsNote: 'Auto Push จะเริ่มทำงานเมื่อเชื่อมต่อ PMS',
     })
     const texts = allText(env.contents).join(' ')
-    // Body still rich.
-    expect(texts).toContain('Occupancy')
-    expect(texts).toContain('Suite: ฿1,200 → ฿1,080')
-    // Footer carries the review-only path.
+    // All 4 types render.
+    expect(texts).toContain('Deluxe2')
+    expect(texts).toContain('Deluxe5')
+    expect(texts).toContain('Deluxe6')
+    expect(texts).toContain('Suite')
+    // Block title.
+    expect(texts).toContain('แนะนำราคาวันนี้')
+    // Footer: review-only path.
     const footer = (env.contents as { footer: { contents: Array<Record<string, unknown>> } }).footer
     const buttonActions = footer.contents
       .filter((c) => c.type === 'button')
       .map((c) => (c.action as { label: string }))
     expect(buttonActions.length).toBe(1)
     expect(buttonActions[0].label).toBe('ดูใน RateDesk')
-    // Awaiting note rendered.
     expect(texts).toContain('Auto Push จะเริ่มทำงานเมื่อเชื่อมต่อ PMS')
+    // No blended single ฿X anywhere.
+    expect(texts).not.toContain('คืนนี้คาด')
   })
 
   it('omits awaiting-PMS note when not provided', () => {
@@ -248,15 +382,5 @@ describe('buildHotelBriefFlexMessage', () => {
     })
     const texts = allText(env.contents).join(' ')
     expect(texts).not.toContain('Auto Push จะเริ่มทำงานเมื่อเชื่อมต่อ PMS')
-  })
-
-  it('shows "all room rates are appropriate" when multi-room but no per-room rec fired', () => {
-    const env = buildHotelBriefFlexMessage({
-      ...BASE,
-      hasMultipleRoomTypes: true,
-      topRecs: [],  // no per-room recs
-    })
-    const texts = allText(env.contents).join(' ')
-    expect(texts).toContain('ราคาทุกประเภทห้องเหมาะสม')
   })
 })
