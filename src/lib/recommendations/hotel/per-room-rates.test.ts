@@ -200,6 +200,84 @@ describe('recommendPerRoomTypeRates — every active room type produces a row', 
     expect(recommendPerRoomTypeRates([])).toEqual([])
   })
 
+  // ── Satang fields (migration 037 / 038 requirements) ─────────────────
+
+  it('every emitted row carries integer satang fields = THB × 100', () => {
+    const days = makeWindow([
+      {
+        date: '2026-05-29',
+        types: [
+          { roomType: 'Suite',  totalRooms: 2, occupiedRooms: 2, rateThb: 1200 },  // 100% → increase
+          { roomType: 'Deluxe', totalRooms: 4, occupiedRooms: 2, rateThb: 950 },   // 50% → hold
+        ],
+      },
+    ])
+    const out = recommendPerRoomTypeRates(days)
+    for (const r of out) {
+      expect(Number.isInteger(r.currentRateSatang)).toBe(true)
+      expect(Number.isInteger(r.suggestedRateSatang)).toBe(true)
+      expect(r.currentRateSatang).toBeGreaterThanOrEqual(0)
+      expect(r.suggestedRateSatang).toBeGreaterThanOrEqual(0)
+      expect(r.currentRateSatang).toBe(r.currentRateThb * 100)
+      expect(r.suggestedRateSatang).toBe(r.suggestedRateThb * 100)
+    }
+  })
+
+  it('never emits roomType="all" — per-room only', () => {
+    // Even if the input somehow carried a literal 'all' label (it
+    // shouldn't), the engine would just emit it back as-is — but the
+    // breakdown shapes the engine accepts from the route never use
+    // 'all'. This test asserts the contract on a normal Crystal Resort
+    // shape.
+    const days = makeWindow([
+      {
+        date: '2026-05-29',
+        types: [
+          { roomType: 'Deluxe2', totalRooms: 4, occupiedRooms: 2, rateThb: 950 },
+          { roomType: 'Suite',   totalRooms: 2, occupiedRooms: 1, rateThb: 1200 },
+        ],
+      },
+    ])
+    const out = recommendPerRoomTypeRates(days)
+    expect(out.length).toBeGreaterThan(0)
+    for (const r of out) {
+      expect(r.roomType).not.toBe('all')
+      expect(r.roomType.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('Crystal Resort 4-type output: satang integers, no blended row', () => {
+    const days = makeWindow([
+      {
+        date: '2026-05-29',
+        types: [
+          { roomType: 'Deluxe2', totalRooms: 4, occupiedRooms: 4, rateThb: 950 },   // 100% → increase
+          { roomType: 'Deluxe5', totalRooms: 4, occupiedRooms: 2, rateThb: 790 },   // 50% → hold
+          { roomType: 'Deluxe6', totalRooms: 4, occupiedRooms: 1, rateThb: 850 },   // 25% → decrease
+          { roomType: 'Suite',   totalRooms: 2, occupiedRooms: 2, rateThb: 1200 },  // 100% → increase
+        ],
+      },
+      {
+        date: '2026-05-28',
+        types: [
+          { roomType: 'Deluxe2', totalRooms: 4, occupiedRooms: 4, rateThb: 950 },
+          { roomType: 'Deluxe5', totalRooms: 4, occupiedRooms: 2, rateThb: 790 },
+          { roomType: 'Deluxe6', totalRooms: 4, occupiedRooms: 1, rateThb: 850 },
+          { roomType: 'Suite',   totalRooms: 2, occupiedRooms: 2, rateThb: 1200 },
+        ],
+      },
+    ])
+    const out = recommendPerRoomTypeRates(days)
+    expect(out.length).toBe(4)
+    expect(out.every((r) => r.roomType !== 'all')).toBe(true)
+    expect(out.every((r) => Number.isInteger(r.currentRateSatang))).toBe(true)
+    expect(out.every((r) => Number.isInteger(r.suggestedRateSatang))).toBe(true)
+    // Suite suggested = 1200 + 120 = 1320 THB → 132000 satang
+    const suite = out.find((r) => r.roomType === 'Suite')!
+    expect(suite.suggestedRateSatang).toBe(132000)
+    expect(suite.direction).toBe('increase')
+  })
+
   it('impactThb is the absolute delta — sortable by magnitude', () => {
     const days = makeWindow([
       {

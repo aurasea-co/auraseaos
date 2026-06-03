@@ -28,9 +28,15 @@ async function handle(req: NextRequest) {
   // Fetch pending rows: approved by owner but not yet pushed.
   // Note: .not('approved_at', 'is', null) is the supabase-js way to
   // say "approved_at IS NOT NULL"; .is would invert the meaning.
+  //
+  // Pulls BOTH rate columns during the satang phaseout: the worker
+  // prefers suggested_rate_satang, falls back to suggested_rate_thb
+  // for legacy rows (pre-migration-038). The shape adapter below
+  // projects to PendingApprovalRow.rateSatang so the worker doesn't
+  // have to know about the dual columns.
   const { data: rows, error: fetchErr } = await supabase
     .from('rate_approvals')
-    .select('id, branch_id, date, room_type, suggested_rate_thb')
+    .select('id, branch_id, date, room_type, suggested_rate_satang, suggested_rate_thb')
     .eq('push_status', 'pending')
     .not('approved_at', 'is', null)
     .order('approved_at', { ascending: true })
@@ -41,7 +47,23 @@ async function handle(req: NextRequest) {
     return NextResponse.json({ error: 'fetch_failed', detail: fetchErr.message }, { status: 500 })
   }
 
-  const pending = (rows ?? []) as PendingApprovalRow[]
+  interface RawRow {
+    id: string
+    branch_id: string
+    date: string
+    room_type: string
+    suggested_rate_satang: number | null
+    suggested_rate_thb: number | null
+  }
+  const pending: PendingApprovalRow[] = ((rows ?? []) as RawRow[]).map((r) => ({
+    id: r.id,
+    branch_id: r.branch_id,
+    date: r.date,
+    room_type: r.room_type,
+    suggested_rate_satang:
+      r.suggested_rate_satang ??
+      (r.suggested_rate_thb != null ? r.suggested_rate_thb * 100 : 0),
+  }))
 
   if (pending.length === 0) {
     console.log('[push-approved-rates] no pending approvals — nothing to push')

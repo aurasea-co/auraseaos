@@ -26,12 +26,17 @@ export interface PushRateInput {
   /** Date the new rate applies to (YYYY-MM-DD, Bangkok wall time). */
   date: string
 
-  /** Room type the rate applies to. 'all' = property-wide override. */
+  /** Room type the rate applies to. With the per-room-type flow
+   *  this is always the actual type ('Suite', 'Deluxe2', etc.).
+   *  Legacy 'all' values from pre-038 rows are still possible until
+   *  those rows expire (~20h TTL). */
   roomType: string
 
-  /** Rate in THB (integer). Providers that want decimal or satang
-   *  convert internally — the worker passes THB through. */
-  rateThb: number
+  /** Rate in **satang** (bigint, 1 THB = 100 satang). The worker
+   *  passes satang through verbatim; providers convert to whatever
+   *  unit their API wants (Cloudbeds takes THB, so the adapter
+   *  divides by 100 at the boundary). */
+  rateSatang: number
 }
 
 export interface PushRateResult {

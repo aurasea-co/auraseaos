@@ -24,6 +24,12 @@ import {
   recommendPerRoomTypeRates,
 } from '@/lib/recommendations/hotel/engine'
 import {
+  upsertBranchRateRecommendations,
+  toPerRoomTypeRate,
+  type BranchRateRecommendationRow,
+} from '@/lib/recommendations/hotel/persistence'
+import { randomUUID } from 'crypto'
+import {
   canShowLiveApproveButton,
   shouldShowAwaitingPmsNote,
 } from '@/lib/ratedesk/auto-push-gating'
@@ -500,10 +506,62 @@ async function handleMorningFlash(req: NextRequest) {
             .slice(0, 2)
           const forecast = forecastTomorrow(recInputs)
           // Per-room-type rate sheet — one row per active room type
-          // including holds. The new "Today's recommended rates" block
-          // in the brief renders this; it also feeds the bulk-approval
-          // room_rates payload when the approve button is shown.
-          const perRoomRates = recommendPerRoomTypeRates(recInputs)
+          // including holds. Engine output is in-memory; we PERSIST it
+          // to branch_rate_recommendations below (single source of
+          // truth for the dashboard + the brief).
+          const engineRecs = recommendPerRoomTypeRates(recInputs)
+
+          // Persist the recs for today. The morning-flash job runs at
+          // 07:00 BKK; the engine targets the night the owner is about
+          // to sell, so metric_date = today (BKK) is the right anchor.
+          const persistAdmin = createServiceClient()
+          if (engineRecs.length > 0) {
+            const upsertResult = await upsertBranchRateRecommendations(
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              persistAdmin as any,
+              {
+                branchId: f.branchId,
+                metricDate: today,
+                recs: engineRecs,
+              },
+            )
+            if (upsertResult.error) {
+              console.error(
+                `[morning-flash] failed to persist branch_rate_recommendations for branch=${f.branchId}:`,
+                upsertResult.error,
+              )
+            } else {
+              console.log(
+                `[morning-flash] persisted ${upsertResult.inserted} rec(s) for branch=${f.branchId} on ${today}`,
+              )
+            }
+          }
+
+          // READ-BACK: brief renders from branch_rate_recommendations,
+          // not from the in-memory engine output. The table is the
+          // source of truth so a future hand-edit (e.g. an owner
+          // manually overriding tomorrow's Suite rate from the
+          // dashboard) is what the LINE brief reflects. Falls back to
+          // the in-memory engine output if the read fails so the brief
+          // still goes out on a transient DB hiccup.
+          let perRoomRates = engineRecs
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const persistDb = persistAdmin as any
+          const { data: persistedRows, error: persistedErr } = await persistDb
+            .from('branch_rate_recommendations')
+            .select(
+              'branch_id, metric_date, room_type, current_rate_satang, suggested_rate_satang, direction, reason_th, reason_en',
+            )
+            .eq('branch_id', f.branchId)
+            .eq('metric_date', today)
+          if (persistedErr) {
+            console.warn(
+              `[morning-flash] read-back from branch_rate_recommendations failed for branch=${f.branchId} — using in-memory engine output:`,
+              persistedErr,
+            )
+          } else if (persistedRows && persistedRows.length > 0) {
+            perRoomRates = (persistedRows as BranchRateRecommendationRow[]).map(toPerRoomTypeRate)
+          }
 
           const yRevenue = Number((f.latest as { revenue: unknown }).revenue) || 0
           const yRoomsSold = Number((f.latest as { rooms_sold: unknown }).rooms_sold) || 0
@@ -563,30 +621,26 @@ async function handleMorningFlash(req: NextRequest) {
             pmsConfig,
           })
 
-          // Build the per-room rate set for the rate_approvals.room_rates
-          // jsonb payload. Sourced from recommendPerRoomTypeRates() so it
-          // mirrors what the bubble displays — one entry per active room
-          // type, including holds. The PMS write-back worker (Phase R3)
-          // can skip holds (no-op pushes) by checking direction.
-          const perRoomRateSet = perRoomRates.map((r) => ({
-            roomType: r.roomType,
-            currentRateThb: r.currentRateThb,
-            suggestedRateThb: r.suggestedRateThb,
-            direction: r.direction,
-            reasonTh: r.reasonTh,
-          }))
-
-          // Create the approval row only when the live button will
-          // render. Skipping the insert saves a wasted DB round-trip
-          // every morning for the (currently) most common case: Pro
-          // plan, no live adapter yet.
+          // Per-room rate approval rows. The new model is:
+          //   - ONE rate_approvals row per recommended room type
+          //   - room_type = the actual type (never 'all' or 'multi')
+          //   - All rows in the set share ONE token so the LINE tap
+          //     looks up and approves the whole set atomically
+          //   - suggested_rate_satang is the canonical field;
+          //     suggested_rate_thb is filled as a back-compat shadow
+          //     for the cron worker (which we update separately)
           //
-          // Re-running the cron same-branch+same-day first deletes any
-          // unexpired, unapproved row so we don't multiply tokens.
-          // Approved rows are preserved (audit trail).
+          // The token is generated client-side via crypto.randomUUID()
+          // so we can stamp the SAME value across every insert in the
+          // set (Postgres' default would generate a fresh uuid per
+          // row, defeating the shared-token design).
           let approveButton: { url: string; label: string } | undefined
-          if (canShowApprove) {
+          if (canShowApprove && perRoomRates.length > 0) {
             const adminSb = createServiceClient()
+
+            // Clear any prior unapproved set for this branch+date so
+            // re-running the cron same-day doesn't accumulate tokens.
+            // Approved rows stay (audit trail).
             await adminSb
               .from('rate_approvals')
               .delete()
@@ -594,71 +648,49 @@ async function handleMorningFlash(req: NextRequest) {
               .eq('date', today)
               .is('approved_at', null)
 
-            // Determine the row's payload. For multi-room: room_type =
-            // 'multi', suggested_rate_thb carries the highest-impact
-            // headline rate (so legacy worker iteration still has a
-            // sensible single number until R3 teaches it to expand
-            // room_rates), and room_rates holds the full set.
-            //
-            // For single-room: legacy shape — room_type='all',
-            // suggested_rate_thb from the forecast, room_rates NULL.
-            const isMulti = hasMultipleRoomTypes && perRoomRateSet.length > 0
+            const sharedToken = randomUUID()
+            const expiresAtIso = new Date(Date.now() + 20 * 60 * 60 * 1000).toISOString()
+            const approvalRows = perRoomRates.map((r) => ({
+              branch_id: f.branchId,
+              token: sharedToken,
+              room_type: r.roomType,
+              date: today,
+              // Both columns populated during the satang phaseout:
+              // satang is the canonical field; thb stays for legacy
+              // readers (push-approved-rates cron) until they migrate.
+              suggested_rate_satang: r.suggestedRateSatang,
+              suggested_rate_thb: r.suggestedRateThb,
+              push_status: 'pending',
+              expires_at: expiresAtIso,
+            }))
 
-            // Pick the headline rec: the rate-move with the largest
-            // absolute delta. Falls back to forecast.suggestedRateThb
-            // for the single-room path; if neither is available we
-            // skip token creation entirely (nothing to approve).
-            const headlineThb = isMulti
-              ? Math.round(
-                  perRoomRateSet
-                    .slice()
-                    .sort(
-                      (a, b) =>
-                        Math.abs(b.suggestedRateThb - b.currentRateThb) -
-                        Math.abs(a.suggestedRateThb - a.currentRateThb),
-                    )[0]?.suggestedRateThb ?? 0,
-                )
-              : forecast
-                  ? Math.round(forecast.suggestedRateThb)
-                  : null
+            const { error: createErr } = await adminSb
+              .from('rate_approvals')
+              .insert(approvalRows)
 
-            if (headlineThb != null) {
-              const { data: created, error: createErr } = await adminSb
-                .from('rate_approvals')
-                .insert({
-                  branch_id: f.branchId,
-                  room_type: isMulti ? 'multi' : 'all',
-                  date: today,
-                  suggested_rate_thb: headlineThb,
-                  room_rates: isMulti ? perRoomRateSet : null,
-                  push_status: 'pending',
-                  expires_at: new Date(Date.now() + 20 * 60 * 60 * 1000).toISOString(),
-                })
-                .select('token')
-                .single()
-
-              if (createErr) {
-                console.error(`[morning-flash] failed to create approval token for branch=${f.branchId}:`, createErr)
-              } else if (created?.token) {
-                // Label rules:
-                //   - Multi-room: a single ฿X is misleading (4 rates).
-                //     Use "✓ อนุมัติทั้งหมด (Nห้อง)" — N = count of
-                //     per-room recommendations. LINE caps labels at 20
-                //     chars; the Thai+digits form fits comfortably.
-                //   - Single-room: legacy form "✓ อนุมัติราคา ฿X" if
-                //     it fits, else "✓ อนุมัติราคาคืนนี้".
-                let label: string
-                if (isMulti) {
-                  label = `✓ อนุมัติทั้งหมด (${perRoomRateSet.length})`
-                } else {
-                  const rateStr = headlineThb.toLocaleString('th-TH')
-                  const fullLabel = `✓ อนุมัติราคา ฿${rateStr}`
-                  label = fullLabel.length <= 20 ? fullLabel : '✓ อนุมัติราคาคืนนี้'
-                }
-                approveButton = {
-                  url: `${baseUrl}/api/line/approve-rate?token=${created.token}`,
-                  label,
-                }
+            if (createErr) {
+              console.error(
+                `[morning-flash] failed to create approval set for branch=${f.branchId}:`,
+                createErr,
+              )
+            } else {
+              // Label rules:
+              //   - Set size 1 (genuine single-room property): show
+              //     the rate inline if it fits in LINE's 20-char cap.
+              //   - Set size > 1: "✓ อนุมัติทั้งหมด (N)" — a single
+              //     ฿X label across N rates would be misleading.
+              let label: string
+              if (perRoomRates.length === 1) {
+                const onlyThb = perRoomRates[0].suggestedRateThb
+                const rateStr = onlyThb.toLocaleString('th-TH')
+                const fullLabel = `✓ อนุมัติราคา ฿${rateStr}`
+                label = fullLabel.length <= 20 ? fullLabel : '✓ อนุมัติราคาคืนนี้'
+              } else {
+                label = `✓ อนุมัติทั้งหมด (${perRoomRates.length})`
+              }
+              approveButton = {
+                url: `${baseUrl}/api/line/approve-rate?token=${sharedToken}`,
+                label,
               }
             }
           }

@@ -303,6 +303,8 @@ export function detectWeekendOpportunity(days: RecommendationInput[]): HotelReco
   }]
 }
 
+import { thbToSatang } from '@/lib/money/satang'
+
 // Per-room-type rate recommendation, one row per active room type.
 // Distinct from `suggestRatesPerRoomType` (which only emits
 // increase/decrease signals into the property-level recommendation
@@ -321,12 +323,27 @@ export function detectWeekendOpportunity(days: RecommendationInput[]): HotelReco
 //                (Crystal Resort: 4 types → all 4 fit; an 8-type
 //                property gets the 6 biggest moves + "+2 more")
 export interface PerRoomTypeRate {
+  /** Actual room type label from accommodation_daily_metrics.room_type_
+   *  breakdown jsonb (e.g. "Suite", "Deluxe2"). Never the literal 'all'
+   *  — property-level recs are emitted as separate signals by the rest
+   *  of the engine, not as a per-room row. */
   roomType: string
+  /** Rack rate captured for this type on the latest day (THB integer).
+   *  THB fields are retained for the brief renderer which displays in
+   *  baht; the *_satang fields below are the persistence units. */
   currentRateThb: number
   suggestedRateThb: number
+  /** Same values in satang (1 THB = 100 satang). These are the canonical
+   *  values stored in branch_rate_recommendations and rate_approvals.
+   *  Computed via thbToSatang() at engine output time so callers don't
+   *  do unit conversion. */
+  currentRateSatang: number
+  suggestedRateSatang: number
   direction: 'increase' | 'hold' | 'decrease'
   reasonTh: string
   reasonEn: string
+  /** |suggestedRateThb − currentRateThb|; used by the brief builder to
+   *  cap to top N by impact when many room types are present. */
   impactThb: number
 }
 
@@ -363,19 +380,39 @@ export function recommendPerRoomTypeRates(
       occs.push(row.occupiedRooms / row.totalRooms)
     }
 
+    // Inline helper — composes a PerRoomTypeRate from
+    // (currentThb, suggestedThb, direction, reasons). The satang
+    // conversion happens here, exactly once, so every code path that
+    // emits a row goes through the same boundary.
+    const buildRow = (
+      currentThb: number,
+      suggestedThb: number,
+      direction: PerRoomTypeRate['direction'],
+      reasonTh: string,
+      reasonEn: string,
+    ): PerRoomTypeRate => ({
+      roomType: rt.roomType,
+      currentRateThb: currentThb,
+      suggestedRateThb: suggestedThb,
+      currentRateSatang: thbToSatang(currentThb),
+      suggestedRateSatang: thbToSatang(suggestedThb),
+      direction,
+      reasonTh,
+      reasonEn,
+      impactThb: Math.abs(suggestedThb - currentThb),
+    })
+
     if (occs.length === 0) {
       // No occupancy data for this type yet — hold at current with a
       // reason copy that calls out the data gap so the owner knows
       // why no move is being suggested.
-      rows.push({
-        roomType: rt.roomType,
-        currentRateThb: currentRate,
-        suggestedRateThb: currentRate,
-        direction: 'hold',
-        reasonTh: 'ข้อมูลยังไม่พอ — คงราคาไว้ก่อน',
-        reasonEn: 'Not enough data yet — hold current rate',
-        impactThb: 0,
-      })
+      rows.push(buildRow(
+        currentRate,
+        currentRate,
+        'hold',
+        'ข้อมูลยังไม่พอ — คงราคาไว้ก่อน',
+        'Not enough data yet — hold current rate',
+      ))
       continue
     }
 
@@ -387,15 +424,13 @@ export function recommendPerRoomTypeRates(
       // uses, applied to this type's own rack rate.
       const lift = Math.round(currentRate * 0.10)
       const suggested = currentRate + lift
-      rows.push({
-        roomType: rt.roomType,
-        currentRateThb: currentRate,
-        suggestedRateThb: suggested,
-        direction: 'increase',
-        reasonTh: `Occupancy ${occPct}% สูง — แนะนำขึ้น`,
-        reasonEn: `${occPct}% occupancy — suggest raise`,
-        impactThb: Math.abs(suggested - currentRate),
-      })
+      rows.push(buildRow(
+        currentRate,
+        suggested,
+        'increase',
+        `Occupancy ${occPct}% สูง — แนะนำขึ้น`,
+        `${occPct}% occupancy — suggest raise`,
+      ))
     } else if (avgOcc < 0.35) {
       // Low-demand band. Slightly tighter than the 40% threshold the
       // blended path uses — a single bad night in a sparse type can
@@ -403,28 +438,24 @@ export function recommendPerRoomTypeRates(
       // other two days. 35% keeps the decrease signal high-quality.
       const drop = Math.round(currentRate * 0.06)
       const suggested = Math.max(0, currentRate - drop)
-      rows.push({
-        roomType: rt.roomType,
-        currentRateThb: currentRate,
-        suggestedRateThb: suggested,
-        direction: 'decrease',
-        reasonTh: `Occupancy ${occPct}% ต่ำ — พิจารณาลด`,
-        reasonEn: `${occPct}% occupancy — consider lower`,
-        impactThb: Math.abs(suggested - currentRate),
-      })
+      rows.push(buildRow(
+        currentRate,
+        suggested,
+        'decrease',
+        `Occupancy ${occPct}% ต่ำ — พิจารณาลด`,
+        `${occPct}% occupancy — consider lower`,
+      ))
     } else {
       // Comfortable middle band — explicit hold so the owner sees the
       // type was considered. impactThb = 0 means this row sorts last
       // when the brief caps to top N by impact.
-      rows.push({
-        roomType: rt.roomType,
-        currentRateThb: currentRate,
-        suggestedRateThb: currentRate,
-        direction: 'hold',
-        reasonTh: `Occupancy ${occPct}% — ราคาเหมาะสม`,
-        reasonEn: `${occPct}% occupancy — current rate is appropriate`,
-        impactThb: 0,
-      })
+      rows.push(buildRow(
+        currentRate,
+        currentRate,
+        'hold',
+        `Occupancy ${occPct}% — ราคาเหมาะสม`,
+        `${occPct}% occupancy — current rate is appropriate`,
+      ))
     }
   }
   // Preserve breakdown input order (matches the order the owner sees

@@ -17,6 +17,7 @@
 import { NextRequest } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { canShowLiveApproveButton } from '@/lib/ratedesk/auto-push-gating'
+import { satangToThb } from '@/lib/money/satang'
 
 type ResultState =
   | 'success'
@@ -27,11 +28,18 @@ type ResultState =
   | 'adapter_invalid'
   | 'error'
 
-interface RoomRate {
-  roomType: string
-  currentRateThb: number
-  suggestedRateThb: number
-  reasonTh?: string
+/** One row from rate_approvals — the per-room-type design means a
+ *  single token can fan out to N rows, all of which need to be
+ *  approved together. */
+interface ApprovalRow {
+  id: string
+  branch_id: string
+  room_type: string
+  date: string
+  suggested_rate_satang: number | null  // preferred — null on legacy rows
+  suggested_rate_thb: number | null     // back-compat shadow
+  approved_at: string | null
+  expires_at: string
 }
 
 export async function GET(req: NextRequest) {
@@ -51,19 +59,30 @@ export async function GET(req: NextRequest) {
   // to embed deeply through chained references. Three round-trips here
   // is a few hundred extra ms — paid only at click time, once per tap —
   // and the code is immune to the embedding quirk.
-  const { data: approval, error: fetchErr } = await supabase
+  // Per-room model: a single token can carry N rows (one per room
+  // type), all sharing branch_id + date + token. Fetch the WHOLE set.
+  // Sorted by created_at so the success copy refers to them in the
+  // order the engine emitted (matches the bubble's display order).
+  const { data: approvalRows, error: fetchErr } = await supabase
     .from('rate_approvals')
-    .select('id, branch_id, room_type, date, suggested_rate_thb, room_rates, approved_at, expires_at')
+    .select(
+      'id, branch_id, room_type, date, suggested_rate_satang, suggested_rate_thb, approved_at, expires_at',
+    )
     .eq('token', token)
-    .maybeSingle()
+    .order('created_at', { ascending: true })
 
   if (fetchErr) {
     console.error('[approve-rate] fetch error:', fetchErr)
     return htmlResponse('error', 'เกิดข้อผิดพลาด กรุณาลองใหม่', 'Server error, please try again', 500)
   }
-  if (!approval) {
+  if (!approvalRows || approvalRows.length === 0) {
     return htmlResponse('not_found', 'ไม่พบคำขออนุมัตินี้', 'Approval not found', 404)
   }
+
+  const approvals = approvalRows as ApprovalRow[]
+  // All rows in a set share branch_id, date, expires_at by construction
+  // (they were inserted together). Read these from the first row.
+  const headApproval = approvals[0]
 
   // Lookup branch (for name + organization_id). Missing branch is
   // treated as a non-fatal — we fall back to generic copy in the
@@ -71,7 +90,7 @@ export async function GET(req: NextRequest) {
   const { data: branchRow } = await supabase
     .from('branches')
     .select('name, organization_id')
-    .eq('id', approval.branch_id)
+    .eq('id', headApproval.branch_id)
     .maybeSingle()
   const branchName: string = (branchRow?.name as string) ?? 'your hotel'
   const organizationId: string | null = (branchRow?.organization_id as string) ?? null
@@ -98,7 +117,7 @@ export async function GET(req: NextRequest) {
   const { data: pmsConfigRow } = await supabase
     .from('branch_pms_config')
     .select('is_active, supports_write_back')
-    .eq('branch_id', approval.branch_id)
+    .eq('branch_id', headApproval.branch_id)
     .eq('is_active', true)
     .order('updated_at', { ascending: false })
     .limit(1)
@@ -134,33 +153,35 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  // Detect multi-room set up-front so the success/already copy is
-  // sensible. When room_rates is a non-empty array, we're approving the
-  // whole set rather than a single rate. Cast defensively — Postgres
-  // jsonb can come back as null, an empty array, or a malformed shape.
-  const roomRates: RoomRate[] = Array.isArray(approval.room_rates)
-    ? (approval.room_rates as RoomRate[]).filter(
-        (r) =>
-          r != null &&
-          typeof r === 'object' &&
-          typeof (r as RoomRate).roomType === 'string' &&
-          typeof (r as RoomRate).suggestedRateThb === 'number',
-      )
-    : []
-  const isMultiSet = roomRates.length > 0
+  // Build a per-row preferred-satang-with-thb-fallback helper. Legacy
+  // rows from before migration 038 have suggested_rate_satang = NULL;
+  // the fallback path converts thb → satang client-side using the
+  // shared boundary helper (`thbToSatang` inverse).
+  const setSize = approvals.length
+  const headlineRow = approvals[0]
+  const headlineSatang =
+    headlineRow.suggested_rate_satang ??
+    (headlineRow.suggested_rate_thb != null
+      ? headlineRow.suggested_rate_thb * 100
+      : 0)
+  const headlineThb = satangToThb(headlineSatang)
+  const isMultiSet = setSize > 1
 
-  const rateStr = approval.suggested_rate_thb.toLocaleString('th-TH')
   const setSummaryTh = isMultiSet
-    ? `อัปเดตราคา ${roomRates.length} ประเภทห้องสำหรับ ${branchName}`
-    : `อนุมัติราคา ฿${rateStr} สำหรับ ${branchName}`
+    ? `อัปเดตราคา ${setSize} ประเภทห้องสำหรับ ${branchName}`
+    : `อนุมัติราคา ฿${headlineThb.toLocaleString('th-TH')} สำหรับ ${branchName}`
   const setSummaryEn = isMultiSet
-    ? `Updated rates for ${roomRates.length} room types at ${branchName}`
-    : `Rate ฿${rateStr} for ${branchName}`
+    ? `Updated rates for ${setSize} room types at ${branchName}`
+    : `Rate ฿${headlineThb.toLocaleString('en-US')} for ${branchName}`
 
-  // Already approved → idempotent success. We return 200, not 409, so
-  // the user sees a green checkmark on re-tap (they don't care that we
-  // already had the click; the rate is approved either way).
-  if (approval.approved_at) {
+  // Idempotency lock: if EVERY row in the set is already approved we
+  // return "already approved" with a green checkmark. Partial-approved
+  // sets are an impossible state (we approve them all in one update
+  // below; an atomic-ish failure would leave us mid-state and the
+  // owner would re-tap, which then completes the rest). For that race,
+  // treat "any row approved" as "already approved" so the owner sees a
+  // consistent success.
+  if (approvals.every((a) => a.approved_at != null)) {
     return htmlResponse(
       'already',
       `${setSummaryTh} แล้ว`,
@@ -169,8 +190,9 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  // Expired
-  if (new Date(approval.expires_at).getTime() < Date.now()) {
+  // Expired — checked against the head row's expires_at (all rows in a
+  // set were inserted together with the same TTL).
+  if (new Date(headApproval.expires_at).getTime() < Date.now()) {
     return htmlResponse(
       'expired',
       'ลิงก์อนุมัตินี้หมดอายุแล้ว — รอ brief พรุ่งนี้',
@@ -179,16 +201,19 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  // Mark approved. push_status stays 'pending' until the Phase R3
-  // Cloudbeds adapter picks it up and writes back to the PMS.
+  // Approve EVERY row in the set in a single .eq('token') update.
+  // PostgREST runs this as one statement, so either all rows flip to
+  // approved or none do — no half-state for the owner to observe.
+  const approvedAtIso = new Date().toISOString()
   const { error: updateErr } = await supabase
     .from('rate_approvals')
     .update({
-      approved_at: new Date().toISOString(),
+      approved_at: approvedAtIso,
       approved_via: 'line',
       push_status: 'pending',
     })
-    .eq('id', approval.id)
+    .eq('token', token)
+    .is('approved_at', null)  // don't re-approve rows that already are
 
   if (updateErr) {
     console.error('[approve-rate] update error:', updateErr)
@@ -196,28 +221,35 @@ export async function GET(req: NextRequest) {
   }
 
   // Audit. actor_user_id is NULL — the LINE webhook carries no auth.
-  // The token's randomness is the integrity guarantee; the row's id is
-  // the trace. organization_id stays NULL only if branch join failed;
-  // in the normal case it's set so the org's audit view scopes correctly.
-  //
-  // For multi-room: room_rates carries the whole set so /audit and the
-  // dashboard's "approval history" can show "approved 4 room types"
-  // with the actual rates. Phase R3's PMS worker reads room_rates and
-  // iterates pushes per-room.
+  // The token's randomness is the integrity guarantee; the rows' ids
+  // are the trace. We write ONE audit_log entry for the whole set,
+  // carrying every row's room_type + satang rate in the payload, so
+  // /audit shows "approved 4 room types" with the actual rates.
+  // Phase R3's PMS worker reads each rate_approvals row individually
+  // and iterates pushes per-room.
   await supabase.from('audit_log').insert({
     actor_user_id: null,
     organization_id: organizationId,
     action: 'rate.approved',
     target_entity: 'rate_approval',
-    target_id: approval.id,
+    target_id: headApproval.id,
     payload: {
-      branch_id: approval.branch_id,
+      branch_id: headApproval.branch_id,
       branch_name: branchName,
-      date: approval.date,
-      room_type: approval.room_type,
-      rate_thb: approval.suggested_rate_thb,
-      room_rates: isMultiSet ? roomRates : null,
+      date: headApproval.date,
       approved_via: 'line',
+      set_size: setSize,
+      rates: approvals.map((a) => {
+        const satang =
+          a.suggested_rate_satang ??
+          (a.suggested_rate_thb != null ? a.suggested_rate_thb * 100 : 0)
+        return {
+          approval_id: a.id,
+          room_type: a.room_type,
+          rate_satang: satang,
+          rate_thb: satangToThb(satang),
+        }
+      }),
     },
   })
 

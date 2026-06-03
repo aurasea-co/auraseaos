@@ -15,7 +15,9 @@ export interface PendingApprovalRow {
   branch_id: string
   date: string
   room_type: string
-  suggested_rate_thb: number
+  /** Canonical rate in satang. Cron route is responsible for filling
+   *  this in via the satang column (preferred) or thb*100 fallback. */
+  suggested_rate_satang: number
 }
 
 // Minimal supabase client surface — lets us pass mocks in tests
@@ -113,7 +115,7 @@ async function processOneApproval(
       externalPropertyId: config?.external_property_id ?? '',
       date: row.date,
       roomType: row.room_type,
-      rateThb: row.suggested_rate_thb,
+      rateSatang: row.suggested_rate_satang,
     }
     pushResult = await provider.pushRate(input)
   } catch (err) {

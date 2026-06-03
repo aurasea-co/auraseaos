@@ -6,8 +6,8 @@ describe('MockProvider', () => {
     approvalId: 'a1b2',
     externalPropertyId: 'prop-123',
     date: '2026-05-31',
-    roomType: 'all',
-    rateThb: 1850,
+    roomType: 'Suite',           // per-room flow: actual type, never 'all'
+    rateSatang: 185000,          // 1850 THB in satang
   }
 
   it('always returns skipped status', async () => {

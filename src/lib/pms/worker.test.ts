@@ -60,8 +60,8 @@ const sampleRow: PendingApprovalRow = {
   id: 'approval-1',
   branch_id: 'branch-1',
   date: '2026-05-31',
-  room_type: 'all',
-  suggested_rate_thb: 1850,
+  room_type: 'Suite',  // per-room flow — never 'all' for new rows
+  suggested_rate_satang: 185000,  // 1850 THB
 }
 
 describe('processApprovalsList — counters', () => {
@@ -261,6 +261,6 @@ describe('processApprovalsList — provider factory uses config row', () => {
     })
     expect(seenInputs[0].externalPropertyId).toBe('prop-42')
     expect(seenInputs[0].date).toBe('2026-05-31')
-    expect(seenInputs[0].rateThb).toBe(1850)
+    expect(seenInputs[0].rateSatang).toBe(185000)
   })
 })

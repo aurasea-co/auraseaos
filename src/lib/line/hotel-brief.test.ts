@@ -6,16 +6,29 @@ import type {
 } from '@/lib/recommendations/hotel/engine'
 
 function makePerRoomRate(partial: Partial<PerRoomTypeRate> = {}): PerRoomTypeRate {
-  return {
+  // Base = increase from 1000 → 1100 THB; if the caller overrides the
+  // *_Thb fields without providing satang, derive satang from those
+  // overrides so the test object stays internally consistent (the
+  // engine's invariant: satang = thb * 100).
+  const base: PerRoomTypeRate = {
     roomType: 'Deluxe',
     currentRateThb: 1000,
     suggestedRateThb: 1100,
+    currentRateSatang: 100000,
+    suggestedRateSatang: 110000,
     direction: 'increase',
     reasonTh: 'Occupancy 88% สูง — แนะนำขึ้น',
     reasonEn: '88% occupancy — suggest raise',
     impactThb: 100,
-    ...partial,
   }
+  const merged = { ...base, ...partial }
+  if (partial.currentRateThb != null && partial.currentRateSatang == null) {
+    merged.currentRateSatang = partial.currentRateThb * 100
+  }
+  if (partial.suggestedRateThb != null && partial.suggestedRateSatang == null) {
+    merged.suggestedRateSatang = partial.suggestedRateThb * 100
+  }
+  return merged
 }
 
 const BASE: HotelBriefData = {

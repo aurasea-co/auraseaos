@@ -74,9 +74,16 @@ interface CompetitorRow {
 
 // One row from rate_approvals — what the dashboard's history table renders.
 // Status is computed at render time from (approved_at, expires_at, push_status).
+//
+// During the satang phaseout (migration 038) every row carries BOTH
+// suggested_rate_satang (canonical) and suggested_rate_thb (back-compat
+// shadow). The renderer prefers satang and falls back to thb*100 for
+// legacy rows that pre-date the migration.
 interface ApprovalRow {
   date: string
-  suggested_rate_thb: number
+  room_type: string
+  suggested_rate_satang: number | null
+  suggested_rate_thb: number | null
   approved_at: string | null
   approved_via: 'line' | 'dashboard' | 'auto' | null
   expires_at: string
@@ -140,7 +147,7 @@ export default function RateDeskPage() {
     const approvalsQuery = hasAutoPush
       ? db
           .from('rate_approvals')
-          .select('date, suggested_rate_thb, approved_at, approved_via, expires_at, push_status, pushed_to_pms_at, created_at')
+          .select('date, room_type, suggested_rate_satang, suggested_rate_thb, approved_at, approved_via, expires_at, push_status, pushed_to_pms_at, created_at')
           .eq('branch_id', activeBranch.id)
           .order('created_at', { ascending: false })
           .limit(7)
@@ -559,7 +566,11 @@ export default function RateDeskPage() {
                   return (
                     <tr key={i} style={{ borderTop: '1px solid #f0f0ee' }}>
                       <td style={td}>{a.date}</td>
-                      <td style={td}>฿{a.suggested_rate_thb.toLocaleString('th-TH')}</td>
+                      <td style={td}>
+                        {a.room_type && a.room_type !== 'all'
+                          ? `${a.room_type} · ฿${approvalThb(a).toLocaleString('th-TH')}`
+                          : `฿${approvalThb(a).toLocaleString('th-TH')}`}
+                      </td>
                       <td style={{ ...td, color: 'var(--color-text-tertiary)' }}>
                         {a.approved_at
                           ? `${t(`approvedVia.${a.approved_via || 'line'}`)} · ${fmtTime(a.approved_at)}`
@@ -588,6 +599,18 @@ export default function RateDeskPage() {
       )}
     </div>
   )
+}
+
+// Project a rate_approvals row's rate to a baht number for display.
+// Prefers suggested_rate_satang (canonical post-migration-038); falls
+// back to suggested_rate_thb for legacy rows. The satang→baht
+// conversion lives in lib/money/satang and rounds half-up so display
+// always reflects the closest whole baht.
+function approvalThb(a: ApprovalRow): number {
+  if (a.suggested_rate_satang != null) {
+    return Math.round(a.suggested_rate_satang / 100)
+  }
+  return a.suggested_rate_thb ?? 0
 }
 
 // Compute the row's display status. Order matters: expiry beats
