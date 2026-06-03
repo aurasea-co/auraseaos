@@ -447,26 +447,95 @@ async function handleMorningFlash(req: NextRequest) {
 
         if (hasSingleHotel) {
           const f = hotelFlexInputs[0]
+
+          // 31-day window — shared by the room-type breakdown fetch
+          // below AND the competitor_rates fetch further down. Computed
+          // once so the two queries are guaranteed to align (we used
+          // to inline two separate copies of this, which would drift
+          // if anyone tweaked one).
+          const fromIso = (() => {
+            const d = new Date()
+            d.setUTCDate(d.getUTCDate() - 31)
+            return d.toISOString().slice(0, 10)
+          })()
+
+          // ROOM-TYPE BREAKDOWN — sourced from accommodation_daily_
+          // metrics, NOT branch_daily_metrics. branch_daily_metrics is
+          // the rolled-up KPI view (revenue, rooms_sold, rooms_available)
+          // and does NOT carry room_type_breakdown — reading it off
+          // m.room_type_breakdown in the toRecommendationInputs map
+          // below used to always return undefined, which silently made
+          // recommendPerRoomTypeRates fall back to a single blended row.
+          //
+          // The breakdown jsonb lives on accommodation_daily_metrics
+          // (migration 029) with shape:
+          //   [{ roomType, totalRooms, occupiedRooms, rateThb }, ...]
+          // — exactly what the engine expects. We pull the same 31-day
+          // window the metrics fetch used, build a Map keyed by
+          // metric_date, and merge into the engine inputs below.
+          interface BreakdownEntry {
+            roomType: string
+            totalRooms: number
+            occupiedRooms: number
+            rateThb: number
+          }
+          const { data: accomBreakdownRows } = await supabase
+            .from('accommodation_daily_metrics')
+            .select('metric_date, room_type_breakdown')
+            .eq('branch_id', f.branchId)
+            .gte('metric_date', fromIso)
+
+          // Defensive normalisation: jsonb can come back null, [], or
+          // (legacy) malformed. Drop rows whose breakdown isn't a
+          // non-empty array, and within each row drop entries that
+          // don't carry a string roomType + finite numbers. Engine
+          // (toRecommendationInputs) does its own filtering, but
+          // failing here means /sets/ of types stay consistent instead
+          // of half-bad days slipping through.
+          const breakdownByDate = new Map<string, BreakdownEntry[]>()
+          for (const row of (accomBreakdownRows ?? []) as Array<{
+            metric_date: string
+            room_type_breakdown: unknown
+          }>) {
+            const raw = row.room_type_breakdown
+            if (!Array.isArray(raw) || raw.length === 0) continue
+            const cleaned: BreakdownEntry[] = []
+            for (const b of raw as Array<Record<string, unknown>>) {
+              if (!b || typeof b !== 'object') continue
+              const roomType = typeof b.roomType === 'string' ? b.roomType : null
+              const totalRooms = Number(b.totalRooms)
+              const occupiedRooms = Number(b.occupiedRooms)
+              const rateThb = Number(b.rateThb)
+              if (
+                !roomType ||
+                !Number.isFinite(totalRooms) ||
+                !Number.isFinite(occupiedRooms) ||
+                !Number.isFinite(rateThb)
+              ) {
+                continue
+              }
+              cleaned.push({ roomType, totalRooms, occupiedRooms, rateThb })
+            }
+            if (cleaned.length > 0) {
+              breakdownByDate.set(String(row.metric_date), cleaned)
+            }
+          }
+
           // Project the 30-day metric window into the engine's input
           // shape and run the recommendation + forecast layers.
           // Both are pure functions — no extra round-trips.
+          //
+          // room_type_breakdown is sourced from breakdownByDate (built
+          // from accommodation_daily_metrics above) keyed by the same
+          // metric_date as the branch_daily_metrics row. Days without
+          // a breakdown entry get null — the engine treats them as
+          // "no per-type signal for this day".
           const baseInputs = toRecommendationInputs(
             f.metrics.map((m) => {
-              // Defensive cast of the jsonb breakdown column — runtime
-              // shape may be null, an array of valid objects, or (legacy)
-              // a malformed import. toRecommendationInputs filters
-              // malformed entries; we just shovel whatever's there.
-              const breakdownRaw = (m as { room_type_breakdown?: unknown }).room_type_breakdown
-              const breakdown = Array.isArray(breakdownRaw)
-                ? (breakdownRaw as Array<{
-                    roomType: string
-                    totalRooms: number
-                    occupiedRooms: number
-                    rateThb: number
-                  }>)
-                : null
+              const metricDate = String((m as { metric_date: string }).metric_date)
+              const breakdown = breakdownByDate.get(metricDate) ?? null
               return {
-                metric_date: String((m as { metric_date: string }).metric_date),
+                metric_date: metricDate,
                 rooms_available: numOrNull(m.rooms_available),
                 rooms_sold: numOrNull(m.rooms_sold),
                 revenue: numOrNull(m.revenue),
@@ -485,11 +554,6 @@ async function handleMorningFlash(req: NextRequest) {
           // 1.05× the metric window so a fresh entry made at 06:55
           // BKK (just before the cron) still gets included if its
           // captured_at is today's BKK calendar date.
-          const fromIso = (() => {
-            const d = new Date()
-            d.setUTCDate(d.getUTCDate() - 31)
-            return d.toISOString().slice(0, 10)
-          })()
           const { data: compRows } = await supabase
             .from('competitor_rates')
             .select('competitor_name, rate, captured_at')
@@ -574,13 +638,22 @@ async function handleMorningFlash(req: NextRequest) {
           // Multi-room detection — computed up here so the approval-
           // token block below can skip insert/delete when the button
           // won't render (saves a wasted DB round-trip every morning).
-          const latestBreakdown = (() => {
-            const raw = (f.latest as { room_type_breakdown?: unknown }).room_type_breakdown
-            return Array.isArray(raw) ? raw : []
-          })()
+          //
+          // Sourced from the same breakdownByDate Map the engine reads
+          // from, keyed by the latest day's metric_date. Reading
+          // (f.latest as ...).room_type_breakdown — what this block
+          // used to do — always returned undefined because f.latest is
+          // a branch_daily_metrics row and that view doesn't expose
+          // the column. Result: hasMultipleRoomTypes was always false,
+          // and the per-type sheet + approve-set logic disagreed
+          // silently.
+          const latestMetricDate = String(
+            (f.latest as { metric_date?: unknown }).metric_date ?? '',
+          )
+          const latestBreakdown = breakdownByDate.get(latestMetricDate) ?? []
           const distinctRoomTypes = new Set(
             latestBreakdown
-              .map((b) => (b as { roomType?: string }).roomType)
+              .map((b) => b.roomType)
               .filter((rt): rt is string => typeof rt === 'string' && rt.length > 0),
           )
           const hasMultipleRoomTypes = distinctRoomTypes.size > 1
