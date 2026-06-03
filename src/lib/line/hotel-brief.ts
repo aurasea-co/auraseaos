@@ -7,6 +7,7 @@
 import type {
   HotelRecommendation,
   PerRoomTypeRate,
+  DailyAction,
 } from '@/lib/recommendations/hotel/engine'
 
 export interface HotelBriefData {
@@ -35,6 +36,13 @@ export interface HotelBriefData {
    *  have no breakdown — the brief then falls back to the blended
    *  forecast strip. */
   perRoomRates?: PerRoomTypeRate[]
+  /** Output of summarizePerRoomRates() — one bilingual action line
+   *  derived from the rate-mix in perRoomRates. The brief renders this
+   *  as a callout right under the rate sheet so the owner gets a
+   *  one-glance "what to do today" prompt even when low-occupancy /
+   *  weekend / competitor signals don't fire (typical for branches
+   *  with <3 days of data). Omitted → no callout. */
+  dailyAction?: DailyAction
   /** Output of forecastTomorrow(); used ONLY when perRoomRates is
    *  empty/absent (legacy single-room properties with no breakdown
    *  jsonb). Pass null when not enough data. */
@@ -322,8 +330,45 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
     })
   }
 
+  // "What to do today" insight — bilingual action line synthesised
+  // from the rate-mix in perRoomRates. Renders right under the rate
+  // sheet so the owner gets a one-glance "next step" prompt even when
+  // the threshold-gated signals below (low_occupancy_alert, weekend
+  // opportunity, competitor undercut) don't fire — which is the
+  // typical case for branches with <3 days of data.
+  //
+  // Distinct visual treatment from the rate sheet (lighter neutral
+  // background, accent-coloured text) so the owner can tell at a
+  // glance: this is the prose insight, that's the rate sheet.
+  if (data.dailyAction) {
+    bodyContents.push({
+      type: 'box',
+      layout: 'vertical',
+      backgroundColor: '#F8F7FF',  // very light primary tint
+      cornerRadius: '6px',
+      paddingAll: '10px',
+      contents: [
+        {
+          type: 'text',
+          text: 'วันนี้ควรทำอะไร · Today\'s action',
+          size: 'xxs',
+          color: COLORS.forecastFg,
+          weight: 'bold',
+        },
+        {
+          type: 'text',
+          text: data.dailyAction.messageTh,
+          size: 'xs',
+          color: COLORS.text,
+          wrap: true,
+          margin: 'xs',
+        },
+      ],
+    })
+  }
+
   // Property-level recs (weekend signal, undercut, etc.) render below
-  // the rate block. Per-room rate moves from topRecs are dropped —
+  // the action callout. Per-room rate moves from topRecs are dropped —
   // the perRoomRates block above already displays them, and double-
   // rendering wastes precious bubble height.
   const propertyRecs = data.topRecs.filter((r) => !r.roomType)

@@ -22,6 +22,7 @@ import {
   toRecommendationInputs,
   attachCompetitorRates,
   recommendPerRoomTypeRates,
+  summarizePerRoomRates,
 } from '@/lib/recommendations/hotel/engine'
 import {
   upsertBranchRateRecommendations,
@@ -777,6 +778,13 @@ async function handleMorningFlash(req: NextRequest) {
             ? 'Auto Push จะเริ่มทำงานเมื่อเชื่อมต่อ PMS ที่รองรับ'
             : undefined
 
+          // "What to do today" synthesised from the final rate sheet
+          // (which is already DB-sourced via the read-back above, so
+          // a dashboard edit would change the action prompt too).
+          // Returns null only when the rate sheet itself is empty, in
+          // which case the brief omits the callout.
+          const dailyAction = summarizePerRoomRates(perRoomRates) ?? undefined
+
           const flex = buildHotelBriefFlexMessage({
             branchName: f.branchName,
             yesterday: {
@@ -788,6 +796,7 @@ async function handleMorningFlash(req: NextRequest) {
             },
             topRecs: recs,
             perRoomRates,
+            dailyAction,
             forecast,
             approveButton,
             dashboardUrl,

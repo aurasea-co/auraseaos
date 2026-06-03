@@ -465,6 +465,86 @@ export function recommendPerRoomTypeRates(
   return rows
 }
 
+/** Plain-language "what to do today" line synthesised from the per-
+ *  room rate mix. Used by the morning LINE brief to give the owner a
+ *  one-glance action — the rate sheet shows WHAT to change, this line
+ *  says WHY and WHAT ELSE to consider.
+ *
+ *  Pure function. Always returns something when given a non-empty set,
+ *  so the brief never lacks an action line — the previous behaviour of
+ *  relying on `detectLowOccupancy` / `detectWeekendOpportunity` left
+ *  branches with <3 days of data with no actionable guidance at all. */
+export interface DailyAction {
+  messageTh: string
+  messageEn: string
+}
+
+export function summarizePerRoomRates(
+  rates: ReadonlyArray<PerRoomTypeRate>,
+): DailyAction | null {
+  if (rates.length === 0) return null
+
+  const increases = rates.filter((r) => r.direction === 'increase')
+  const decreases = rates.filter((r) => r.direction === 'decrease')
+  const holds = rates.filter((r) => r.direction === 'hold')
+
+  // All decreases — soft demand across the board. Action shifts from
+  // rate-tuning to demand generation (promo + new channel) because
+  // dropping rates alone won't fix what's typically a visibility
+  // problem.
+  if (decreases.length === rates.length) {
+    return {
+      messageTh: 'ทุกห้องมีโอกาสจองต่ำ — เปิดโปรโมชั่น last-minute หรือเพิ่มช่องทาง OTA',
+      messageEn: 'All rooms showing soft demand — open a last-minute promo or add an OTA channel',
+    }
+  }
+
+  // All increases — hot demand. The risk is leaving money on the
+  // table via standing online discounts; tell the owner to close
+  // those before raising rack rates.
+  if (increases.length === rates.length) {
+    return {
+      messageTh: 'ดีมานด์สูงทุกห้อง — ปิดส่วนลดออนไลน์และตั้งราคา weekend premium',
+      messageEn: 'High demand across all rooms — close online discounts and set a weekend premium',
+    }
+  }
+
+  // All holds — rates are in the comfortable middle band. The lever
+  // for revenue growth here is volume (more channels, more reviews),
+  // not price.
+  if (holds.length === rates.length) {
+    return {
+      messageTh: 'ราคาทุกห้องเหมาะสม — เน้นเพิ่มช่องทางขายและรีวิวเพื่อขับยอด',
+      messageEn: 'All rates appropriate — focus on expanding sales channels and reviews',
+    }
+  }
+
+  // Mixed — call out the most actionable side. Increases get
+  // priority when they exist because raising is faster ROI than
+  // running a promo; if increases dominate, name the highest-impact
+  // type so the owner knows where to start.
+  if (increases.length > decreases.length) {
+    const topIncrease = increases.slice().sort((a, b) => b.impactThb - a.impactThb)[0]
+    return {
+      messageTh: `${topIncrease.roomType} ดีมานด์สูง — ปรับราคาขึ้นและพิจารณา weekend premium`,
+      messageEn: `${topIncrease.roomType} in high demand — raise rate and consider a weekend premium`,
+    }
+  }
+  if (decreases.length > increases.length) {
+    return {
+      messageTh: `${decreases.length} ประเภทห้องต้องการกระตุ้นยอด — เปิดดีล last-minute สำหรับห้องเหล่านี้`,
+      messageEn: `${decreases.length} room types need a push — open last-minute deals for these types`,
+    }
+  }
+
+  // Increases == decreases — surface the polarisation explicitly so
+  // the owner knows to manage rates by type, not blanket.
+  return {
+    messageTh: 'มีทั้งห้องดีมานด์สูงและต่ำ — บริหารราคาตามประเภทห้อง',
+    messageEn: 'Demand is split — manage rates by room type, not blanket',
+  }
+}
+
 export function forecastTomorrow(
   days: RecommendationInput[],
 ): { expectedOccupancy: number; suggestedRateThb: number } | null {

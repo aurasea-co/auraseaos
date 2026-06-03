@@ -396,4 +396,59 @@ describe('buildHotelBriefFlexMessage', () => {
     const texts = allText(env.contents).join(' ')
     expect(texts).not.toContain('Auto Push จะเริ่มทำงานเมื่อเชื่อมต่อ PMS')
   })
+
+  // ── "What to do today" insight callout ────────────────────────────────
+
+  it('renders the dailyAction callout below the rate sheet when provided', () => {
+    const env = buildHotelBriefFlexMessage({
+      ...BASE,
+      perRoomRates: [
+        makePerRoomRate({ roomType: 'Deluxe2', currentRateThb: 950, suggestedRateThb: 893, direction: 'decrease', impactThb: 57 }),
+      ],
+      dailyAction: {
+        messageTh: 'ทุกห้องมีโอกาสจองต่ำ — เปิดโปรโมชั่น last-minute',
+        messageEn: 'All rooms showing soft demand — open a last-minute promo',
+      },
+    })
+    const texts = allText(env.contents).join(' ')
+    expect(texts).toContain('วันนี้ควรทำอะไร')
+    expect(texts).toContain('Today\'s action')
+    expect(texts).toContain('ทุกห้องมีโอกาสจองต่ำ')
+  })
+
+  it('omits the dailyAction callout when not provided', () => {
+    const env = buildHotelBriefFlexMessage({
+      ...BASE,
+      perRoomRates: [
+        makePerRoomRate({ roomType: 'Deluxe2', currentRateThb: 950, suggestedRateThb: 893, direction: 'decrease', impactThb: 57 }),
+      ],
+    })
+    const texts = allText(env.contents).join(' ')
+    expect(texts).not.toContain('วันนี้ควรทำอะไร')
+    expect(texts).not.toContain('Today\'s action')
+  })
+
+  it('dailyAction renders even when topRecs is empty (the Crystal Resort case)', () => {
+    // The original bug: branches with <3 days of data → topRecs empty
+    // → brief had no "what to do" line at all. With dailyAction the
+    // insight always shows.
+    const env = buildHotelBriefFlexMessage({
+      ...BASE,
+      topRecs: [],
+      perRoomRates: [
+        makePerRoomRate({ roomType: 'Deluxe2', currentRateThb: 950, suggestedRateThb: 893, direction: 'decrease', impactThb: 57 }),
+        makePerRoomRate({ roomType: 'Suite',   currentRateThb: 1200, suggestedRateThb: 1128, direction: 'decrease', impactThb: 72 }),
+      ],
+      dailyAction: {
+        messageTh: 'ทุกห้องมีโอกาสจองต่ำ — เปิดโปรโมชั่น last-minute หรือเพิ่มช่องทาง OTA',
+        messageEn: 'All rooms showing soft demand — open a last-minute promo or add an OTA channel',
+      },
+    })
+    const texts = allText(env.contents).join(' ')
+    // Body of the callout is Thai-first (matches the existing
+    // messageTh-only convention in recRow). The bilingual title is
+    // verified by the other test above.
+    expect(texts).toContain('ทุกห้องมีโอกาสจองต่ำ')
+    expect(texts).toContain('last-minute')
+  })
 })
