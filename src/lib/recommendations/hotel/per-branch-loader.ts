@@ -37,6 +37,7 @@ import {
   toPerRoomTypeRate,
   type BranchRateRecommendationRow,
 } from './persistence'
+import { deriveRoomTypesFromBreakdowns } from './room-types'
 import {
   canShowLiveApproveButton,
   shouldShowAwaitingPmsNote,
@@ -82,6 +83,10 @@ interface LoaderParams {
   metrics: ReadonlyArray<Record<string, unknown>>
   /** Org plan string — drives the Auto Push plan gate. */
   plan: string | null
+  /** Branch occupancy target (0..1 fraction or 0..100 percent — the
+   *  action-line builder normalises). Drives the "X pts below target"
+   *  framing in the daily action. Optional. */
+  targetOccupancy?: number | null
 }
 
 export async function loadPerRoomRecsForBranch(
@@ -154,8 +159,32 @@ export async function loadPerRoomRecsForBranch(
     (compRows || []) as Array<{ competitor_name: string; rate: number | string | null; captured_at: string }>,
   )
 
+  // ── 3b. Authoritative room-type roster ──
+  // Derive the COMPLETE set of room types the branch has ever reported
+  // across the fetch window (with inventory + last-known rack rate) from
+  // the raw accommodation_daily_metrics rows. This is the room-config
+  // source the engine prefers as authoritative: it guarantees a row for
+  // every known type even on a night a type sold nothing (and was
+  // therefore omitted from / zeroed in that day's breakdown). Without
+  // it a type that didn't sell would vanish from the sheet.
+  const roster = deriveRoomTypesFromBreakdowns(
+    (accomBreakdownRows ?? []) as Array<{
+      metric_date: string
+      room_type_breakdown: Array<{
+        roomType: string
+        totalRooms?: number | null
+        occupiedRooms?: number | null
+        rateThb?: number | null
+      }> | null
+    }>,
+  ).map((t) => ({
+    roomType: t.roomType,
+    inventory: t.inventory,
+    rackRateThb: t.latestRateThb,
+  }))
+
   // ── 4. Run engine + upsert + read-back ──
-  const engineRecs = recommendPerRoomTypeRates(recInputs)
+  const engineRecs = recommendPerRoomTypeRates(recInputs, { roster })
   if (engineRecs.length > 0) {
     const upsertResult = await upsertBranchRateRecommendations(supabase, {
       branchId: params.branchId,
@@ -188,7 +217,14 @@ export async function loadPerRoomRecsForBranch(
   }
 
   // ── 5. "Today's action" insight ──
-  const dailyAction = summarizePerRoomRates(perRoomRates)
+  // Pass the engine inputs + occupancy target so the action line is
+  // SITUATIONAL (weakest types, trend, weekend/weekday, competitor gap,
+  // gap-to-target) rather than a static template keyed only on "low
+  // occupancy". Same dailyAction feeds both LINE and email → parity.
+  const dailyAction = summarizePerRoomRates(perRoomRates, {
+    inputs: recInputs,
+    targetOccupancy: params.targetOccupancy ?? null,
+  })
 
   // ── 6. PMS adapter gating ──
   const { data: pmsConfigRow } = await supabase

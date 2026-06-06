@@ -278,6 +278,131 @@ describe('recommendPerRoomTypeRates — every active room type produces a row', 
     expect(suite.direction).toBe('increase')
   })
 
+  // ── BUG 1: every room type gets a row, even with zero/no occupancy ──
+
+  it('a 4-type branch where Suite had zero sales still produces 4 rows including Suite', () => {
+    // Suite is OMITTED from every day's breakdown (it sold nothing and
+    // the import dropped the row), but it's a known room type via the
+    // config roster. The sheet must still list all 4 types.
+    const days = makeWindow([
+      {
+        date: '2026-05-27',
+        types: [
+          { roomType: 'Deluxe2', totalRooms: 4, occupiedRooms: 3, rateThb: 950 },
+          { roomType: 'Deluxe5', totalRooms: 4, occupiedRooms: 2, rateThb: 790 },
+          { roomType: 'Deluxe6', totalRooms: 4, occupiedRooms: 2, rateThb: 850 },
+        ],
+      },
+      {
+        date: '2026-05-28',
+        types: [
+          { roomType: 'Deluxe2', totalRooms: 4, occupiedRooms: 3, rateThb: 950 },
+          { roomType: 'Deluxe5', totalRooms: 4, occupiedRooms: 2, rateThb: 790 },
+          { roomType: 'Deluxe6', totalRooms: 4, occupiedRooms: 2, rateThb: 850 },
+        ],
+      },
+      {
+        date: '2026-05-29',
+        types: [
+          { roomType: 'Deluxe2', totalRooms: 4, occupiedRooms: 3, rateThb: 950 },
+          { roomType: 'Deluxe5', totalRooms: 4, occupiedRooms: 2, rateThb: 790 },
+          { roomType: 'Deluxe6', totalRooms: 4, occupiedRooms: 2, rateThb: 850 },
+        ],
+      },
+    ])
+    const out = recommendPerRoomTypeRates(days, {
+      roster: [
+        { roomType: 'Deluxe2', inventory: 4, rackRateThb: 950 },
+        { roomType: 'Deluxe5', inventory: 4, rackRateThb: 790 },
+        { roomType: 'Deluxe6', inventory: 4, rackRateThb: 850 },
+        { roomType: 'Suite', inventory: 2, rackRateThb: 1500 },
+      ],
+    })
+    expect(out.length).toBe(4)
+    expect(out.map((r) => r.roomType).sort()).toEqual(['Deluxe2', 'Deluxe5', 'Deluxe6', 'Suite'])
+
+    // Suite had inventory but sold nothing → 0% occupancy → DECREASE,
+    // with the "no bookings" reason copy (NOT "not enough data").
+    const suite = out.find((r) => r.roomType === 'Suite')!
+    expect(suite.direction).toBe('decrease')
+    expect(suite.currentRateThb).toBe(1500) // rack rate from config roster
+    expect(suite.suggestedRateThb).toBe(1410) // −6%
+    expect(suite.reasonTh).toContain('ไม่มีการจองห้องนี้')
+    expect(suite.reasonEn).toContain('No bookings')
+  })
+
+  it('zero-bookings is a decrease signal, not missing data, even without a roster', () => {
+    // Suite appears in an EARLIER window day (so its inventory + rate
+    // are known) but is absent from the latest two days — sold nothing.
+    const days = makeWindow([
+      {
+        date: '2026-05-27',
+        types: [
+          { roomType: 'Deluxe', totalRooms: 4, occupiedRooms: 3, rateThb: 900 },
+          { roomType: 'Suite', totalRooms: 2, occupiedRooms: 1, rateThb: 1500 },
+        ],
+      },
+      {
+        date: '2026-05-28',
+        types: [{ roomType: 'Deluxe', totalRooms: 4, occupiedRooms: 0, rateThb: 900 }],
+      },
+      {
+        date: '2026-05-29',
+        types: [{ roomType: 'Deluxe', totalRooms: 4, occupiedRooms: 0, rateThb: 900 }],
+      },
+    ])
+    const out = recommendPerRoomTypeRates(days)
+    expect(out.map((r) => r.roomType).sort()).toEqual(['Deluxe', 'Suite'])
+    // Suite: known inventory (2 from the 27th), absent on the latest two
+    // days → those count as 0% → drags the avg into the decrease band.
+    // The KEY point: it's a decrease signal, NOT "not enough data".
+    const suite = out.find((r) => r.roomType === 'Suite')!
+    expect(suite.direction).toBe('decrease')
+    expect(suite.reasonTh).not.toContain('ข้อมูลยังไม่พอ')
+    // Deluxe: present but 0/4 occupied on the latest two days → soft
+    // decrease too (not dropped from the sheet).
+    const deluxe = out.find((r) => r.roomType === 'Deluxe')!
+    expect(deluxe.direction).toBe('decrease')
+  })
+
+  it('config-only type with a rack rate but no inventory holds at "not enough data"', () => {
+    // A roster type that never appeared in any breakdown and whose
+    // config carries a rack rate but no inventory → we have no evidence
+    // it had rooms to sell, so we hold (case b), but STILL emit a row.
+    const days = makeWindow([
+      {
+        date: '2026-05-29',
+        types: [{ roomType: 'Deluxe', totalRooms: 4, occupiedRooms: 2, rateThb: 900 }],
+      },
+    ])
+    const out = recommendPerRoomTypeRates(days, {
+      roster: [{ roomType: 'Villa', rackRateThb: 5000 }],
+    })
+    expect(out.map((r) => r.roomType).sort()).toEqual(['Deluxe', 'Villa'])
+    const villa = out.find((r) => r.roomType === 'Villa')!
+    expect(villa.direction).toBe('hold')
+    expect(villa.currentRateThb).toBe(5000)
+    expect(villa.reasonTh).toContain('ข้อมูลยังไม่พอ')
+  })
+
+  it('emits roster rows even when NO type sold on the day (empty-ish breakdowns)', () => {
+    // Every type present but with zero occupied — the brief is never an
+    // empty/partial sheet. All known types appear with a decrease.
+    const days = makeWindow([
+      {
+        date: '2026-05-29',
+        types: [
+          { roomType: 'Deluxe2', totalRooms: 4, occupiedRooms: 0, rateThb: 950 },
+          { roomType: 'Suite', totalRooms: 2, occupiedRooms: 0, rateThb: 1200 },
+        ],
+      },
+    ])
+    const out = recommendPerRoomTypeRates(days)
+    expect(out.length).toBe(2)
+    expect(out.every((r) => r.direction === 'decrease')).toBe(true)
+    expect(out.every((r) => r.reasonEn.includes('No bookings'))).toBe(true)
+  })
+
   it('impactThb is the absolute delta — sortable by magnitude', () => {
     const days = makeWindow([
       {

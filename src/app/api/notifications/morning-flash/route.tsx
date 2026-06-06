@@ -361,6 +361,7 @@ async function handleMorningFlash(req: NextRequest) {
           fromIso,
           metrics: (metrics || []) as Record<string, unknown>[],
           plan: org.plan as string | null,
+          targetOccupancy: targets?.occupancy_target != null ? Number(targets.occupancy_target) : null,
         })
         console.log(
           `[morning-flash] loaded ${hotelRecs.perRoomRates.length} per-room rec(s) for branch=${branch.id}` +

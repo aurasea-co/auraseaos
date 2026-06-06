@@ -347,43 +347,146 @@ export interface PerRoomTypeRate {
   impactThb: number
 }
 
+/** One entry of the authoritative room-type roster — typically derived
+ *  from the Room types settings / room-config source (see
+ *  deriveRoomTypesFromBreakdowns). Lets the engine guarantee a row for
+ *  EVERY known room type, not only the ones that happened to sell on
+ *  the latest day. */
+export interface RoomTypeRosterEntry {
+  /** Display label, exactly as it appears in room_type_breakdown. */
+  roomType: string
+  /** Inventory (rooms) from the config source, if known. Presence of a
+   *  positive inventory is what lets the engine treat an absent type as
+   *  0% occupancy ("had rooms, sold none") rather than "no data". */
+  inventory?: number
+  /** Rack rate (THB) from the config source. Used as the rate-baseline
+   *  fallback when the type didn't sell anywhere in the window. */
+  rackRateThb?: number
+}
+
+export interface RecommendPerRoomTypeOptions {
+  /** Authoritative room-type roster (Room types settings / room-config).
+   *  Every entry is guaranteed exactly one row in the output — even when
+   *  the type sold nothing on every recent day. The per-window union of
+   *  types seen in `days` is merged on top, so a type present in the
+   *  data but missing from config still gets a row. When omitted, the
+   *  roster is the union of types across `days`. */
+  roster?: ReadonlyArray<RoomTypeRosterEntry>
+}
+
+// The invariant this function guarantees: the rate sheet ALWAYS lists
+// every room type in the roster. A type is never silently dropped just
+// because it sold nothing — zero bookings is a 0%-occupancy DECREASE
+// signal, not missing data. The only thing that drops a type is a
+// genuinely unrecoverable rack rate (no rate anywhere + no config rate),
+// and that case is logged.
 export function recommendPerRoomTypeRates(
   days: RecommendationInput[],
+  options: RecommendPerRoomTypeOptions = {},
 ): PerRoomTypeRate[] {
-  if (days.length === 0) return []
-  const latest = pickLatest(days)
-  const types = latest.roomTypeBreakdown ?? []
-  if (types.length === 0) return []
+  const configRoster = options.roster ?? []
+  if (days.length === 0 && configRoster.length === 0) return []
 
-  // 3-day window mirrors the property-level engine. We don't gate on
-  // a hard "≥3 days" quorum like suggestRates() because for the per-
-  // type output a 'hold' is still useful information when data is
-  // thin — we just tag the reason copy accordingly.
+  // ── Build the COMPLETE room-type roster ──────────────────────────
+  // Union of (a) every type seen in any day's breakdown across the
+  // recent window and (b) the authoritative config roster. Each entry
+  // carries the best inventory + last-known rack rate we can recover so
+  // a type that didn't sell still gets a sensible baseline.
+  //
+  // Order: latest day's types first (matches the dashboard /
+  // settings-rooms order the owner already sees), then types seen only
+  // on earlier days, then config-only types — so the sheet reads the
+  // same way every morning.
+  interface RosterMeta {
+    roomType: string
+    /** Max totalRooms observed across the window (best-guess inventory). */
+    inventory: number
+    /** Most recent positive rateThb seen in the window. */
+    lastRateThb: number
+    lastRateDate: string
+    /** Rack rate from the config roster — fallback when the type never
+     *  carried a positive rate in the window (it didn't sell). */
+    configRackThb: number
+  }
+  const meta = new Map<string, RosterMeta>()
+  const order: string[] = []
+  const ensure = (roomType: string): RosterMeta => {
+    let m = meta.get(roomType)
+    if (!m) {
+      m = { roomType, inventory: 0, lastRateThb: 0, lastRateDate: '', configRackThb: 0 }
+      meta.set(roomType, m)
+      order.push(roomType)
+    }
+    return m
+  }
+
+  // Walk latest → earliest so the latest day's type order leads.
+  for (let i = days.length - 1; i >= 0; i--) {
+    const d = days[i]
+    for (const b of d.roomTypeBreakdown ?? []) {
+      if (!b.roomType) continue
+      const m = ensure(b.roomType)
+      m.inventory = Math.max(m.inventory, b.totalRooms || 0)
+      if (d.date > m.lastRateDate && (b.rateThb || 0) > 0) {
+        m.lastRateThb = b.rateThb
+        m.lastRateDate = d.date
+      }
+    }
+  }
+  // Config roster — authoritative inventory + rack-rate fallback. Adds
+  // config-only types to the end of the order.
+  for (const entry of configRoster) {
+    if (!entry.roomType) continue
+    const m = ensure(entry.roomType)
+    if (entry.inventory && entry.inventory > m.inventory) m.inventory = entry.inventory
+    if (entry.rackRateThb && entry.rackRateThb > 0) m.configRackThb = entry.rackRateThb
+  }
+
+  // 3-day window mirrors the property-level engine. We don't gate on a
+  // hard "≥3 days" quorum like suggestRates() — for the per-type output
+  // a 'hold'/'decrease' is still useful when data is thin; we tag the
+  // reason copy accordingly.
   const recent = days.slice(-3)
-
   const rows: PerRoomTypeRate[] = []
-  for (const rt of types) {
-    const currentRate = Math.round(rt.rateThb)
-    // Skip types whose rack rate isn't captured — we can't render a
-    // sensible "฿X → ฿Y" line without a baseline. These are usually
-    // import errors that the dashboard surfaces separately.
-    if (currentRate <= 0) continue
 
-    // Per-type occupancy over the recent window. Days where the type
-    // has no row (e.g. mid-week when only Standard was booked) don't
-    // contribute — we don't want a sparse type to read 0% just because
-    // its rows are missing.
+  for (const roomType of order) {
+    const m = meta.get(roomType)!
+
+    // Rate-baseline fallback order (per spec):
+    //   1. the type's last-known rateThb in the recent window
+    //   2. the Room types config rack rate
+    //   3. skip — only when truly no rate is recoverable (and log it)
+    const baselineThb = m.lastRateThb > 0 ? m.lastRateThb : m.configRackThb
+    if (baselineThb <= 0) {
+      console.warn(
+        `[recommendPerRoomTypeRates] no recoverable rack rate for room type "${roomType}" — skipping`,
+      )
+      continue
+    }
+    const currentRate = Math.round(baselineThb)
+    const knownInventory = m.inventory > 0
+
+    // Per-type occupancy over the recent window. Two ways a day counts:
+    //   - row present with inventory → occupiedRooms / totalRooms
+    //   - row ABSENT but the type is known to have inventory → 0%
+    //     (it had rooms to sell and sold none — the zero-bookings
+    //     signal). A day where the type is absent AND inventory is
+    //     unknown contributes nothing (genuinely no data for it).
     const occs: number[] = []
     for (const d of recent) {
-      const row = (d.roomTypeBreakdown ?? []).find((r) => r.roomType === rt.roomType)
-      if (!row || row.totalRooms <= 0) continue
-      occs.push(row.occupiedRooms / row.totalRooms)
+      const row = (d.roomTypeBreakdown ?? []).find((r) => r.roomType === roomType)
+      if (row && row.totalRooms > 0) {
+        occs.push(row.occupiedRooms / row.totalRooms)
+      } else if (!row && knownInventory) {
+        occs.push(0)
+      }
+      // row present with totalRooms<=0: malformed/no inventory that day
+      // — no contribution.
     }
 
-    // Inline helper — composes a PerRoomTypeRate from
-    // (currentThb, suggestedThb, direction, reasons). The satang
-    // conversion happens here, exactly once, so every code path that
-    // emits a row goes through the same boundary.
+    // Inline helper — composes a PerRoomTypeRate. The satang conversion
+    // happens here, exactly once, so every emitting path shares the
+    // boundary.
     const buildRow = (
       currentThb: number,
       suggestedThb: number,
@@ -391,7 +494,7 @@ export function recommendPerRoomTypeRates(
       reasonTh: string,
       reasonEn: string,
     ): PerRoomTypeRate => ({
-      roomType: rt.roomType,
+      roomType,
       currentRateThb: currentThb,
       suggestedRateThb: suggestedThb,
       currentRateSatang: thbToSatang(currentThb),
@@ -403,9 +506,9 @@ export function recommendPerRoomTypeRates(
     })
 
     if (occs.length === 0) {
-      // No occupancy data for this type yet — hold at current with a
-      // reason copy that calls out the data gap so the owner knows
-      // why no move is being suggested.
+      // Case (b): no occupancy evidence anywhere in the window AND no
+      // inventory to infer a zero from — genuinely thin data. Hold at
+      // the rack-rate baseline so the sheet STILL lists the type.
       rows.push(buildRow(
         currentRate,
         currentRate,
@@ -418,6 +521,7 @@ export function recommendPerRoomTypeRates(
 
     const avgOcc = occs.reduce((s, v) => s + v, 0) / occs.length
     const occPct = Math.round(avgOcc * 100)
+    const nothingSold = occs.every((o) => o === 0)
 
     if (avgOcc > 0.85) {
       // High-demand band — same 10% lift the property-level engine
@@ -436,14 +540,22 @@ export function recommendPerRoomTypeRates(
       // blended path uses — a single bad night in a sparse type can
       // drag a 3-day avg under 40% even when demand is healthy on the
       // other two days. 35% keeps the decrease signal high-quality.
+      //
+      // Case (a): distinguish "had rooms, sold zero" from "sold a
+      // little but soft" — both decrease, but the copy differs so the
+      // owner knows which is which.
       const drop = Math.round(currentRate * 0.06)
       const suggested = Math.max(0, currentRate - drop)
       rows.push(buildRow(
         currentRate,
         suggested,
         'decrease',
-        `Occupancy ${occPct}% ต่ำ — พิจารณาลด`,
-        `${occPct}% occupancy — consider lower`,
+        nothingSold
+          ? 'ไม่มีการจองห้องนี้ — พิจารณาลดราคา'
+          : `Occupancy ${occPct}% ต่ำ — พิจารณาลด`,
+        nothingSold
+          ? 'No bookings — consider lowering'
+          : `${occPct}% occupancy — consider lower`,
       ))
     } else {
       // Comfortable middle band — explicit hold so the owner sees the
@@ -458,10 +570,10 @@ export function recommendPerRoomTypeRates(
       ))
     }
   }
-  // Preserve breakdown input order (matches the order the owner sees
-  // on the dashboard / settings rooms page). Brief builder is free to
-  // sort by impact for the cap decision, but the natural order is what
-  // we hand back so non-capped renders read consistently.
+  // Roster order (latest-day types first) — matches the order the owner
+  // sees on the dashboard / settings rooms page. The brief builder is
+  // free to sort by impact for the cap decision, but the natural order
+  // is what we hand back so non-capped renders read consistently.
   return rows
 }
 
@@ -479,69 +591,224 @@ export interface DailyAction {
   messageEn: string
 }
 
+/** Extra signals the action-line builder uses to make the line
+ *  SITUATIONAL — so two different days produce visibly different,
+ *  accurate guidance rather than the same static template. All optional:
+ *  when nothing is supplied the builder still names the weakest/strongest
+ *  room types (which already vary day to day), it just can't reference
+ *  trend / weekend / target / competitor context. */
+export interface DailyActionContext {
+  /** Engine inputs (occupancy history + competitor data) — the same
+   *  list fed to recommendPerRoomTypeRates. The last entry is the most
+   *  recent day. Drives trend, weekend-vs-weekday, and competitor-gap
+   *  framing. */
+  inputs?: ReadonlyArray<RecommendationInput>
+  /** Target occupancy. Accepts a 0..1 fraction or a 0..100 percent
+   *  (normalised internally). Drives the "X pts below target" framing. */
+  targetOccupancy?: number | null
+}
+
+// Derived, presentation-ready view of the day's situation. Null when no
+// inputs are supplied (the builder degrades to type-name-only copy).
+interface DerivedDayContext {
+  occPct: number
+  /** Positive points below target; null when at/above target or no target. */
+  belowTargetPct: number | null
+  trend: 'worsening' | 'improving' | 'steady'
+  /** True when TOMORROW (the night the rec applies to) is Fri/Sat. */
+  isWeekend: boolean
+  /** Competitors priced this many % above us (≥16%); null otherwise. */
+  competitorHigherPct: number | null
+}
+
+function deriveDayContext(context: DailyActionContext): DerivedDayContext | null {
+  const inputs = context.inputs ?? []
+  if (inputs.length === 0) return null
+  const latest = inputs[inputs.length - 1]
+  const occNow = latest.occupancyRate
+
+  // Trend: latest day vs the average of up to 3 prior days. ±5pts is the
+  // band for "steady" — below that it's noise.
+  const prior = inputs.slice(Math.max(0, inputs.length - 4), inputs.length - 1)
+  const priorAvg = prior.length
+    ? prior.reduce((s, d) => s + d.occupancyRate, 0) / prior.length
+    : occNow
+  const delta = occNow - priorAvg
+  const trend = delta <= -0.05 ? 'worsening' : delta >= 0.05 ? 'improving' : 'steady'
+
+  // Weekend context keys on the night the rec applies to (tomorrow).
+  const tomorrowDow = new Date(`${addDays(latest.date, 1)}T00:00:00Z`).getUTCDay()
+  const isWeekend = tomorrowDow === 5 || tomorrowDow === 6
+
+  let targetOcc = context.targetOccupancy ?? null
+  if (targetOcc != null && targetOcc > 1) targetOcc = targetOcc / 100
+  const belowTargetPct =
+    targetOcc != null && targetOcc > occNow ? Math.round((targetOcc - occNow) * 100) : null
+
+  const cmp = competitorComparison(inputs as RecommendationInput[])
+  const competitorHigherPct = cmp && cmp.gapRatio > 0.15 ? Math.round(cmp.gapRatio * 100) : null
+
+  return { occPct: Math.round(occNow * 100), belowTargetPct, trend, isWeekend, competitorHigherPct }
+}
+
+// Name up to two room types, sorted by impact (the biggest movers).
+function topTwoNames(rates: ReadonlyArray<PerRoomTypeRate>): string[] {
+  return rates
+    .slice()
+    .sort((a, b) => b.impactThb - a.impactThb)
+    .slice(0, 2)
+    .map((r) => r.roomType)
+}
+
+/** Plain-language "what to do today" line synthesised from the per-room
+ *  rate mix AND the day's situational signals. The rate sheet shows WHAT
+ *  to change; this line says WHY and WHAT ELSE to consider — and, unlike
+ *  the old static template, it varies as the numbers vary (weakest types,
+ *  occupancy vs target, trend, weekend/weekday, competitor gap), so two
+ *  different days don't read identically.
+ *
+ *  Pure function. Always returns something for a non-empty rate set. The
+ *  `context` is optional so existing callers / tests keep working — but
+ *  the morning-flash loader passes it, so LINE and email both get the
+ *  situational line (parity). */
 export function summarizePerRoomRates(
   rates: ReadonlyArray<PerRoomTypeRate>,
+  context: DailyActionContext = {},
 ): DailyAction | null {
   if (rates.length === 0) return null
 
   const increases = rates.filter((r) => r.direction === 'increase')
   const decreases = rates.filter((r) => r.direction === 'decrease')
   const holds = rates.filter((r) => r.direction === 'hold')
+  const ctx = deriveDayContext(context)
 
-  // All decreases — soft demand across the board. Action shifts from
-  // rate-tuning to demand generation (promo + new channel) because
-  // dropping rates alone won't fix what's typically a visibility
-  // problem.
-  if (decreases.length === rates.length) {
+  // Shared "where we are" fragment — occupancy and (when known) the gap
+  // to target. Interpolating these is what makes the line move day to
+  // day even when the dominant signal is unchanged.
+  const occTh = ctx
+    ? ` (occ ${ctx.occPct}%${ctx.belowTargetPct != null ? `, ต่ำกว่าเป้า ${ctx.belowTargetPct}%` : ''})`
+    : ''
+  const occEn = ctx
+    ? ` (occ ${ctx.occPct}%${ctx.belowTargetPct != null ? `, ${ctx.belowTargetPct}pts below target` : ''})`
+    : ''
+
+  // ── MIXED / equal split — demand is polarised with both ends present
+  // in equal measure. Name both ends so the owner manages by type
+  // rather than blanket. Checked first so an even split doesn't get
+  // mis-routed into the soft/hot single-sided copy. ──
+  if (increases.length > 0 && decreases.length > 0 && increases.length === decreases.length) {
+    const topUp = increases.slice().sort((a, b) => b.impactThb - a.impactThb)[0]
+    const topDown = decreases.slice().sort((a, b) => b.impactThb - a.impactThb)[0]
     return {
-      messageTh: 'ทุกห้องมีโอกาสจองต่ำ — เปิดโปรโมชั่น last-minute หรือเพิ่มช่องทาง OTA',
-      messageEn: 'All rooms showing soft demand — open a last-minute promo or add an OTA channel',
+      messageTh: `ดีมานด์แยกตามห้อง: ขึ้น ${topUp.roomType}, ดัน ${topDown.roomType}${occTh} — บริหารราคาตามประเภทห้อง`,
+      messageEn: `Demand is split: raise ${topUp.roomType}, push ${topDown.roomType}${occEn} — manage rates by room type`,
     }
   }
 
-  // All increases — hot demand. The risk is leaving money on the
-  // table via standing online discounts; tell the owner to close
-  // those before raising rack rates.
-  if (increases.length === rates.length) {
-    return {
-      messageTh: 'ดีมานด์สูงทุกห้อง — ปิดส่วนลดออนไลน์และตั้งราคา weekend premium',
-      messageEn: 'High demand across all rooms — close online discounts and set a weekend premium',
-    }
-  }
-
-  // All holds — rates are in the comfortable middle band. The lever
-  // for revenue growth here is volume (more channels, more reviews),
-  // not price.
-  if (holds.length === rates.length) {
-    return {
-      messageTh: 'ราคาทุกห้องเหมาะสม — เน้นเพิ่มช่องทางขายและรีวิวเพื่อขับยอด',
-      messageEn: 'All rates appropriate — focus on expanding sales channels and reviews',
-    }
-  }
-
-  // Mixed — call out the most actionable side. Increases get
-  // priority when they exist because raising is faster ROI than
-  // running a promo; if increases dominate, name the highest-impact
-  // type so the owner knows where to start.
-  if (increases.length > decreases.length) {
-    const topIncrease = increases.slice().sort((a, b) => b.impactThb - a.impactThb)[0]
-    return {
-      messageTh: `${topIncrease.roomType} ดีมานด์สูง — ปรับราคาขึ้นและพิจารณา weekend premium`,
-      messageEn: `${topIncrease.roomType} in high demand — raise rate and consider a weekend premium`,
-    }
-  }
+  // ── SOFT DEMAND — decreases dominate (more types need a push than
+  // need a raise). Name the weakest types; tailor the action to
+  // weekend/weekday, trend, and competitor gap. ──
   if (decreases.length > increases.length) {
+    const names = topTwoNames(decreases)
+    const nameTh = names.join(' และ ')
+    const nameEn = names.join(' and ')
+    const more = decreases.length - names.length
+    const moreTh = more > 0 ? ` (+${more} ห้องอื่น)` : ''
+    const moreEn = more > 0 ? ` (+${more} more)` : ''
+
+    let tailTh: string
+    let tailEn: string
+    if (ctx?.competitorHigherPct != null) {
+      // Competitors are priced above us yet we're soft — it's a
+      // visibility/promo problem, not a price-too-high one.
+      tailTh = `คู่แข่งราคาสูงกว่า ${ctx.competitorHigherPct}% — ดึงยอดด้วยดีลและโปรบน OTA แทนการลดลึก`
+      tailEn = `competitors price ${ctx.competitorHigherPct}% higher — win bookings with an OTA deal, not a deep cut`
+    } else if (ctx?.isWeekend) {
+      tailTh =
+        ctx.trend === 'worsening'
+          ? 'สุดสัปดาห์ยังว่าง — เปิดดีล last-minute บน OTA และดันโพสต์โซเชียลคืนนี้'
+          : 'จัดโปรสุดสัปดาห์และเพิ่มการมองเห็นบน OTA'
+      tailEn =
+        ctx.trend === 'worsening'
+          ? 'weekend still open — push a last-minute OTA deal and boost social tonight'
+          : 'run a weekend promo and lift OTA visibility'
+    } else {
+      tailTh =
+        ctx?.trend === 'worsening'
+          ? 'ยอดอ่อนลง — เปิดดีลกลางสัปดาห์/ลูกค้าองค์กรและกระตุ้น OTA วันนี้'
+          : 'เพิ่มช่องทาง OTA และโปรพักกลางสัปดาห์'
+      tailEn =
+        ctx?.trend === 'worsening'
+          ? 'demand slipping — open a midweek/corporate deal and nudge OTA today'
+          : 'add an OTA channel and a midweek stay offer'
+    }
+
     return {
-      messageTh: `${decreases.length} ประเภทห้องต้องการกระตุ้นยอด — เปิดดีล last-minute สำหรับห้องเหล่านี้`,
-      messageEn: `${decreases.length} room types need a push — open last-minute deals for these types`,
+      messageTh: `${nameTh} ว่างมาก${moreTh}${occTh} — ${tailTh}`,
+      messageEn: `${nameEn} sitting soft${moreEn}${occEn} — ${tailEn}`,
     }
   }
 
-  // Increases == decreases — surface the polarisation explicitly so
-  // the owner knows to manage rates by type, not blanket.
+  // ── HOT DEMAND — increases dominate (and outnumber decreases). Name
+  // the strongest types; the risk is standing online discounts leaving
+  // money on the table. ──
+  if (increases.length > 0 && increases.length > decreases.length) {
+    const names = topTwoNames(increases)
+    const nameTh = names.join(' และ ')
+    const nameEn = names.join(' and ')
+
+    let tailTh: string
+    let tailEn: string
+    if (ctx?.competitorHigherPct != null) {
+      tailTh = `คู่แข่งสูงกว่า ${ctx.competitorHigherPct}% — ยังมีช่องขึ้นราคาได้อีก ปิดส่วนลดออนไลน์`
+      tailEn = `competitors ${ctx.competitorHigherPct}% higher — room to raise further, close online discounts`
+    } else if (ctx?.isWeekend) {
+      tailTh = 'ปิดส่วนลดออนไลน์และตั้ง weekend premium'
+      tailEn = 'close online discounts and set a weekend premium'
+    } else {
+      tailTh = 'ปิดส่วนลดและปรับราคาขึ้นตามดีมานด์'
+      tailEn = 'close discounts and raise rates with demand'
+    }
+
+    return {
+      messageTh: `${nameTh} ดีมานด์สูง${occTh} — ${tailTh}`,
+      messageEn: `${nameEn} in high demand${occEn} — ${tailEn}`,
+    }
+  }
+
+  // ── ALL HOLD — rates sit in the comfortable band. Lever is volume,
+  // not price; vary the nudge by competitor gap / weekend / trend. ──
+  if (holds.length === rates.length) {
+    if (ctx?.competitorHigherPct != null) {
+      return {
+        messageTh: `ราคาทุกห้องเหมาะสม แต่คู่แข่งสูงกว่า ${ctx.competitorHigherPct}% — ทดลองขยับราคาขึ้นเล็กน้อย`,
+        messageEn: `All rates healthy, but competitors price ${ctx.competitorHigherPct}% higher — test a small increase`,
+      }
+    }
+    if (ctx?.isWeekend) {
+      return {
+        messageTh: `ราคาทุกห้องเหมาะสม${occTh} — ดันยอดสุดสัปดาห์ผ่าน OTA และรีวิว`,
+        messageEn: `All rates appropriate${occEn} — drive weekend volume via OTA and reviews`,
+      }
+    }
+    const tail =
+      ctx?.trend === 'improving'
+        ? { th: 'โมเมนตัมดีขึ้น เก็บรีวิวเพิ่มเพื่อรักษาราคา', en: 'momentum improving — gather reviews to hold rates' }
+        : ctx?.trend === 'worsening'
+          ? { th: 'ยอดเริ่มอ่อน เพิ่มช่องทางขายก่อนต้องลดราคา', en: 'demand softening — add channels before cutting price' }
+          : { th: 'เน้นเพิ่มช่องทางขายและรีวิวเพื่อขับยอด', en: 'focus on expanding channels and reviews' }
+    return {
+      messageTh: `ราคาทุกห้องเหมาะสม${occTh} — ${tail.th}`,
+      messageEn: `All rates appropriate${occEn} — ${tail.en}`,
+    }
+  }
+
+  // Safety net — the branches above are exhaustive over the (increase,
+  // decrease, hold) count space, but TypeScript needs a terminal return
+  // and a future direction value would land here. Generic by-type copy.
   return {
-    messageTh: 'มีทั้งห้องดีมานด์สูงและต่ำ — บริหารราคาตามประเภทห้อง',
-    messageEn: 'Demand is split — manage rates by room type, not blanket',
+    messageTh: `บริหารราคาตามประเภทห้อง${occTh}`,
+    messageEn: `Manage rates by room type${occEn}`,
   }
 }
 
