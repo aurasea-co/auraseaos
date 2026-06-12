@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Trash2, Plus, Upload, Download } from 'lucide-react'
 import { useUser } from '@/providers/user-context'
@@ -66,8 +66,25 @@ export default function CompetitorsPage() {
   // opt-in for the occasional full competitive shop.
   const [showAllChannels, setShowAllChannels] = useState(false)
 
+  // Monotonic id per reload() invocation. activeBranch defaults to the
+  // alphabetically-first branch on a fresh load (often an F&B sibling),
+  // so a fetch can be in flight for one branch when the user switches
+  // to another. Each in-flight response checks it's still the newest
+  // invocation before touching state — a late 400 (or stale data) from
+  // the previous branch can never paint over the current one.
+  const reloadSeq = useRef(0)
+
   const reload = useCallback(async () => {
     if (!activeBranch) return
+    if (activeBranch.business_type !== 'accommodation') {
+      // Non-hotel branch: never fetch — the render's hotelOnly notice
+      // covers it and the API would 400 wrong_business_type anyway.
+      // Same early-return the RateDesk dashboard's load() does. Bump
+      // the seq so any response still in flight is invalidated too.
+      reloadSeq.current++
+      return
+    }
+    const seq = ++reloadSeq.current
     setLoading(true)
     setError(null)
     try {
@@ -84,6 +101,9 @@ export default function CompetitorsPage() {
           .order('metric_date', { ascending: false })
           .limit(30),
       ])
+      // Superseded while in flight (branch switched, or a newer save
+      // triggered reload) — drop this result silently.
+      if (seq !== reloadSeq.current) return
       if (compRes.ok) {
         const json = (await compRes.json()) as { competitors: Competitor[]; maxCompetitors: number }
         setCompetitors(json.competitors || [])
@@ -120,7 +140,7 @@ export default function CompetitorsPage() {
       }
       setMyRateByType(rateMap)
     } finally {
-      setLoading(false)
+      if (seq === reloadSeq.current) setLoading(false)
     }
   }, [activeBranch, supabase])
 
