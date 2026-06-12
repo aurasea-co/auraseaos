@@ -38,15 +38,28 @@ async function authorize(branchId: string): Promise<AuthOk | AuthFail> {
     return { ok: false, status: 400, error: 'wrong_business_type' }
   }
   // Owner + manager — mirrors the manual competitor-rates route and the
-  // RateDesk access matrix (ratedesk_competitors).
-  const { data: memberRow } = await ub
-    .from('organization_members')
-    .select('role')
-    .eq('user_id', user.id)
-    .eq('organization_id', branch.organization_id)
-    .in('role', ['owner', 'manager'])
-    .maybeSingle()
-  if (!memberRow) return { ok: false, status: 403, error: 'forbidden_role' }
+  // RateDesk access matrix (ratedesk_competitors). organization_members
+  // holds owners only (live CHECK constraint); managers live in
+  // branch_members with role 'manager' / legacy 'branch_manager' — see
+  // invite/accept/route.ts and get-user-context.ts. branch_members is
+  // keyed by branch_id, so cross-org managers never match.
+  const [{ data: ownerRow }, { data: managerRow }] = await Promise.all([
+    ub
+      .from('organization_members')
+      .select('role')
+      .eq('user_id', user.id)
+      .eq('organization_id', branch.organization_id)
+      .eq('role', 'owner')
+      .maybeSingle(),
+    ub
+      .from('branch_members')
+      .select('role')
+      .eq('user_id', user.id)
+      .eq('branch_id', branchId)
+      .in('role', ['manager', 'branch_manager'])
+      .maybeSingle(),
+  ])
+  if (!ownerRow && !managerRow) return { ok: false, status: 403, error: 'forbidden_role' }
   return { ok: true, userId: user.id, organizationId: branch.organization_id }
 }
 

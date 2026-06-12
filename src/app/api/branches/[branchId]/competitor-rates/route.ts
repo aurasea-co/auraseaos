@@ -43,16 +43,33 @@ async function authorize(branchId: string) {
     return { ok: false as const, status: 400, error: 'wrong_business_type' }
   }
   // Owner + manager — mirrors the RateDesk access matrix
-  // (ratedesk_competitors) now that this surface lives under RateDesk
-  // rather than Settings. Managers run the daily competitor check too.
-  const { data: memberRow } = await ub
-    .from('organization_members')
-    .select('role')
-    .eq('user_id', user.id)
-    .eq('organization_id', branch.organization_id)
-    .in('role', ['owner', 'manager'])
-    .maybeSingle()
-  if (!memberRow) return { ok: false as const, status: 403, error: 'forbidden_role' }
+  // (ratedesk_competitors). Schema reality (see invite/accept/route.ts
+  // and get-user-context.ts): organization_members holds OWNERS ONLY —
+  // the live CHECK constraint rejects any other role — while invited
+  // managers live in branch_members with role 'manager' (legacy rows:
+  // 'branch_manager'). So: org ownership grants access to every branch
+  // in the org; manager access is per-branch via branch_members, which
+  // also keeps multi-tenancy intact (a manager from another org has no
+  // row for this branch_id).
+  const [{ data: ownerRow }, { data: managerRow }] = await Promise.all([
+    ub
+      .from('organization_members')
+      .select('role')
+      .eq('user_id', user.id)
+      .eq('organization_id', branch.organization_id)
+      .eq('role', 'owner')
+      .maybeSingle(),
+    ub
+      .from('branch_members')
+      .select('role')
+      .eq('user_id', user.id)
+      .eq('branch_id', branchId)
+      .in('role', ['manager', 'branch_manager'])
+      .maybeSingle(),
+  ])
+  if (!ownerRow && !managerRow) {
+    return { ok: false as const, status: 403, error: 'forbidden_role' }
+  }
   return { ok: true as const, user, branch }
 }
 
