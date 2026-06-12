@@ -59,31 +59,41 @@ async function authorize(branchId: string, mode: 'read' | 'write' | 'delete'): P
   if (branch.business_type !== 'fnb') {
     return { ok: false, status: 400, error: 'wrong_business_type' }
   }
-  const { data: memberRow } = await ub
-    .from('organization_members')
-    .select('role')
-    .eq('user_id', user.id)
-    .eq('organization_id', branch.organization_id)
-    .maybeSingle()
-  if (!memberRow) return { ok: false, status: 403, error: 'not_member' }
-  const role = memberRow.role as string
-  // Read: any org member. Write: owner + manager. Delete: owner only.
-  if (mode === 'read') {
-    // Pass through.
-  } else if (mode === 'write') {
-    if (role !== 'owner' && role !== 'manager') {
-      return { ok: false, status: 403, error: 'owner_or_manager_only' }
-    }
-  } else if (mode === 'delete') {
-    if (role !== 'owner') {
-      return { ok: false, status: 403, error: 'owner_only' }
-    }
+  // Schema reality (see invite/accept/route.ts and get-user-context.ts):
+  // organization_members holds OWNERS ONLY — the live CHECK constraint
+  // rejects any other role — while invited managers live in
+  // branch_members with role 'manager' (legacy rows: 'branch_manager').
+  // So: org ownership grants access to every branch in the org; manager
+  // access is per-branch via branch_members, which also keeps
+  // multi-tenancy intact (a manager from another org has no row for
+  // this branch_id).
+  const [{ data: ownerRow }, { data: managerRow }] = await Promise.all([
+    ub
+      .from('organization_members')
+      .select('role')
+      .eq('user_id', user.id)
+      .eq('organization_id', branch.organization_id)
+      .eq('role', 'owner')
+      .maybeSingle(),
+    ub
+      .from('branch_members')
+      .select('role')
+      .eq('user_id', user.id)
+      .eq('branch_id', branchId)
+      .in('role', ['manager', 'branch_manager'])
+      .maybeSingle(),
+  ])
+  if (!ownerRow && !managerRow) return { ok: false, status: 403, error: 'not_member' }
+  const role: 'owner' | 'manager' = ownerRow ? 'owner' : 'manager'
+  // Read: owner + manager. Write: owner + manager. Delete: owner only.
+  if (mode === 'delete' && role !== 'owner') {
+    return { ok: false, status: 403, error: 'owner_only' }
   }
   return {
     ok: true,
     userId: user.id,
     organizationId: branch.organization_id,
-    role: role === 'manager' ? 'manager' : 'owner',
+    role,
   }
 }
 
