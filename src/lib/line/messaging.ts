@@ -128,9 +128,15 @@ export function buildMorningFlashLine(params: {
   sales?: number
   /** Per-cover avg spend (F&B). Appended to the covers line when > 0. */
   avgSpend?: number
+  /** THB-total visibility. When false (manager/staff recipients) the
+   *  revenue line is dropped — same rule as the dashboard, email brief,
+   *  and exports (canSeeRevenue()). Defaults true so owner-only callers
+   *  like the closing-summary keep the revenue line. */
+  canSeeRevenue?: boolean
   recommendation: string
 }): string {
   const { branchName, branchType, date } = params
+  const canSeeRevenue = params.canSeeRevenue ?? true
 
   // Buddhist year compressed to 2 digits (e.g. 2569 → 69). Applied to both
   // accommodation and F&B headers. Idempotent so callers may pre-shorten.
@@ -143,7 +149,8 @@ export function buildMorningFlashLine(params: {
       : gap > 0
         ? ` · เกินเป้า ฿${Math.round(Math.abs(gap))}`
         : ''
-    return `● ${branchName} — ${shortDate}\nADR ฿${Math.round(params.adr || 0)}${adrGapText}\nOcc ${Math.round(params.occupancy || 0)}% · ${params.roomsAvailable || 0} ห้องว่าง\nรายได้ ฿${(params.revenue || 0).toLocaleString()}\n\n💡 ${params.recommendation}`
+    const revenueLine = canSeeRevenue ? `\nรายได้ ฿${(params.revenue || 0).toLocaleString()}` : ''
+    return `● ${branchName} — ${shortDate}\nADR ฿${Math.round(params.adr || 0)}${adrGapText}\nOcc ${Math.round(params.occupancy || 0)}% · ${params.roomsAvailable || 0} ห้องว่าง${revenueLine}\n\n💡 ${params.recommendation}`
   }
 
   // F&B formatting:
@@ -156,6 +163,6 @@ export function buildMorningFlashLine(params: {
   const coversLeft = avgSpend && avgSpend > 0
     ? `ลูกค้า ${params.covers || 0} · ฿${Math.round(avgSpend).toLocaleString()}/คน`
     : `ลูกค้า ${params.covers || 0}`
-  const revenueLine = `รายได้ ฿${(params.sales || 0).toLocaleString()}`
-  return `● ${branchName} — ${shortDate}\nMargin (ไม่รวมเงินเดือน) ${marginPct}%\n${coversLeft}\n${revenueLine}\n\n💡 ${params.recommendation}`
+  const revenueLine = canSeeRevenue ? `\nรายได้ ฿${(params.sales || 0).toLocaleString()}` : ''
+  return `● ${branchName} — ${shortDate}\nMargin (ไม่รวมเงินเดือน) ${marginPct}%\n${coversLeft}${revenueLine}\n\n💡 ${params.recommendation}`
 }

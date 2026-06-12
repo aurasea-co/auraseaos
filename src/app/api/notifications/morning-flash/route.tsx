@@ -431,6 +431,7 @@ async function handleMorningFlash(req: NextRequest) {
           covers: latest.customers || undefined,
           sales: latest.revenue,
           avgSpend,
+          canSeeRevenue: recipientCanSeeRevenue,
           recommendation,
         }),
       )
@@ -780,6 +781,7 @@ async function handleMorningFlash(req: NextRequest) {
             },
             topRecs: recs,
             dashboardUrl: `${baseUrl}/menudesk`,
+            canSeeRevenue: recipientCanSeeRevenue,
           })
 
           ok = await sendLineFlexMessage(profile.line_id as string, flex.altText, flex.contents)

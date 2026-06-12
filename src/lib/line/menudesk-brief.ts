@@ -27,6 +27,12 @@ export interface FnbBriefData {
    *  in the footer when provided so owners can dig into the bubble's
    *  space-constrained summary. */
   dashboardUrl?: string
+  /** THB-total visibility. When false (manager/staff recipients) the
+   *  revenue KPI box and its altText mention are dropped — covers,
+   *  ฿/คน, and food cost stay visible (operational, not P&L). Mirrors
+   *  canSeeRevenue() and the MenuDesk dashboard's revenue-card gate.
+   *  Defaults true so owner recipients are unaffected. */
+  canSeeRevenue?: boolean
 }
 
 export interface FlexMessageEnvelope {
@@ -119,30 +125,30 @@ export function buildFnbBriefFlexMessage(data: FnbBriefData): FlexMessageEnvelop
     ? `${data.yesterday.foodCostPct.toFixed(1)}%`
     : '—'
 
-  const altText = `☀️ ${data.branchName} — เมื่อวาน รายได้ ${revStr} · ลูกค้า ${coversStr}`
+  const canSeeRevenue = data.canSeeRevenue ?? true
 
-  const bodyContents: Array<Record<string, unknown>> = [
-    // KPI row 1: Revenue + Covers
-    {
+  const altText = canSeeRevenue
+    ? `☀️ ${data.branchName} — เมื่อวาน รายได้ ${revStr} · ลูกค้า ${coversStr}`
+    : `☀️ ${data.branchName} — เมื่อวาน ลูกค้า ${coversStr}`
+
+  // KPI boxes, revenue dropped for non-revenue recipients. Chunked into
+  // rows of two so the layout stays balanced whether there are 3 or 4
+  // boxes (manager: covers / ฿คน / food cost → 2 rows; owner: + รายได้).
+  const kpiBoxes: Array<Record<string, unknown>> = []
+  if (canSeeRevenue) kpiBoxes.push(kpiBox('รายได้', revStr, COLORS.text))
+  kpiBoxes.push(kpiBox('ลูกค้า', coversStr, COLORS.text))
+  kpiBoxes.push(kpiBox('฿/คน', avgStr, COLORS.text))
+  kpiBoxes.push(kpiBox('Food cost', foodCostStr, foodCostColor(data.yesterday.foodCostPct)))
+
+  const bodyContents: Array<Record<string, unknown>> = []
+  for (let i = 0; i < kpiBoxes.length; i += 2) {
+    bodyContents.push({
       type: 'box',
       layout: 'horizontal',
       spacing: 'sm',
-      contents: [
-        kpiBox('รายได้', revStr, COLORS.text),
-        kpiBox('ลูกค้า', coversStr, COLORS.text),
-      ],
-    },
-    // KPI row 2: Avg per cover + Food cost %
-    {
-      type: 'box',
-      layout: 'horizontal',
-      spacing: 'sm',
-      contents: [
-        kpiBox('฿/คน', avgStr, COLORS.text),
-        kpiBox('Food cost', foodCostStr, foodCostColor(data.yesterday.foodCostPct)),
-      ],
-    },
-  ]
+      contents: kpiBoxes.slice(i, i + 2),
+    })
+  }
 
   // Up to 2 highest-urgency recs. When no recs fire, surface a
   // reassuring "all signals normal" panel so the bubble doesn't read
