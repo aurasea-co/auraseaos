@@ -10,7 +10,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 // DELETE — remove all rate rows for the given competitor name
 //          (query param ?competitor=...)
 //
-// Owner-only. The page at /settings/competitors is the only caller.
+// Owner + manager. The page at /ratedesk/competitors is the only caller.
 
 const MAX_COMPETITORS = 5
 
@@ -42,14 +42,17 @@ async function authorize(branchId: string) {
   if (branch.business_type !== 'accommodation') {
     return { ok: false as const, status: 400, error: 'wrong_business_type' }
   }
-  const { data: ownerRow } = await ub
+  // Owner + manager — mirrors the RateDesk access matrix
+  // (ratedesk_competitors) now that this surface lives under RateDesk
+  // rather than Settings. Managers run the daily competitor check too.
+  const { data: memberRow } = await ub
     .from('organization_members')
     .select('role')
     .eq('user_id', user.id)
     .eq('organization_id', branch.organization_id)
-    .eq('role', 'owner')
+    .in('role', ['owner', 'manager'])
     .maybeSingle()
-  if (!ownerRow) return { ok: false as const, status: 403, error: 'owner_only' }
+  if (!memberRow) return { ok: false as const, status: 403, error: 'forbidden_role' }
   return { ok: true as const, user, branch }
 }
 
@@ -116,7 +119,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ branchId: 
   }
 
   // Surface every (room_type, channel) rate captured TODAY so the
-  // multi-channel grid in /settings/competitors can pre-fill its
+  // multi-channel grid in /ratedesk/competitors can pre-fill its
   // inputs without a second round-trip. Keyed by `${roomType}|${channel}`
   // because object-of-object adds two layers of optional-chaining
   // pain in the client; a flat string key is simpler.

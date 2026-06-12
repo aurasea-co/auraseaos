@@ -37,14 +37,16 @@ async function authorize(branchId: string): Promise<AuthOk | AuthFail> {
   if (branch.business_type !== 'accommodation') {
     return { ok: false, status: 400, error: 'wrong_business_type' }
   }
-  const { data: ownerRow } = await ub
+  // Owner + manager — mirrors the manual competitor-rates route and the
+  // RateDesk access matrix (ratedesk_competitors).
+  const { data: memberRow } = await ub
     .from('organization_members')
     .select('role')
     .eq('user_id', user.id)
     .eq('organization_id', branch.organization_id)
-    .eq('role', 'owner')
+    .in('role', ['owner', 'manager'])
     .maybeSingle()
-  if (!ownerRow) return { ok: false, status: 403, error: 'owner_only' }
+  if (!memberRow) return { ok: false, status: 403, error: 'forbidden_role' }
   return { ok: true, userId: user.id, organizationId: branch.organization_id }
 }
 

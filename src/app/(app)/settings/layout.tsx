@@ -16,7 +16,6 @@ import {
   Download,
   Upload,
   BedDouble,
-  LineChart,
   Plug,
   UtensilsCrossed,
   ChevronRight,
@@ -32,9 +31,9 @@ const allSections = [
   // branch is F&B so the link is harmless if surfaced for a mixed
   // owner who's currently on an F&B branch.
   { href: '/settings/rooms', icon: BedDouble, labelKey: 'rooms' as const, roles: ['owner'] },
-  // Competitor rate manual entry — feeds the RateDesk undercut
-  // signal. Same hotel-only early-return as /settings/rooms.
-  { href: '/settings/competitors', icon: LineChart, labelKey: 'competitors' as const, roles: ['owner'] },
+  // Competitor rates moved to the RateDesk section (/ratedesk/competitors)
+  // so it's one click from the owner's primary surface. The old
+  // /settings/competitors route now permanently redirects there.
   // PMS integration config (provider + external_property_id) —
   // consumed by the hourly push-approved-rates worker. Hotel-only
   // early-return inside the page. Owner-only: managers shouldn't

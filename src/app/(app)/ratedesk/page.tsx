@@ -223,7 +223,7 @@ export default function RateDeskPage() {
   // (If we add a LINE delivery channel later, that flow can persist
   //  via /api/notifications/morning-flash — separate ticket.)
   //
-  // Competitor rates collected from /settings/competitors are layered
+  // Competitor rates collected from /ratedesk/competitors are layered
   // onto the engine inputs via attachCompetitorRates(). The two
   // competitor-aware signals (undercut + overpricing) require ≥3 days
   // with competitor data before firing, so the owner needs to log
@@ -493,7 +493,7 @@ export default function RateDeskPage() {
       </section>
 
       {/* Competitor overlay — ฿0 rows are placeholder competitors the
-          owner added at /settings/competitors but hasn't yet entered
+          owner added at /ratedesk/competitors but hasn't yet entered
           a rate for. Hide them from the table so the dashboard doesn't
           flash "Pullman Korat ฿0" as if it were a real data point.
           The engine adapter already filters zeros, so the rec layer
@@ -506,7 +506,7 @@ export default function RateDeskPage() {
             return (
               <div style={{ padding: '12px 0', fontSize: 12, color: 'var(--color-text-tertiary)' }}>
                 {t('noCompetitors')}{' '}
-                <Link href="/settings/competitors" style={{ color: 'var(--color-accent, #534AB7)' }}>
+                <Link href="/ratedesk/competitors" style={{ color: 'var(--color-accent, #534AB7)' }}>
                   {t('manageCompetitors')} →
                 </Link>
               </div>
