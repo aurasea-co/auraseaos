@@ -27,7 +27,8 @@ import {
   type MarginInputRow,
 } from '@/lib/calculations/marginAggregates'
 import Link from 'next/link'
-import { ArrowRight, LineChart } from 'lucide-react'
+import { ArrowRight } from 'lucide-react'
+import { CompetitorStalenessCard } from '@/components/competitor-staleness-card'
 import { ManagerGettingStarted } from '@/components/onboarding/ManagerGettingStarted'
 import { OwnerGettingStarted } from '@/components/onboarding/OwnerGettingStarted'
 
@@ -414,6 +415,10 @@ export function HomeDashboard() {
             </p>
           )}
 
+          {/* Stale competitor-rates nudge — hotel only; renders nothing
+              when all competitors were updated today (Bangkok). */}
+          {isHotel && <CompetitorStalenessCard branchId={activeBranch.id} />}
+
           {/* Entry compliance dots */}
           <EntryStatusPanel metrics={metrics} />
 
@@ -434,9 +439,6 @@ export function HomeDashboard() {
             {t('enterData')}
             <ArrowRight size={14} />
           </Link>
-
-          {/* Hotel-only one-click entry to Competitor rates (RateDesk). */}
-          {isHotel && <CompetitorRatesCta label={t('competitorRatesCta')} />}
         </div>
       </PullToRefresh>
     )
@@ -523,6 +525,10 @@ export function HomeDashboard() {
           </p>
         )}
 
+        {/* Stale competitor-rates nudge — hotel only; renders nothing
+            when all competitors were updated today (Bangkok). */}
+        {isHotel && <CompetitorStalenessCard branchId={activeBranch.id} />}
+
         {/* Chart */}
         {isHotel ? (
           (() => {
@@ -577,39 +583,8 @@ export function HomeDashboard() {
           {t('enterData')}
           <ArrowRight size={14} />
         </Link>
-
-        {/* Hotel-only one-click entry to Competitor rates (RateDesk). */}
-        {isHotel && <CompetitorRatesCta label={t('competitorRatesCta')} />}
       </div>
     </PullToRefresh>
-  )
-}
-
-// Secondary CTA to the RateDesk Competitor rates page. Hotel-only, and
-// rendered only in the owner / manager views (the roles that carry
-// ratedesk_competitors access). Gives the daily 2-minute competitor
-// check a one-click entry point from Home — previously it lived two
-// clicks deep under Settings → Competitor rates.
-function CompetitorRatesCta({ label }: { label: string }) {
-  return (
-    <Link
-      href="/ratedesk/competitors"
-      className="flex items-center justify-center gap-2 touch-target"
-      style={{
-        padding: '8px 16px',
-        background: 'var(--color-bg)',
-        border: '1px solid var(--color-border)',
-        color: 'var(--color-text-primary)',
-        fontSize: 13,
-        fontWeight: 500,
-        borderRadius: 'var(--radius-md)',
-        textDecoration: 'none',
-      }}
-    >
-      <LineChart size={14} style={{ opacity: 0.6 }} />
-      {label}
-      <ArrowRight size={14} />
-    </Link>
   )
 }
 
