@@ -96,6 +96,22 @@ function avgOccupancy(days: RecommendationInput[]): number {
   return days.reduce((s, d) => s + d.occupancyRate, 0) / days.length
 }
 
+function median(values: ReadonlyArray<number>): number {
+  const s = values.slice().sort((a, b) => a - b)
+  const mid = Math.floor(s.length / 2)
+  return s.length % 2 === 1 ? s[mid] : (s[mid - 1] + s[mid]) / 2
+}
+
+// Weekday display names, indexed by getUTCDay() (0 = Sunday) — the same
+// DOW derivation deriveDayContext/forecastTomorrow already use on the
+// raw Bangkok calendar date.
+const WEEKDAY_TH = ['วันอาทิตย์', 'วันจันทร์', 'วันอังคาร', 'วันพุธ', 'วันพฤหัสฯ', 'วันศุกร์', 'วันเสาร์'] as const
+const WEEKDAY_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
+
+function dowOf(dateStr: string): number {
+  return new Date(`${dateStr}T00:00:00Z`).getUTCDay()
+}
+
 function pickLatest(days: RecommendationInput[]): RecommendationInput {
   return days[days.length - 1]
 }
@@ -449,6 +465,16 @@ export function recommendPerRoomTypeRates(
   const recent = days.slice(-3)
   const rows: PerRoomTypeRate[] = []
 
+  // Matched-weekday anchor for the reason copy: the latest ACTUAL day.
+  // (The target night is the future — it has no occupancy to compare.)
+  // An earlier revision cited the target night's weekday norm next to
+  // the 3-day figure, which read as comparable when the windows weren't
+  // — every number a reason sentence compares now comes from the same
+  // weekday. TEXT-ONLY: direction and every satang value come from the
+  // 3-day math above, unchanged.
+  const latestDay = days.length > 0 ? days[days.length - 1] : null
+  const latestDow = latestDay ? dowOf(latestDay.date) : null
+
   for (const roomType of order) {
     const m = meta.get(roomType)!
 
@@ -523,17 +549,65 @@ export function recommendPerRoomTypeRates(
     const occPct = Math.round(avgOcc * 100)
     const nothingSold = occs.every((o) => o === 0)
 
+    // Matched-weekday clause: the latest day's own single-day occupancy
+    // for THIS type vs that same weekday's median — like-for-like, with
+    // the delta stated. Null when the type lacks ≥3 true same-weekday
+    // samples (sparse Suite history) or has no usable latest-day value;
+    // those types keep the plain 3-day wording below, stay on the
+    // sheet, and state no fabricated delta.
+    let matched: { th: string; en: string } | null = null
+    if (latestDay && latestDow != null) {
+      const latestRow = (latestDay.roomTypeBreakdown ?? []).find((r) => r.roomType === roomType)
+      const latestOcc = latestRow && latestRow.totalRooms > 0
+        ? latestRow.occupiedRooms / latestRow.totalRooms
+        : !latestRow && knownInventory
+          ? 0
+          : null
+      if (latestOcc != null) {
+        const wb = computeWeekdayBaseline(days, latestDay.date, roomType)
+        if (!wb.insufficient && wb.source === 'weekday' && wb.occupancyMedian != null) {
+          const basePct = Math.round(wb.occupancyMedian * 100)
+          const todayPct = Math.round(latestOcc * 100)
+          const delta = todayPct - basePct
+          const dayTh = WEEKDAY_TH[latestDow].replace(/^วัน/, '')
+          const dayEn = WEEKDAY_EN[latestDow]
+          const posTh = Math.abs(delta) < 5
+            ? 'ใกล้เคียงปกติ'
+            : delta > 0
+              ? `สูงกว่าปกติ ${delta}pts`
+              : `ต่ำกว่าปกติ ${Math.abs(delta)}pts`
+          const posEn = Math.abs(delta) < 5
+            ? 'near norm'
+            : delta > 0
+              ? `${delta}pts above norm`
+              : `${Math.abs(delta)}pts below norm`
+          matched = {
+            th: `${dayTh}นี้ ${todayPct}% · ปกติ${dayTh} ${basePct}% (n=${wb.sampleCount}) → ${posTh}`,
+            en: `${dayEn} ${todayPct}% vs ${dayEn} norm ${basePct}% (n=${wb.sampleCount}) → ${posEn}`,
+          }
+        }
+      }
+    }
+
     if (avgOcc > 0.85) {
       // High-demand band — same 10% lift the property-level engine
       // uses, applied to this type's own rack rate.
       const lift = Math.round(currentRate * 0.10)
       const suggested = currentRate + lift
+      // Matched form drops the 3-day occPct from the sentence entirely:
+      // a 3-day mean next to a one-weekday median reads as comparable
+      // when it isn't. The 3-day math still decides direction/rate; the
+      // sentence's qualitative verb carries that verdict.
       rows.push(buildRow(
         currentRate,
         suggested,
         'increase',
-        `Occupancy ${occPct}% สูง — แนะนำขึ้น`,
-        `${occPct}% occupancy — suggest raise`,
+        matched
+          ? `ดีมานด์สูง — แนะนำขึ้น · ${matched.th}`
+          : `Occupancy ${occPct}% สูง — แนะนำขึ้น`,
+        matched
+          ? `High demand — suggest raise · ${matched.en}`
+          : `${occPct}% occupancy — suggest raise`,
       ))
     } else if (avgOcc < 0.35) {
       // Low-demand band. Slightly tighter than the 40% threshold the
@@ -551,11 +625,15 @@ export function recommendPerRoomTypeRates(
         suggested,
         'decrease',
         nothingSold
-          ? 'ไม่มีการจองห้องนี้ — พิจารณาลดราคา'
-          : `Occupancy ${occPct}% ต่ำ — พิจารณาลด`,
+          ? `ไม่มีการจองห้องนี้ — พิจารณาลดราคา${matched ? ` · ${matched.th}` : ''}`
+          : matched
+            ? `ดีมานด์ต่ำ — พิจารณาลด · ${matched.th}`
+            : `Occupancy ${occPct}% ต่ำ — พิจารณาลด`,
         nothingSold
-          ? 'No bookings — consider lowering'
-          : `${occPct}% occupancy — consider lower`,
+          ? `No bookings — consider lowering${matched ? ` · ${matched.en}` : ''}`
+          : matched
+            ? `Soft demand — consider lower · ${matched.en}`
+            : `${occPct}% occupancy — consider lower`,
       ))
     } else {
       // Comfortable middle band — explicit hold so the owner sees the
@@ -565,8 +643,12 @@ export function recommendPerRoomTypeRates(
         currentRate,
         currentRate,
         'hold',
-        `Occupancy ${occPct}% — ราคาเหมาะสม`,
-        `${occPct}% occupancy — current rate is appropriate`,
+        matched
+          ? `ราคาเหมาะสม · ${matched.th}`
+          : `Occupancy ${occPct}% — ราคาเหมาะสม`,
+        matched
+          ? `Current rate is appropriate · ${matched.en}`
+          : `${occPct}% occupancy — current rate is appropriate`,
       ))
     }
   }
@@ -575,6 +657,96 @@ export function recommendPerRoomTypeRates(
   // free to sort by impact for the cap decision, but the natural order
   // is what we hand back so non-capped renders read consistently.
   return rows
+}
+
+// ── Weekday-pattern baseline ───────────────────────────────────────────────
+
+/** "What does this weekday normally do" — median-based so a single
+ *  spike day can't drag the norm. Pure; display/narrative input only
+ *  (never feeds rate arithmetic). */
+export interface WeekdayBaseline {
+  /** True when even the all-day fallback has < 3 samples. Consumers
+   *  must say nothing about a norm rather than fabricate one. */
+  insufficient: boolean
+  /** Samples behind the returned medians (same-weekday count for
+   *  source 'weekday', all-day count for 'all_day'; when insufficient,
+   *  the same-weekday count that fell short). */
+  sampleCount: number
+  /** 0..1 median occupancy. Present when !insufficient. */
+  occupancyMedian?: number
+  /** Median of the positive THB rates observed (rounded). Display-only
+   *  — never written anywhere. Null when no positive rate samples. */
+  rateThbMedian?: number | null
+  /** 'weekday' = true same-weekday history (≥3 samples); 'all_day' =
+   *  fallback median across every day in the window. */
+  source?: 'weekday' | 'all_day'
+}
+
+/** Same-weekday baseline for `targetDate` from the trailing window in
+ *  `days`. Property-level when `roomType` is omitted; per-room-type
+ *  from each day's room_type_breakdown row otherwise (a day counts for
+ *  a type only when its row carries inventory — mirrors the occupancy
+ *  convention in recommendPerRoomTypeRates). `targetDate` itself is
+ *  excluded so a day never explains its own norm.
+ *
+ *  Fallback ladder: <3 same-weekday samples → all-day median in the
+ *  window; still <3 → { insufficient: true }. Thin types (e.g. a
+ *  sparse Suite) therefore degrade to honest silence, never to a
+ *  fabricated norm — and since this function is narrative-only, a thin
+ *  type is never dropped from the rate sheet because of it. */
+export function computeWeekdayBaseline(
+  days: ReadonlyArray<RecommendationInput>,
+  targetDate: string,
+  roomType?: string,
+): WeekdayBaseline {
+  const targetDow = dowOf(targetDate)
+
+  const occAll: number[] = []
+  const rateAll: number[] = []
+  const occDow: number[] = []
+  const rateDow: number[] = []
+  for (const d of days) {
+    if (d.date === targetDate) continue
+    let occ: number | null = null
+    let rate: number | null = null
+    if (roomType == null) {
+      occ = d.occupancyRate
+      rate = d.adrThb > 0 ? d.adrThb : null
+    } else {
+      const row = (d.roomTypeBreakdown ?? []).find((r) => r.roomType === roomType)
+      if (row && row.totalRooms > 0) {
+        occ = row.occupiedRooms / row.totalRooms
+        rate = row.rateThb > 0 ? row.rateThb : null
+      }
+    }
+    if (occ == null) continue
+    occAll.push(occ)
+    if (rate != null) rateAll.push(rate)
+    if (dowOf(d.date) === targetDow) {
+      occDow.push(occ)
+      if (rate != null) rateDow.push(rate)
+    }
+  }
+
+  if (occDow.length >= 3) {
+    return {
+      insufficient: false,
+      sampleCount: occDow.length,
+      occupancyMedian: median(occDow),
+      rateThbMedian: rateDow.length > 0 ? Math.round(median(rateDow)) : null,
+      source: 'weekday',
+    }
+  }
+  if (occAll.length >= 3) {
+    return {
+      insufficient: false,
+      sampleCount: occAll.length,
+      occupancyMedian: median(occAll),
+      rateThbMedian: rateAll.length > 0 ? Math.round(median(rateAll)) : null,
+      source: 'all_day',
+    }
+  }
+  return { insufficient: true, sampleCount: occDow.length }
 }
 
 /** Plain-language "what to do today" line synthesised from the per-
@@ -619,6 +791,23 @@ interface DerivedDayContext {
   isWeekend: boolean
   /** Competitors priced this many % above us (≥16%); null otherwise. */
   competitorHigherPct: number | null
+  // ── Weekday-pattern context (additive; 3-day-tail fields above are
+  // unchanged). Populated only from TRUE same-weekday history (≥3
+  // samples) — the all_day fallback is deliberately not surfaced here,
+  // because naming a weekday norm that isn't weekday-derived would be
+  // dishonest copy. All null/0 when history is thin. ──
+  /** Median occupancy (0..100 pct) of the latest data day's own weekday. */
+  weekdayOccupancyBaseline: number | null
+  /** Signed pts: latest day's occupancy − its weekday median
+   *  (e.g. +18 = running 18pts above the weekday norm). */
+  todayVsWeekdayNorm: number | null
+  /** Last week's same-weekday occupancy vs the weekday median
+   *  (±5pts band = 'on'). Null when last week's row is missing. */
+  wowDirection: 'ahead' | 'on' | 'behind' | null
+  /** Same-weekday samples behind the baseline. */
+  weekdaySampleCount: number
+  weekdayNameTh: string | null
+  weekdayNameEn: string | null
 }
 
 function deriveDayContext(context: DailyActionContext): DerivedDayContext | null {
@@ -648,7 +837,41 @@ function deriveDayContext(context: DailyActionContext): DerivedDayContext | null
   const cmp = competitorComparison(inputs as RecommendationInput[])
   const competitorHigherPct = cmp && cmp.gapRatio > 0.15 ? Math.round(cmp.gapRatio * 100) : null
 
-  return { occPct: Math.round(occNow * 100), belowTargetPct, trend, isWeekend, competitorHigherPct }
+  // Weekday-pattern context: what the latest data day's own weekday
+  // normally does, where today sits against that norm, and whether last
+  // week's same weekday was already ahead/behind it (pattern drift).
+  const wb = computeWeekdayBaseline(inputs, latest.date)
+  let weekdayOccupancyBaseline: number | null = null
+  let todayVsWeekdayNorm: number | null = null
+  let wowDirection: 'ahead' | 'on' | 'behind' | null = null
+  let weekdayNameTh: string | null = null
+  let weekdayNameEn: string | null = null
+  if (!wb.insufficient && wb.source === 'weekday' && wb.occupancyMedian != null) {
+    weekdayOccupancyBaseline = Math.round(wb.occupancyMedian * 100)
+    todayVsWeekdayNorm = Math.round((occNow - wb.occupancyMedian) * 100)
+    const dow = dowOf(latest.date)
+    weekdayNameTh = WEEKDAY_TH[dow]
+    weekdayNameEn = WEEKDAY_EN[dow]
+    const lastWeek = inputs.find((d) => d.date === addDays(latest.date, -7))
+    if (lastWeek) {
+      const wowDelta = lastWeek.occupancyRate - wb.occupancyMedian
+      wowDirection = wowDelta <= -0.05 ? 'behind' : wowDelta >= 0.05 ? 'ahead' : 'on'
+    }
+  }
+
+  return {
+    occPct: Math.round(occNow * 100),
+    belowTargetPct,
+    trend,
+    isWeekend,
+    competitorHigherPct,
+    weekdayOccupancyBaseline,
+    todayVsWeekdayNorm,
+    wowDirection,
+    weekdaySampleCount: wb.sampleCount,
+    weekdayNameTh,
+    weekdayNameEn,
+  }
 }
 
 // Name up to two room types, sorted by impact (the biggest movers).
@@ -684,13 +907,37 @@ export function summarizePerRoomRates(
 
   // Shared "where we are" fragment — occupancy and (when known) the gap
   // to target. Interpolating these is what makes the line move day to
-  // day even when the dominant signal is unchanged.
-  const occTh = ctx
-    ? ` (occ ${ctx.occPct}%${ctx.belowTargetPct != null ? `, ต่ำกว่าเป้า ${ctx.belowTargetPct}%` : ''})`
-    : ''
-  const occEn = ctx
-    ? ` (occ ${ctx.occPct}%${ctx.belowTargetPct != null ? `, ${ctx.belowTargetPct}pts below target` : ''})`
-    : ''
+  // day even when the dominant signal is unchanged. When a same-weekday
+  // baseline exists (≥3 samples), the fragment anchors today against
+  // what this weekday NORMALLY does — "วันเสาร์ปกติ 88% วันนี้ 62%" —
+  // which is the honest comparison for pattern-driven properties; with
+  // thin history it falls back to the plain occ% wording unchanged.
+  const targetTh = ctx?.belowTargetPct != null ? `, ต่ำกว่าเป้า ${ctx.belowTargetPct}%` : ''
+  const targetEn = ctx?.belowTargetPct != null ? `, ${ctx.belowTargetPct}pts below target` : ''
+  let occTh = ''
+  let occEn = ''
+  if (ctx) {
+    if (ctx.weekdayOccupancyBaseline != null && ctx.todayVsWeekdayNorm != null) {
+      const diff = ctx.todayVsWeekdayNorm
+      const posTh =
+        Math.abs(diff) < 5
+          ? 'ใกล้เคียงปกติ'
+          : diff > 0
+            ? `สูงกว่าปกติ ${diff}pts`
+            : `ต่ำกว่าปกติ ${Math.abs(diff)}pts`
+      const posEn =
+        Math.abs(diff) < 5
+          ? 'near norm'
+          : diff > 0
+            ? `${diff}pts above norm`
+            : `${Math.abs(diff)}pts below norm`
+      occTh = ` (${ctx.weekdayNameTh}ปกติ ${ctx.weekdayOccupancyBaseline}% วันนี้ ${ctx.occPct}% ${posTh}${targetTh})`
+      occEn = ` (${ctx.weekdayNameEn} norm ${ctx.weekdayOccupancyBaseline}%, today ${ctx.occPct}% — ${posEn}${targetEn})`
+    } else {
+      occTh = ` (occ ${ctx.occPct}%${targetTh})`
+      occEn = ` (occ ${ctx.occPct}%${targetEn})`
+    }
+  }
 
   // ── MIXED / equal split — demand is polarised with both ends present
   // in equal measure. Name both ends so the owner manages by type

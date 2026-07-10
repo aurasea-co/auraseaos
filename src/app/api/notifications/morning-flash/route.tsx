@@ -248,14 +248,18 @@ async function handleMorningFlash(req: NextRequest) {
     let latestMetricDate = today
 
     for (const branch of branches || []) {
-      // Fetch the last 30 daily rows so we can compute a 30-day rolling
-      // avg margin alongside the latest-day values.
+      // Hotel branches fetch 63 rows (9 weeks) so the per-room engine
+      // can compute a trailing-8-week weekday baseline; F&B stays at 30
+      // because these same rows feed periodAvgMargin below, which is
+      // documented as a 30-day rolling average — widening it would
+      // silently change the margin the brief reports.
+      const metricsLimit = branch.business_type === 'accommodation' ? 63 : 30
       const { data: metrics } = await supabase
         .from('branch_daily_metrics')
         .select('*')
         .eq('branch_id', branch.id)
         .order('metric_date', { ascending: false })
-        .limit(30)
+        .limit(metricsLimit)
 
       const latest = metrics?.[0]
       if (!latest) continue
@@ -348,9 +352,13 @@ async function handleMorningFlash(req: NextRequest) {
       // branch_rate_recommendations, reads back, and computes the daily
       // action + auto-push gating. For F&B branches we skip — there's
       // no rate sheet concept.
+      // 63-day (9-week) window so computeWeekdayBaseline sees a full
+      // trailing-8-week same-weekday history (8 samples per weekday)
+      // plus headroom for gaps. Inherited by both the accommodation_
+      // daily_metrics and competitor_rates queries in the loader.
       const fromIso = (() => {
         const d = new Date()
-        d.setUTCDate(d.getUTCDate() - 31)
+        d.setUTCDate(d.getUTCDate() - 63)
         return d.toISOString().slice(0, 10)
       })()
       let hotelRecs: PerBranchHotelRecs | null = null
