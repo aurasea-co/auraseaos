@@ -4,7 +4,7 @@ One app, one codebase. Shared spine (auth, orgs, branches, subscriptions, RBAC, 
 
 ## Stack & infra
 Next.js 15 (App Router) · Supabase (Postgres, Auth, RLS, pg_cron) · Vercel · LINE Messaging API · Resend.
-- Repo: this dir (`~/Desktop/aurasea/platform/auraseaos`) · Supabase `ynzcciiuodmpejasptsv` (Singapore) · GitHub `bovornv/aurasea-v2` · Vercel `main`→prod
+- Repo: this dir (`~/Desktop/aurasea/platform/auraseaos`) · Supabase `ynzcciiuodmpejasptsv` (Singapore) · GitHub `aurasea-co/auraseaos` · Vercel `main`→prod
 - Org `d45b5faa-d44e-4d3d-bc46-9b444ada147c` · Crystal Resort branch `ef77c100-e27b-4f69-a930-053750b79f22` · Crystal Cafe branch `4dca5378-68a7-4eef-94f0-7572852a7744` · Owner `2fc42b21-769a-4d3c-9403-22332f885a64`
 
 ## Ground-truth schema facts (assumed values have burned us — verify, don't guess)
