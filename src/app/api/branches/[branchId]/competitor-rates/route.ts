@@ -70,7 +70,12 @@ async function authorize(branchId: string) {
   if (!ownerRow && !managerRow) {
     return { ok: false as const, status: 403, error: 'forbidden_role' }
   }
-  return { ok: true as const, user, branch }
+  // Hand back the RLS user client so GET can read through it instead of
+  // the service role — members_read_competitor_rates (migration 029) is
+  // already branch/org-membership scoped (not owner-only), so this is
+  // the same access the role check above already grants, just enforced
+  // at the DB layer too rather than solely by app logic.
+  return { ok: true as const, user, branch, supabase: userClient }
 }
 
 function bkkToday(): string {
@@ -93,9 +98,12 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ branchId: 
   const auth = await authorize(branchId)
   if (!auth.ok) return bail(auth.status, auth.error, '', '')
 
-  const supabase = createServiceClient()
+  // RLS user client, not service role — members_read_competitor_rates
+  // (branch/org membership, not owner-scoped) is the actual enforcement
+  // for viewing; the role check in authorize() just gives a clean 403
+  // instead of a silent empty list for a genuinely unauthorized caller.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const db = supabase as any
+  const db = auth.supabase as any
   const { data, error } = await db
     .from('competitor_rates')
     .select('competitor_name, room_type, rate, captured_at, created_at, channel, source')
