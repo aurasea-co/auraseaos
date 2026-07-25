@@ -16,6 +16,7 @@ import {
   CRYSTAL_RESORT_ACCOM_ROWS,
   CRYSTAL_RESORT_COMPETITOR_ROWS,
 } from './__fixtures__/crystal-resort-2026-07'
+import { THAILAND_PUBLIC_HOLIDAYS_2026 } from '../../demand-calendar/thailand-public-holidays-2026'
 
 function makeRate(partial: Partial<PerRoomTypeRate> = {}): PerRoomTypeRate {
   return {
@@ -287,6 +288,8 @@ describe('classifyDailyAction — pace precedence invariant', () => {
         trend: 'steady',
         occTh: '',
         occEn: '',
+        demandCalendarEventNameTh: null,
+        demandCalendarEventNameEn: null,
       })
       expect(cutScenarios).not.toContain(scenario)
     }
@@ -308,6 +311,8 @@ describe('classifyDailyAction — pace precedence invariant', () => {
         trend: 'steady',
         occTh: '',
         occEn: '',
+        demandCalendarEventNameTh: null,
+        demandCalendarEventNameEn: null,
       })
       expect(raiseScenarios).not.toContain(scenario)
     }
@@ -327,6 +332,8 @@ describe('classifyDailyAction — pace precedence invariant', () => {
         trend: 'steady',
         occTh: '',
         occEn: '',
+        demandCalendarEventNameTh: null,
+        demandCalendarEventNameEn: null,
       })
       expect(scenario).toBe('MIXED_SPLIT')
     }
@@ -350,6 +357,8 @@ describe('renderAction — deterministic date-seeded phrasing', () => {
     competitorGapPct: null,
     isWeekend: false,
     trend: 'steady',
+    demandCalendarEventNameTh: null,
+    demandCalendarEventNameEn: null,
   }
 
   it('the same scenario + facts + dateSeed always renders identical text (reproducible)', () => {
@@ -520,5 +529,67 @@ describe('real Crystal Resort replay — 2026-07-22/23/24 (the reported bug)', (
   it('the three real days produce materially different lines (not the reported near-static repeat)', () => {
     const messages = ['2026-07-22', '2026-07-23', '2026-07-24'].map((d) => replay(d)!.messageEn)
     expect(new Set(messages).size).toBe(3)
+  })
+})
+
+describe('demand_calendar note — informational only, never changes the scenario', () => {
+  const rates: PerRoomTypeRate[] = [
+    makeRate({ roomType: 'Suite', direction: 'decrease', impactThb: 72 }),
+    makeRate({ roomType: 'Deluxe6', direction: 'decrease', impactThb: 51 }),
+  ]
+
+  it('appends nothing when no event overlaps tomorrow (backward compatible)', () => {
+    const out = summarizePerRoomRates(rates, ctxFrom('2026-06-08', [0.4, 0.45, 0.4]))
+    expect(out!.messageEn).not.toContain('tomorrow:')
+    expect(out!.messageTh).not.toContain('พรุ่งนี้:')
+  })
+
+  it('appends the event name (Th + En) to both messages when one overlaps tomorrow', () => {
+    const out = summarizePerRoomRates(
+      rates,
+      ctxFrom('2026-06-08', [0.4, 0.45, 0.4], {
+        demandCalendarEvent: { nameTh: 'เทศกาลทดสอบ', nameEn: 'Test Festival' },
+      }),
+    )
+    expect(out!.messageEn).toContain('(tomorrow: Test Festival)')
+    expect(out!.messageTh).toContain('(พรุ่งนี้: เทศกาลทดสอบ)')
+  })
+
+  it('appends identically regardless of which scenario the day lands on', () => {
+    // ON_PACE_BALANCED (all holds) vs SOFT_TYPES_NO_COMPS (decreases
+    // dominate) — two different scenarios, same event note behaviour.
+    const holdRates: PerRoomTypeRate[] = [makeRate({ roomType: 'Standard', direction: 'hold' })]
+    const event = { demandCalendarEvent: { nameTh: 'ก', nameEn: 'Event' } }
+    const balanced = summarizePerRoomRates(holdRates, ctxFrom('2026-06-08', [0.5, 0.5, 0.5], event))
+    const soft = summarizePerRoomRates(rates, ctxFrom('2026-06-08', [0.4, 0.45, 0.4], event))
+    expect(balanced!.messageEn).toContain('(tomorrow: Event)')
+    expect(soft!.messageEn).toContain('(tomorrow: Event)')
+  })
+
+  it('classifyDailyAction never uses the event to pick a scenario — only renderAction appends it', () => {
+    const decreaseHeavy = [makeRate({ roomType: 'A', direction: 'decrease' })]
+    const withEvent = classifyDailyAction({
+      increases: [], decreases: decreaseHeavy, holds: [], pace: 'ahead',
+      competitorGapPct: null, isWeekend: false, trend: 'steady', occTh: '', occEn: '',
+      demandCalendarEventNameTh: 'ก', demandCalendarEventNameEn: 'Event',
+    })
+    const withoutEvent = classifyDailyAction({
+      increases: [], decreases: decreaseHeavy, holds: [], pace: 'ahead',
+      competitorGapPct: null, isWeekend: false, trend: 'steady', occTh: '', occEn: '',
+      demandCalendarEventNameTh: null, demandCalendarEventNameEn: null,
+    })
+    expect(withEvent.scenario).toBe(withoutEvent.scenario)
+  })
+
+  it('real seeded holiday data (Songkran) renders correctly through the full pipeline', () => {
+    const songkran = THAILAND_PUBLIC_HOLIDAYS_2026.find((h) => h.nameEn === 'Songkran Festival')!
+    const out = summarizePerRoomRates(
+      rates,
+      ctxFrom('2026-06-08', [0.4, 0.45, 0.4], {
+        demandCalendarEvent: { nameTh: songkran.nameTh, nameEn: songkran.nameEn },
+      }),
+    )
+    expect(out!.messageEn).toContain('(tomorrow: Songkran Festival)')
+    expect(out!.messageTh).toContain('(พรุ่งนี้: วันสงกรานต์)')
   })
 })

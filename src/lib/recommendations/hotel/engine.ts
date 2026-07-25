@@ -779,6 +779,17 @@ export interface DailyActionContext {
   /** Target occupancy. Accepts a 0..1 fraction or a 0..100 percent
    *  (normalised internally). Drives the "X pts below target" framing. */
   targetOccupancy?: number | null
+  /** A demand_calendar event (public holiday, festival, local event —
+   *  see migration 039) overlapping TOMORROW (the night the rec applies
+   *  to), if any. Purely informational: appended to the action line as
+   *  context, never changes the scenario/pace classification — no
+   *  seeded event carries a verified demand-impact magnitude
+   *  (expected_impact_modifier is deliberately left unset on every row;
+   *  see the seed migration's design rationale), so nothing here should
+   *  quietly bias the numbers. Caller resolves which event wins when
+   *  more than one overlaps (see pickPrimaryEvent in
+   *  lib/demand-calendar/queries.ts). */
+  demandCalendarEvent?: { nameTh: string; nameEn: string } | null
 }
 
 // Derived, presentation-ready view of the day's situation. Null when no
@@ -818,6 +829,10 @@ interface DerivedDayContext {
    *  'on' when there's no weekday baseline yet — an honest default that
    *  never fabricates a pace the data can't support. */
   pace: 'ahead' | 'behind' | 'on'
+  /** Passthrough of context.demandCalendarEvent — see that field's
+   *  comment. Null when no event overlaps tomorrow. */
+  demandCalendarEventNameTh: string | null
+  demandCalendarEventNameEn: string | null
 }
 
 // Competitor data older than this (relative to the latest metrics day)
@@ -944,6 +959,8 @@ function deriveDayContext(context: DailyActionContext): DerivedDayContext | null
     weekdayNameTh,
     weekdayNameEn,
     pace,
+    demandCalendarEventNameTh: context.demandCalendarEvent?.nameTh ?? null,
+    demandCalendarEventNameEn: context.demandCalendarEvent?.nameEn ?? null,
   }
 }
 
@@ -996,6 +1013,12 @@ export interface DailyActionFacts {
   competitorGapPct: number | null
   isWeekend: boolean
   trend: 'worsening' | 'improving' | 'steady'
+  /** A demand_calendar event overlapping tomorrow, if any — see
+   *  DailyActionContext.demandCalendarEvent. Purely informational;
+   *  renderAction appends it as a note, it never affects scenario
+   *  choice. */
+  demandCalendarEventNameTh: string | null
+  demandCalendarEventNameEn: string | null
 }
 
 /** Inputs classifyDailyAction needs — a thin, pure-function-friendly
@@ -1010,6 +1033,8 @@ export interface DailySituationSignals {
   trend: 'worsening' | 'improving' | 'steady'
   occTh: string
   occEn: string
+  demandCalendarEventNameTh: string | null
+  demandCalendarEventNameEn: string | null
 }
 
 /** Maps the day's real signals to a scenario. PACE IS PRIMARY: a
@@ -1029,7 +1054,10 @@ export interface DailySituationSignals {
 export function classifyDailyAction(
   signals: DailySituationSignals,
 ): { scenario: DailyActionScenario; facts: DailyActionFacts } {
-  const { increases, decreases, pace, competitorGapPct, isWeekend, trend, occTh, occEn } = signals
+  const {
+    increases, decreases, pace, competitorGapPct, isWeekend, trend, occTh, occEn,
+    demandCalendarEventNameTh, demandCalendarEventNameEn,
+  } = signals
 
   const raiseNames = topTwoNames(increases)
   const cutNames = topTwoNames(decreases)
@@ -1052,6 +1080,8 @@ export function classifyDailyAction(
     competitorGapPct,
     isWeekend,
     trend,
+    demandCalendarEventNameTh,
+    demandCalendarEventNameEn,
   }
 
   if (increases.length > 0 && decreases.length > 0 && increases.length === decreases.length) {
@@ -1110,7 +1140,10 @@ function seedIndex(seed: string, count: number): number {
  *  scenario, picked deterministically from `dateSeed` (the latest
  *  metrics day, e.g. "2026-07-24") so the same day is reproducible but
  *  consecutive days in the same scenario don't read byte-identical. */
-export function renderAction(
+// Renders the scenario-specific text. Kept private — the exported
+// renderAction below wraps this with the demand_calendar note so every
+// scenario branch here stays untouched by that concern.
+function renderBaseAction(
   scenario: DailyActionScenario,
   facts: DailyActionFacts,
   dateSeed: string,
@@ -1392,6 +1425,26 @@ export function renderAction(
   }
 }
 
+/** Renders a scenario + facts into bilingual copy (see renderBaseAction),
+ *  then appends a demand_calendar note when an event overlaps tomorrow.
+ *  The note is purely additive context — same wording appended after
+ *  EVERY scenario's text, regardless of what the scenario already says,
+ *  since we have no verified impact magnitude to fold into the
+ *  classification itself (see DailyActionContext.demandCalendarEvent). */
+export function renderAction(
+  scenario: DailyActionScenario,
+  facts: DailyActionFacts,
+  dateSeed: string,
+): DailyAction {
+  const base = renderBaseAction(scenario, facts, dateSeed)
+  const { demandCalendarEventNameTh, demandCalendarEventNameEn } = facts
+  if (!demandCalendarEventNameTh || !demandCalendarEventNameEn) return base
+  return {
+    messageTh: `${base.messageTh} (พรุ่งนี้: ${demandCalendarEventNameTh})`,
+    messageEn: `${base.messageEn} (tomorrow: ${demandCalendarEventNameEn})`,
+  }
+}
+
 /** Plain-language "what to do today" line synthesised from the per-room
  *  rate mix AND the day's situational signals. The rate sheet shows WHAT
  *  to change; this line says WHY and WHAT ELSE to consider — and, unlike
@@ -1458,6 +1511,8 @@ export function summarizePerRoomRates(
     trend: ctx?.trend ?? 'steady',
     occTh,
     occEn,
+    demandCalendarEventNameTh: ctx?.demandCalendarEventNameTh ?? null,
+    demandCalendarEventNameEn: ctx?.demandCalendarEventNameEn ?? null,
   })
 
   // Seed on the latest metrics day so the same day always renders the

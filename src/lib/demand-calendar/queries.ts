@@ -128,6 +128,34 @@ export async function getDemandCalendarForBranch(
   return filterRowsForBranch((data || []) as DemandCalendarRawRow[], { organizationId, branchId })
 }
 
+// Priority when multiple events overlap the same day (rare) and a
+// caller (e.g. the LINE brief) needs to pick ONE to mention by name.
+// Broader-scope / higher-significance types win; ties broken by name
+// for determinism.
+const EVENT_TYPE_PRIORITY: Record<DemandCalendarType, number> = {
+  public_holiday: 0,
+  festival: 1,
+  school_holiday: 2,
+  local_event: 3,
+  owner_event: 4,
+}
+
+/** Pure — picks the single most notable event from a list for a
+ *  narrative mention. Null when the list is empty. */
+export function pickPrimaryEvent(
+  events: ReadonlyArray<DemandCalendarEvent>,
+): DemandCalendarEvent | null {
+  if (events.length === 0) return null
+  return events
+    .slice()
+    .sort((a, b) => {
+      const pa = EVENT_TYPE_PRIORITY[a.type] ?? 99
+      const pb = EVENT_TYPE_PRIORITY[b.type] ?? 99
+      if (pa !== pb) return pa - pb
+      return a.nameEn.localeCompare(b.nameEn)
+    })[0]
+}
+
 /** Pure — expands a list of events into the individual YYYY-MM-DD dates
  *  they cover, for callers that need a per-day "is this an event day"
  *  lookup (e.g. a calendar grid) rather than a list of ranges. */

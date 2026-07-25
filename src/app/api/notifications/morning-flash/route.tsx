@@ -365,6 +365,7 @@ async function handleMorningFlash(req: NextRequest) {
       if (isHotel) {
         hotelRecs = await loadPerRoomRecsForBranch(supabase, {
           branchId: branch.id,
+          organizationId: setting.organization_id,
           today,
           fromIso,
           metrics: (metrics || []) as Record<string, unknown>[],

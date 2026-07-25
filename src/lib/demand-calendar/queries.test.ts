@@ -2,9 +2,28 @@ import { describe, it, expect } from 'vitest'
 import {
   filterRowsForBranch,
   demandCalendarDatesInRange,
+  pickPrimaryEvent,
   type DemandCalendarRawRow,
   type DemandCalendarEvent,
 } from './queries'
+
+function makeEvent(partial: Partial<DemandCalendarEvent> = {}): DemandCalendarEvent {
+  return {
+    id: '1',
+    startDate: '2026-07-28',
+    endDate: '2026-07-28',
+    type: 'public_holiday',
+    nameTh: 'test',
+    nameEn: 'Test',
+    province: null,
+    expectedImpactModifier: null,
+    source: 'public_holiday_lib',
+    confidence: 1,
+    organizationId: null,
+    branchId: null,
+    ...partial,
+  }
+}
 
 function makeRow(partial: Partial<DemandCalendarRawRow> = {}): DemandCalendarRawRow {
   return {
@@ -110,5 +129,37 @@ describe('demandCalendarDatesInRange', () => {
     expect(demandCalendarDatesInRange(events)).toEqual(
       new Set(['2026-04-14', '2026-04-15', '2026-04-16']),
     )
+  })
+})
+
+describe('pickPrimaryEvent', () => {
+  it('returns null for an empty list', () => {
+    expect(pickPrimaryEvent([])).toBeNull()
+  })
+
+  it('returns the only event when there is one', () => {
+    const e = makeEvent()
+    expect(pickPrimaryEvent([e])).toBe(e)
+  })
+
+  it('prefers public_holiday over festival, local_event, and owner_event', () => {
+    const holiday = makeEvent({ type: 'public_holiday', nameEn: 'Holiday' })
+    const festival = makeEvent({ type: 'festival', nameEn: 'Festival' })
+    const local = makeEvent({ type: 'local_event', nameEn: 'Local' })
+    const owner = makeEvent({ type: 'owner_event', nameEn: 'Owner' })
+    expect(pickPrimaryEvent([owner, local, festival, holiday])).toBe(holiday)
+  })
+
+  it('prefers festival over school_holiday, local_event, and owner_event', () => {
+    const festival = makeEvent({ type: 'festival', nameEn: 'Festival' })
+    const school = makeEvent({ type: 'school_holiday', nameEn: 'School' })
+    expect(pickPrimaryEvent([school, festival])).toBe(festival)
+  })
+
+  it('breaks ties between same-priority events by English name, deterministically', () => {
+    const a = makeEvent({ type: 'local_event', nameEn: 'Zebra Fest' })
+    const b = makeEvent({ type: 'local_event', nameEn: 'Apple Fest' })
+    expect(pickPrimaryEvent([a, b])).toBe(b)
+    expect(pickPrimaryEvent([b, a])).toBe(b)
   })
 })

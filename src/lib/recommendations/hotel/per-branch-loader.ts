@@ -16,8 +16,12 @@
 //   6. Read back from the table → perRoomRates. The DB is the source
 //      of truth so an owner's dashboard override is what reaches the
 //      brief/email.
-//   7. Run summarizePerRoomRates → dailyAction.
-//   8. Read branch_pms_config + org plan → computed gating flags
+//   7. Look up demand_calendar (migration 039) for TOMORROW — global
+//      holidays/festivals plus this org/branch's own entries. Purely
+//      informational context for the action line, never feeds the
+//      rate math.
+//   8. Run summarizePerRoomRates → dailyAction.
+//   9. Read branch_pms_config + org plan → computed gating flags
 //      (canShowApprove, showAwaitingPmsNote).
 //
 // Pure-ish: I/O via the supabase client, but no mutation of inputs
@@ -42,6 +46,7 @@ import {
   canShowLiveApproveButton,
   shouldShowAwaitingPmsNote,
 } from '@/lib/ratedesk/auto-push-gating'
+import { getDemandCalendarForBranch, pickPrimaryEvent } from '@/lib/demand-calendar/queries'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SupabaseLike = any
@@ -71,6 +76,10 @@ export interface PerBranchHotelRecs {
 
 interface LoaderParams {
   branchId: string
+  /** Needed to resolve org-wide demand_calendar rows for this branch
+   *  (see getDemandCalendarForBranch) — branches.organization_id, not
+   *  a separate lookup. */
+  organizationId: string
   /** Bangkok-day metric_date for the morning brief — the upsert keys
    *  onto this so re-running same-day is idempotent. */
   today: string
@@ -230,9 +239,27 @@ export async function loadPerRoomRecsForBranch(
   // SITUATIONAL (weakest types, trend, weekend/weekday, competitor gap,
   // gap-to-target) rather than a static template keyed only on "low
   // occupancy". Same dailyAction feeds both LINE and email → parity.
+  //
+  // demand_calendar lookup is for TOMORROW — the night the rec applies
+  // to — global holidays/festivals plus this org/branch's own entries.
+  // Purely informational (see DailyActionContext.demandCalendarEvent);
+  // never fails the whole load if the query errors (getDemandCalendarForBranch
+  // already degrades to [] on error).
+  const tomorrow = addOneDay(params.today)
+  const demandEvents = await getDemandCalendarForBranch(supabase, {
+    organizationId: params.organizationId,
+    branchId: params.branchId,
+    fromDate: tomorrow,
+    toDate: tomorrow,
+  })
+  const primaryDemandEvent = pickPrimaryEvent(demandEvents)
+
   const dailyAction = summarizePerRoomRates(perRoomRates, {
     inputs: recInputs,
     targetOccupancy: params.targetOccupancy ?? null,
+    demandCalendarEvent: primaryDemandEvent
+      ? { nameTh: primaryDemandEvent.nameTh, nameEn: primaryDemandEvent.nameEn }
+      : null,
   })
 
   // ── 6. PMS adapter gating ──
@@ -261,4 +288,10 @@ function numOrNull(v: unknown): number | null {
   if (v == null) return null
   const n = Number(v)
   return Number.isFinite(n) ? n : null
+}
+
+function addOneDay(dateStr: string): string {
+  const d = new Date(`${dateStr}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
 }
