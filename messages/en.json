@@ -491,6 +491,10 @@
   },
   "menudesk": {
     "title": "MenuDesk",
+    "demand_calendar": "30-day demand calendar",
+    "demand_low": "Low",
+    "demand_medium": "Medium",
+    "demand_high": "High — consider a promo push",
     "fnbOnly": "MenuDesk is only available for F&B branches. Switch to an F&B branch from the topbar.",
     "windowLabel": "Last {days} days",
     "daysWithData": "{count, plural, one {# day with data} other {# days with data}}",

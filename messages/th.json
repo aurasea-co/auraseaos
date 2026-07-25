@@ -491,6 +491,10 @@
   },
   "menudesk": {
     "title": "MenuDesk",
+    "demand_calendar": "ปฏิทิน demand 30 วัน",
+    "demand_low": "ต่ำ",
+    "demand_medium": "ปานกลาง",
+    "demand_high": "สูง — พิจารณาทำโปรโมชัน",
     "fnbOnly": "MenuDesk ใช้ได้กับสาขา F&B เท่านั้น กรุณาเปลี่ยนสาขาจากแถบด้านบน",
     "windowLabel": "{days} วันล่าสุด",
     "daysWithData": "{count} วันที่มีข้อมูล",

@@ -33,6 +33,7 @@ import { useUser } from '@/providers/user-context'
 import { createClient } from '@/lib/supabase/client'
 import { ArrowRight, Edit3, TrendingUp, TrendingDown, Minus, UtensilsCrossed, Upload, Download } from 'lucide-react'
 import { SparklineChart } from '@/components/sparkline-chart'
+import { DemandCalendar } from '@/components/pricing/DemandCalendar'
 import { canSeeRevenue } from '@/lib/auth/ratedesk-permissions'
 import { getTodayBangkok } from '@/lib/businessDate'
 import { buildFnbSalesCsvTemplate } from '@/lib/ingestion/csv-fnb-sales'
@@ -55,7 +56,7 @@ type WindowKey = (typeof WINDOWS)[number]
 
 export default function MenuDeskPage() {
   const router = useRouter()
-  const { activeBranch, role } = useUser()
+  const { activeBranch, role, plan } = useUser()
   const t = useTranslations('menudesk')
   const locale = useLocale()
   const supabase = createClient()
@@ -311,6 +312,15 @@ export default function MenuDeskPage() {
 
   const sparkData = useMemo(
     () => activeRows.map((r) => ({ date: r.metric_date, value: Number(r.revenue) || 0 })),
+    [activeRows],
+  )
+
+  // DemandCalendar's activityLevel signal, F&B flavor: covers
+  // (total_customers) stand in for RateDesk's occupancy_rate — the
+  // classification is relative to this branch's own average, so a raw
+  // count works exactly like a fraction does for hotels.
+  const demandCalendarRows = useMemo(
+    () => activeRows.map((r) => ({ metric_date: r.metric_date, activityLevel: r.total_customers })),
     [activeRows],
   )
 
@@ -759,6 +769,12 @@ export default function MenuDeskPage() {
           formatValue={(v) => `฿${Math.round(v).toLocaleString('th-TH')}`}
         />
       </section>
+
+      {/* Demand calendar — Pro only, same gate + widget as RateDesk's
+          /pricing and /ratedesk copies. Covers stand in for occupancy
+          (see demandCalendarRows above); namespace="menudesk" so the
+          "High" label doesn't show RateDesk's "raise price" copy. */}
+      {plan === 'pro' && <DemandCalendar data={demandCalendarRows} namespace="menudesk" />}
 
       {/* Top movers — populated from fnb_daily_sales × menu_items
           aggregated over the active window. Hidden when there's no

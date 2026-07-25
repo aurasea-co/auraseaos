@@ -49,19 +49,33 @@ function bangkokDateFromStr(dateStr: string): Date {
   return new Date(dateStr + 'T12:00:00+07:00')
 }
 
-// Structural subset of BranchDailyMetric — this is all the component
-// actually reads. Kept narrow (rather than requiring the full
-// BranchDailyMetric shape) so callers that already have occupancy data
-// in a different row shape (e.g. the /ratedesk dashboard's own
-// accommodation_daily_metrics projection) don't have to fabricate
-// irrelevant fields just to satisfy the prop type.
+// A per-day "how busy was this day" signal. Deliberately vertical-
+// neutral: the classification below is entirely RELATIVE (each day is
+// compared to this property's own average), so the unit doesn't
+// matter as long as it's consistent for one branch — occupancy_rate
+// (0..1 fraction) for RateDesk, covers/total_customers (raw count) for
+// MenuDesk. Kept narrow (rather than requiring a full BranchDailyMetric
+// or MenuDesk MetricRow shape) so each caller just maps its own row
+// shape's relevant field instead of fabricating the rest.
 export interface DemandCalendarMetricRow {
   metric_date: string
-  occupancy_rate: number | null
+  activityLevel: number | null
 }
 
-export function DemandCalendar({ data }: { data: DemandCalendarMetricRow[] }) {
-  const t = useTranslations('pricing')
+export function DemandCalendar({
+  data,
+  // Which next-intl namespace to read demand_calendar/demand_low/
+  // demand_medium/demand_high from. Defaults to 'pricing' (RateDesk's
+  // original home for this widget) for backward compatibility.
+  // MenuDesk passes 'menudesk' — the pricing namespace's demand_high
+  // copy says "raise price" (RateDesk-specific), which would be wrong
+  // showing up inside the F&B dashboard.
+  namespace = 'pricing',
+}: {
+  data: DemandCalendarMetricRow[]
+  namespace?: 'pricing' | 'menudesk'
+}) {
+  const t = useTranslations(namespace)
   const locale = useLocale()
   const isThai = locale === 'th'
   const monthLocale = isThai ? 'th-TH-u-ca-buddhist' : 'en-GB'
@@ -99,15 +113,15 @@ export function DemandCalendar({ data }: { data: DemandCalendarMetricRow[] }) {
     const byDow: number[][] = [[], [], [], [], [], [], []]
     const allSamples: number[] = []
     data.forEach((d) => {
-      if (d.occupancy_rate != null && !isNaN(d.occupancy_rate)) {
+      if (d.activityLevel != null && !isNaN(d.activityLevel)) {
         // metric_date can come through as a plain date or a timestamptz;
         // normalize to Bangkok YYYY-MM-DD first so the weekday bucket is
         // correct regardless of how Supabase serializes it.
         const normalizedDate = toBangkokDateStr(d.metric_date)
         if (!normalizedDate) return
         const dow = bangkokDateFromStr(normalizedDate).getDay()
-        byDow[dow].push(d.occupancy_rate)
-        allSamples.push(d.occupancy_rate)
+        byDow[dow].push(d.activityLevel)
+        allSamples.push(d.activityLevel)
       }
     })
 

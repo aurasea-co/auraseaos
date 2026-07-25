@@ -109,7 +109,11 @@ function PricingContent({ branchId, totalRooms }: { branchId: string; totalRooms
       </div>
 
       {/* Demand calendar — Pro only */}
-      {plan === 'pro' && <DemandCalendar data={data} />}
+      {plan === 'pro' && (
+        <DemandCalendar
+          data={data.map((d) => ({ metric_date: d.metric_date, activityLevel: d.occupancy_rate }))}
+        />
+      )}
     </div>
   )
 }

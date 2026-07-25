@@ -268,7 +268,7 @@ export default function RateDeskPage() {
   // this page already has.
   const demandCalendarRows = activeRows.map((r) => ({
     metric_date: r.metric_date,
-    occupancy_rate: r.rooms_available && r.rooms_available > 0 && r.rooms_sold != null
+    activityLevel: r.rooms_available && r.rooms_available > 0 && r.rooms_sold != null
       ? r.rooms_sold / r.rooms_available
       : null,
   }))
