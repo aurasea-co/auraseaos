@@ -52,9 +52,10 @@ export interface RecommendationInput {
     name: string
     rateThb: number
     /** Channel the rate was captured from. The undercut + overpricing
-     *  signals filter to OTA-only since that's what guests actually
-     *  shop. Legacy data without a channel (rows from before
-     *  migration 033) is treated as OTA for backward-compat. */
+     *  signals (and the "today's action" competitor gap) filter to
+     *  OTA-only since that's the only channel comparable to our own
+     *  blended achieved rate — see isOtaChannel(). A missing channel is
+     *  excluded, not defaulted to OTA. */
     channel?: string
   }>
   /** Per-room-type breakdown for the day. Populated from the
@@ -789,8 +790,12 @@ interface DerivedDayContext {
   trend: 'worsening' | 'improving' | 'steady'
   /** True when TOMORROW (the night the rec applies to) is Fri/Sat. */
   isWeekend: boolean
-  /** Competitors priced this many % above us (≥16%); null otherwise. */
-  competitorHigherPct: number | null
+  /** Signed % gap vs competitors (+ = they're priced higher, - = lower);
+   *  null when the gap is under 15% OR the most recent competitor-rate
+   *  entry is older than COMPETITOR_FRESHNESS_DAYS relative to the
+   *  latest metrics day. A shop entered once and never refreshed must
+   *  not keep printing the same fixed % for weeks. */
+  competitorGapPct: number | null
   // ── Weekday-pattern context (additive; 3-day-tail fields above are
   // unchanged). Populated only from TRUE same-weekday history (≥3
   // samples) — the all_day fallback is deliberately not surfaced here,
@@ -808,6 +813,65 @@ interface DerivedDayContext {
   weekdaySampleCount: number
   weekdayNameTh: string | null
   weekdayNameEn: string | null
+  /** Pace vs the same-weekday norm (todayVsWeekdayNorm, ±5pts band) —
+   *  the PRIMARY signal classifyDailyAction uses to pick a scenario.
+   *  'on' when there's no weekday baseline yet — an honest default that
+   *  never fabricates a pace the data can't support. */
+  pace: 'ahead' | 'behind' | 'on'
+}
+
+// Competitor data older than this (relative to the latest metrics day)
+// is not trusted for the "today's action" gap framing. Without this, a
+// shop entered once and never refreshed keeps feeding the same fixed %
+// into the action line indefinitely — competitorComparison() below only
+// checks "≥3 entries somewhere in the fetch window", not how long ago
+// the most recent one was. Scoped to the action line only:
+// detectCompetitorUndercutting / detectOverpricing (the rate-sheet red-
+// dot recs) are unaffected — out of scope for this pass.
+const COMPETITOR_FRESHNESS_DAYS = 2
+
+function daysBetween(laterDate: string, earlierDate: string): number {
+  const later = new Date(`${laterDate}T00:00:00Z`).getTime()
+  const earlier = new Date(`${earlierDate}T00:00:00Z`).getTime()
+  return Math.round((later - earlier) / 86_400_000)
+}
+
+const KNOWN_NON_OTA_CHANNELS = new Set(['walk_in', 'package', 'promo'])
+
+/** Only true OTA rows are comparable to our own rate (which is a
+ *  blended, all-channel achieved rate — see accommodation entry form
+ *  copy: "Not the rack/walk-in rate" — there's no "our OTA-only rate"
+ *  to compare a walk-in/package/promo competitor row against). Both
+ *  competitor-aware signals (this freshness check and
+ *  competitorComparison below) filter through this SAME predicate so a
+ *  walk-in/package/promo row is consistently excluded everywhere, never
+ *  folded into the "guests see this online" comparison.
+ *
+ *  `competitor_rates.channel` is NOT NULL with a CHECK constraint
+ *  (migration 033) — every real DB row carries an explicit value. A
+ *  missing/unrecognized channel here means the row didn't actually come
+ *  through that constraint (hand-built RecommendationInput, or a new
+ *  channel value added upstream without updating this list) — exclude
+ *  it and say so, rather than silently defaulting it into the OTA
+ *  bucket the way pre-migration-033 legacy rows once needed to. */
+function isOtaChannel(r: { channel?: string | null }): boolean {
+  if (r.channel === 'ota') return true
+  if (r.channel == null || !KNOWN_NON_OTA_CHANNELS.has(r.channel)) {
+    console.warn(
+      `[competitor-rates] excluding row with missing/unrecognized channel "${r.channel}" from the OTA comparison`,
+    )
+  }
+  return false
+}
+
+function latestCompetitorDataDate(inputs: ReadonlyArray<RecommendationInput>): string | null {
+  let latest: string | null = null
+  for (const d of inputs) {
+    if ((d.competitorRates ?? []).some(isOtaChannel) && (latest == null || d.date > latest)) {
+      latest = d.date
+    }
+  }
+  return latest
 }
 
 function deriveDayContext(context: DailyActionContext): DerivedDayContext | null {
@@ -835,7 +899,12 @@ function deriveDayContext(context: DailyActionContext): DerivedDayContext | null
     targetOcc != null && targetOcc > occNow ? Math.round((targetOcc - occNow) * 100) : null
 
   const cmp = competitorComparison(inputs as RecommendationInput[])
-  const competitorHigherPct = cmp && cmp.gapRatio > 0.15 ? Math.round(cmp.gapRatio * 100) : null
+  const latestCompetitorDate = latestCompetitorDataDate(inputs)
+  const competitorFresh =
+    latestCompetitorDate != null &&
+    daysBetween(latest.date, latestCompetitorDate) <= COMPETITOR_FRESHNESS_DAYS
+  const competitorGapPct =
+    cmp && competitorFresh && Math.abs(cmp.gapRatio) > 0.15 ? Math.round(cmp.gapRatio * 100) : null
 
   // Weekday-pattern context: what the latest data day's own weekday
   // normally does, where today sits against that norm, and whether last
@@ -859,18 +928,22 @@ function deriveDayContext(context: DailyActionContext): DerivedDayContext | null
     }
   }
 
+  const pace: 'ahead' | 'behind' | 'on' =
+    todayVsWeekdayNorm == null ? 'on' : todayVsWeekdayNorm >= 5 ? 'ahead' : todayVsWeekdayNorm <= -5 ? 'behind' : 'on'
+
   return {
     occPct: Math.round(occNow * 100),
     belowTargetPct,
     trend,
     isWeekend,
-    competitorHigherPct,
+    competitorGapPct,
     weekdayOccupancyBaseline,
     todayVsWeekdayNorm,
     wowDirection,
     weekdaySampleCount: wb.sampleCount,
     weekdayNameTh,
     weekdayNameEn,
+    pace,
   }
 }
 
@@ -881,6 +954,442 @@ function topTwoNames(rates: ReadonlyArray<PerRoomTypeRate>): string[] {
     .sort((a, b) => b.impactThb - a.impactThb)
     .slice(0, 2)
     .map((r) => r.roomType)
+}
+
+// ── Situational classifier ──────────────────────────────────────────────
+//
+// The scenario the "today's action" line renders. PACE (vs the
+// same-weekday norm) is the primary axis — see classifyDailyAction below
+// for why. Per-room direction counts (increase/decrease) only decide the
+// lever when pace itself has nothing to say (thin weekday history).
+export type DailyActionScenario =
+  | 'MIXED_SPLIT'
+  | 'AHEAD_COMPS_HIGHER'
+  | 'AHEAD_NO_COMPS'
+  | 'HOT_TYPES_COMPS_HIGH'
+  | 'HOT_TYPES_NO_COMPS'
+  | 'SOFT_TYPES_COMPS_HIGH'
+  | 'SOFT_TYPES_NO_COMPS'
+  | 'BEHIND_COMPS_LOWER'
+  | 'BEHIND_NO_COMPS'
+  | 'ON_PACE_BALANCED'
+
+/** Everything a scenario's phrasing needs, pre-formatted once so
+ *  renderAction() never has to know how a name-list or the occupancy
+ *  fragment gets built. */
+export interface DailyActionFacts {
+  /** Populated only for MIXED_SPLIT — the single top mover each way. */
+  mixedRaiseType: string | null
+  mixedCutType: string | null
+  raiseNameTh: string
+  raiseNameEn: string
+  raiseMoreTh: string
+  raiseMoreEn: string
+  cutNameTh: string
+  cutNameEn: string
+  cutMoreTh: string
+  cutMoreEn: string
+  /** Pre-built occupancy-vs-norm parenthetical (or plain occ%). */
+  occTh: string
+  occEn: string
+  /** Signed, freshness-gated gap — see DerivedDayContext.competitorGapPct. */
+  competitorGapPct: number | null
+  isWeekend: boolean
+  trend: 'worsening' | 'improving' | 'steady'
+}
+
+/** Inputs classifyDailyAction needs — a thin, pure-function-friendly
+ *  slice of DerivedDayContext + the per-room rate split. */
+export interface DailySituationSignals {
+  increases: ReadonlyArray<PerRoomTypeRate>
+  decreases: ReadonlyArray<PerRoomTypeRate>
+  holds: ReadonlyArray<PerRoomTypeRate>
+  pace: 'ahead' | 'behind' | 'on'
+  competitorGapPct: number | null
+  isWeekend: boolean
+  trend: 'worsening' | 'improving' | 'steady'
+  occTh: string
+  occEn: string
+}
+
+/** Maps the day's real signals to a scenario. PACE IS PRIMARY: a
+ *  property running ahead of its own weekday norm can never land on a
+ *  "soft demand / cut price" scenario, no matter how the per-room-type
+ *  increase/decrease counts split — that mismatch (property pacing
+ *  ahead while a couple of individually-soft room types dominated the
+ *  per-room count) was the root cause of the old static-feeling,
+ *  self-contradictory action line. BEHIND mirrors this for the cut
+ *  side. Only when pace has nothing to say (thin weekday history, 'on')
+ *  does the per-room mix decide the lever.
+ *
+ *  MIXED_SPLIT is checked before pace and is intentionally pace-
+ *  independent: naming a raise target and a cut target for two
+ *  DIFFERENT room types isn't the blanket contradiction pace-precedence
+ *  guards against — it's legitimate per-type management. */
+export function classifyDailyAction(
+  signals: DailySituationSignals,
+): { scenario: DailyActionScenario; facts: DailyActionFacts } {
+  const { increases, decreases, pace, competitorGapPct, isWeekend, trend, occTh, occEn } = signals
+
+  const raiseNames = topTwoNames(increases)
+  const cutNames = topTwoNames(decreases)
+  const raiseMore = increases.length - raiseNames.length
+  const cutMore = decreases.length - cutNames.length
+
+  const facts: DailyActionFacts = {
+    mixedRaiseType: null,
+    mixedCutType: null,
+    raiseNameTh: raiseNames.join(' และ '),
+    raiseNameEn: raiseNames.join(' and '),
+    raiseMoreTh: raiseMore > 0 ? ` (+${raiseMore} ห้องอื่น)` : '',
+    raiseMoreEn: raiseMore > 0 ? ` (+${raiseMore} more)` : '',
+    cutNameTh: cutNames.join(' และ '),
+    cutNameEn: cutNames.join(' and '),
+    cutMoreTh: cutMore > 0 ? ` (+${cutMore} ห้องอื่น)` : '',
+    cutMoreEn: cutMore > 0 ? ` (+${cutMore} more)` : '',
+    occTh,
+    occEn,
+    competitorGapPct,
+    isWeekend,
+    trend,
+  }
+
+  if (increases.length > 0 && decreases.length > 0 && increases.length === decreases.length) {
+    const topUp = increases.slice().sort((a, b) => b.impactThb - a.impactThb)[0]
+    const topDown = decreases.slice().sort((a, b) => b.impactThb - a.impactThb)[0]
+    return {
+      scenario: 'MIXED_SPLIT',
+      facts: { ...facts, mixedRaiseType: topUp.roomType, mixedCutType: topDown.roomType },
+    }
+  }
+
+  if (pace === 'ahead') {
+    return {
+      scenario: competitorGapPct != null && competitorGapPct > 0 ? 'AHEAD_COMPS_HIGHER' : 'AHEAD_NO_COMPS',
+      facts,
+    }
+  }
+  if (pace === 'behind') {
+    return {
+      scenario: competitorGapPct != null && competitorGapPct < 0 ? 'BEHIND_COMPS_LOWER' : 'BEHIND_NO_COMPS',
+      facts,
+    }
+  }
+
+  // pace === 'on' — no property-level pace signal strong enough to lead;
+  // fall back to which lever the per-room mix actually calls for.
+  if (decreases.length > increases.length) {
+    return {
+      scenario: competitorGapPct != null && competitorGapPct > 0 ? 'SOFT_TYPES_COMPS_HIGH' : 'SOFT_TYPES_NO_COMPS',
+      facts,
+    }
+  }
+  if (increases.length > 0 && increases.length > decreases.length) {
+    return {
+      scenario: competitorGapPct != null && competitorGapPct > 0 ? 'HOT_TYPES_COMPS_HIGH' : 'HOT_TYPES_NO_COMPS',
+      facts,
+    }
+  }
+  return { scenario: 'ON_PACE_BALANCED', facts }
+}
+
+// Deterministic, reproducible variant picker — a stand-in for
+// Math.random() so the same day always renders the same phrasing (and
+// tests can assert on it) while two different days can land on
+// different, equally-valid wording for the same scenario.
+function seedIndex(seed: string, count: number): number {
+  if (count <= 1) return 0
+  let hash = 0
+  for (let i = 0; i < seed.length; i++) {
+    hash = (Math.imul(hash, 31) + seed.charCodeAt(i)) | 0
+  }
+  return Math.abs(hash) % count
+}
+
+/** Renders a scenario + facts into bilingual copy. 2-3 phrasings per
+ *  scenario, picked deterministically from `dateSeed` (the latest
+ *  metrics day, e.g. "2026-07-24") so the same day is reproducible but
+ *  consecutive days in the same scenario don't read byte-identical. */
+export function renderAction(
+  scenario: DailyActionScenario,
+  facts: DailyActionFacts,
+  dateSeed: string,
+): DailyAction {
+  const pick = (variants: DailyAction[]): DailyAction => variants[seedIndex(dateSeed, variants.length)]
+  const {
+    raiseNameTh, raiseNameEn, raiseMoreTh, raiseMoreEn,
+    cutNameTh, cutNameEn, cutMoreTh, cutMoreEn,
+    occTh, occEn, competitorGapPct, isWeekend, trend,
+  } = facts
+  const gap = competitorGapPct ?? 0
+  const gapAbs = Math.abs(gap)
+
+  switch (scenario) {
+    case 'MIXED_SPLIT':
+      return {
+        messageTh: `ดีมานด์แยกตามห้อง: ขึ้น ${facts.mixedRaiseType}, ดัน ${facts.mixedCutType}${occTh} — บริหารราคาตามประเภทห้อง`,
+        messageEn: `Demand is split: raise ${facts.mixedRaiseType}, push ${facts.mixedCutType}${occEn} — manage rates by room type`,
+      }
+
+    case 'AHEAD_COMPS_HIGHER':
+      // Property can be pacing well ahead of its weekday norm even when
+      // every individual room type's own noisy 3-day trailing average
+      // still reads as a decrease (real Crystal Resort case, 2026-07-22:
+      // 82% occ vs a 33% Wednesday norm, yet all 4 types individually
+      // "decrease"). Falls back to property-wide phrasing rather than
+      // naming a raise target that doesn't exist.
+      return raiseNameEn.length === 0
+        ? pick([
+            {
+              messageTh: `ภาพรวมจองเกินจังหวะปกติ${occTh} — คู่แข่งราคาสูงกว่า ${gap}% ยังมีช่องขึ้นราคาได้อีก ปิดส่วนลดออนไลน์`,
+              messageEn: `Overall booking running ahead of pace${occEn} — competitors ${gap}% higher, room to raise further, close online discounts`,
+            },
+            {
+              messageTh: `ภาพรวมจองแน่นกว่าปกติ${occTh} — คู่แข่งสูงกว่า ${gap}% ขยับราคาขึ้นได้เลย`,
+              messageEn: `Overall demand well ahead of pace${occEn} — competitors ${gap}% higher, push the rate up now`,
+            },
+          ])
+        : pick([
+            {
+              messageTh: `${raiseNameTh} ดีมานด์เกินจังหวะปกติ${raiseMoreTh}${occTh} — คู่แข่งราคาสูงกว่า ${gap}% ยังมีช่องขึ้นราคาได้อีก ปิดส่วนลดออนไลน์`,
+              messageEn: `${raiseNameEn} running ahead of the norm${raiseMoreEn}${occEn} — competitors ${gap}% higher, room to raise further, close online discounts`,
+            },
+            {
+              messageTh: `${raiseNameTh} จองแน่นกว่าปกติ${raiseMoreTh}${occTh} — คู่แข่งสูงกว่า ${gap}% ขยับราคาขึ้นได้เลย`,
+              messageEn: `${raiseNameEn} booking well ahead of pace${raiseMoreEn}${occEn} — competitors ${gap}% higher, push the rate up now`,
+            },
+          ])
+
+    case 'AHEAD_NO_COMPS':
+      return raiseNameEn.length === 0
+        ? pick([
+            {
+              messageTh: `ภาพรวมจองเกินจังหวะปกติ${occTh} — ปิดส่วนลดออนไลน์และปรับราคาขึ้นตามดีมานด์`,
+              messageEn: `Overall booking running ahead of pace${occEn} — close online discounts and raise rates with demand`,
+            },
+            {
+              messageTh: `ภาพรวมจองแน่นกว่าปกติ${occTh} — งดโปรออนไลน์แล้วขยับราคาขึ้น`,
+              messageEn: `Overall demand ahead of pace${occEn} — pause online promos and push the rate up`,
+            },
+          ])
+        : pick([
+            {
+              messageTh: `${raiseNameTh} ดีมานด์เกินจังหวะปกติ${raiseMoreTh}${occTh} — ปิดส่วนลดออนไลน์และปรับราคาขึ้นตามดีมานด์`,
+              messageEn: `${raiseNameEn} running ahead of the norm${raiseMoreEn}${occEn} — close online discounts and raise rates with demand`,
+            },
+            {
+              messageTh: `${raiseNameTh} จองแน่นกว่าปกติ${raiseMoreTh}${occTh} — งดโปรออนไลน์แล้วขยับราคาขึ้น`,
+              messageEn: `${raiseNameEn} booking ahead of pace${raiseMoreEn}${occEn} — pause online promos and push the rate up`,
+            },
+          ])
+
+    case 'HOT_TYPES_COMPS_HIGH':
+      return pick([
+        {
+          messageTh: `${raiseNameTh} ดีมานด์สูง${occTh} — คู่แข่งสูงกว่า ${gap}% ยังมีช่องขึ้นราคาได้อีก ปิดส่วนลดออนไลน์`,
+          messageEn: `${raiseNameEn} in high demand${occEn} — competitors ${gap}% higher, room to raise further, close online discounts`,
+        },
+        {
+          messageTh: `${raiseNameTh} คนจองเยอะ${occTh} — คู่แข่งราคาสูงกว่า ${gap}% ปิดดีลออนไลน์แล้วขึ้นราคา`,
+          messageEn: `${raiseNameEn} seeing strong demand${occEn} — competitors ${gap}% higher, close online deals and raise`,
+        },
+      ])
+
+    case 'HOT_TYPES_NO_COMPS':
+      return pick(
+        isWeekend
+          ? [
+              {
+                messageTh: `${raiseNameTh} ดีมานด์สูง${occTh} — ปิดส่วนลดออนไลน์และตั้ง weekend premium`,
+                messageEn: `${raiseNameEn} in high demand${occEn} — close online discounts and set a weekend premium`,
+              },
+              {
+                messageTh: `${raiseNameTh} จองดีต่อเนื่อง${occTh} — ตั้งราคาพิเศษวันหยุดและงดส่วนลด`,
+                messageEn: `${raiseNameEn} booking strongly${occEn} — set a weekend premium and pause discounts`,
+              },
+            ]
+          : [
+              {
+                messageTh: `${raiseNameTh} ดีมานด์สูง${occTh} — ปิดส่วนลดและปรับราคาขึ้นตามดีมานด์`,
+                messageEn: `${raiseNameEn} in high demand${occEn} — close discounts and raise rates with demand`,
+              },
+              {
+                messageTh: `${raiseNameTh} จองดีต่อเนื่อง${occTh} — งดส่วนลดออนไลน์ ขยับราคาขึ้นตามยอดจอง`,
+                messageEn: `${raiseNameEn} booking strongly${occEn} — pause online discounts and raise with bookings`,
+              },
+            ],
+      )
+
+    case 'SOFT_TYPES_COMPS_HIGH':
+      return pick([
+        {
+          messageTh: `${cutNameTh} ว่างมาก${cutMoreTh}${occTh} — คู่แข่งราคาสูงกว่า ${gap}% ดึงยอดด้วยดีลและโปรบน OTA แทนการลดลึก`,
+          messageEn: `${cutNameEn} sitting soft${cutMoreEn}${occEn} — competitors price ${gap}% higher, win bookings with an OTA deal, not a deep cut`,
+        },
+        {
+          messageTh: `${cutNameTh} ยังว่าง${cutMoreTh}${occTh} — คู่แข่งสูงกว่า ${gap}% เน้นโปรบน OTA ไม่ต้องลดราคาลึก`,
+          messageEn: `${cutNameEn} still open${cutMoreEn}${occEn} — competitors ${gap}% higher, lean on OTA visibility rather than a deep cut`,
+        },
+      ])
+
+    case 'SOFT_TYPES_NO_COMPS': {
+      const variants: DailyAction[] = isWeekend
+        ? trend === 'worsening'
+          ? [
+              {
+                messageTh: `${cutNameTh} สุดสัปดาห์ยังว่าง${cutMoreTh}${occTh} — เปิดดีล last-minute บน OTA และดันโพสต์โซเชียลคืนนี้`,
+                messageEn: `${cutNameEn} still open this weekend${cutMoreEn}${occEn} — push a last-minute OTA deal and boost social tonight`,
+              },
+              {
+                messageTh: `${cutNameTh} ยังว่างช่วงวันหยุด${cutMoreTh}${occTh} — รีบเปิดดีล last-minute และโปรโมทโซเชียลคืนนี้`,
+                messageEn: `${cutNameEn} open heading into the weekend${cutMoreEn}${occEn} — get a last-minute OTA deal live and push social tonight`,
+              },
+            ]
+          : [
+              {
+                messageTh: `${cutNameTh} ว่างมาก${cutMoreTh}${occTh} — จัดโปรสุดสัปดาห์และเพิ่มการมองเห็นบน OTA`,
+                messageEn: `${cutNameEn} sitting soft${cutMoreEn}${occEn} — run a weekend promo and lift OTA visibility`,
+              },
+              {
+                messageTh: `${cutNameTh} ยังว่าง${cutMoreTh}${occTh} — เปิดโปรวันหยุดและดันการมองเห็นบน OTA`,
+                messageEn: `${cutNameEn} still soft${cutMoreEn}${occEn} — launch a weekend offer and boost OTA visibility`,
+              },
+            ]
+        : trend === 'worsening'
+          ? [
+              {
+                messageTh: `${cutNameTh} ยอดอ่อนลง${cutMoreTh}${occTh} — เปิดดีลกลางสัปดาห์/ลูกค้าองค์กรและกระตุ้น OTA วันนี้`,
+                messageEn: `${cutNameEn} sitting soft, demand slipping${cutMoreEn}${occEn} — open a midweek/corporate deal and nudge OTA today`,
+              },
+              {
+                messageTh: `${cutNameTh} ว่างมากและยอดกำลังลด${cutMoreTh}${occTh} — เปิดดีลลูกค้าองค์กรและดัน OTA วันนี้`,
+                messageEn: `${cutNameEn} soft and slipping${cutMoreEn}${occEn} — open a corporate/midweek deal and push OTA today`,
+              },
+            ]
+          : [
+              {
+                messageTh: `${cutNameTh} ว่างมาก${cutMoreTh}${occTh} — เพิ่มช่องทาง OTA และโปรพักกลางสัปดาห์`,
+                messageEn: `${cutNameEn} sitting soft${cutMoreEn}${occEn} — add an OTA channel and a midweek stay offer`,
+              },
+              {
+                messageTh: `${cutNameTh} ยังว่าง${cutMoreTh}${occTh} — เปิดโปรกลางสัปดาห์และเพิ่มช่องทาง OTA`,
+                messageEn: `${cutNameEn} still soft${cutMoreEn}${occEn} — launch a midweek offer and add an OTA channel`,
+              },
+            ]
+      return pick(variants)
+    }
+
+    case 'BEHIND_COMPS_LOWER':
+      // Mirrors AHEAD_*: pace can be 'behind' even when no individual
+      // room type's own 3-day average happens to read as a decrease.
+      return cutNameEn.length === 0
+        ? pick([
+            {
+              messageTh: `ภาพรวมต่ำกว่าจังหวะปกติ${occTh} — คู่แข่งราคาต่ำกว่า ${gapAbs}% พิจารณาลดราคาและเปิดดีล last-minute`,
+              messageEn: `Overall pace lagging the norm${occEn} — competitors ${gapAbs}% cheaper, consider a rate cut and a last-minute deal`,
+            },
+            {
+              messageTh: `ภาพรวมตามหลังจังหวะปกติ${occTh} — คู่แข่งถูกกว่า ${gapAbs}% ลดราคาและเปิดดีลด่วน`,
+              messageEn: `Overall booking behind pace${occEn} — competitors ${gapAbs}% lower, cut price and push a last-minute deal`,
+            },
+          ])
+        : pick([
+            {
+              messageTh: `${cutNameTh} ต่ำกว่าจังหวะปกติ${cutMoreTh}${occTh} — คู่แข่งราคาต่ำกว่า ${gapAbs}% พิจารณาลดราคาห้องที่ค้างและเปิดดีล last-minute`,
+              messageEn: `${cutNameEn} lagging the norm${cutMoreEn}${occEn} — competitors ${gapAbs}% cheaper, consider a targeted cut on the lagging types and a last-minute deal`,
+            },
+            {
+              messageTh: `${cutNameTh} ตามหลังจังหวะปกติ${cutMoreTh}${occTh} — คู่แข่งถูกกว่า ${gapAbs}% ลดราคาเฉพาะจุดและเปิดดีลด่วน`,
+              messageEn: `${cutNameEn} behind pace${cutMoreEn}${occEn} — competitors ${gapAbs}% lower, cut price on the lagging types and push a last-minute deal`,
+            },
+          ])
+
+    case 'BEHIND_NO_COMPS':
+      return cutNameEn.length === 0
+        ? pick([
+            {
+              messageTh: `ภาพรวมต่ำกว่าจังหวะปกติ${occTh} — พิจารณาลดราคาและเพิ่มช่องทางขาย`,
+              messageEn: `Overall pace lagging the norm${occEn} — consider a rate cut and add sales channels`,
+            },
+            {
+              messageTh: `ภาพรวมตามหลังจังหวะปกติ${occTh} — ลดราคาและกระตุ้น OTA วันนี้`,
+              messageEn: `Overall booking behind pace${occEn} — cut price and nudge OTA today`,
+            },
+          ])
+        : pick([
+            {
+              messageTh: `${cutNameTh} ต่ำกว่าจังหวะปกติ${cutMoreTh}${occTh} — พิจารณาลดราคาห้องที่ค้างและเพิ่มช่องทางขาย`,
+              messageEn: `${cutNameEn} lagging the norm${cutMoreEn}${occEn} — consider a targeted cut on the lagging types and add sales channels`,
+            },
+            {
+              messageTh: `${cutNameTh} ตามหลังจังหวะปกติ${cutMoreTh}${occTh} — ลดราคาเฉพาะจุดและกระตุ้น OTA วันนี้`,
+              messageEn: `${cutNameEn} behind pace${cutMoreEn}${occEn} — cut price on the lagging types and nudge OTA today`,
+            },
+          ])
+
+    case 'ON_PACE_BALANCED': {
+      if (competitorGapPct != null && competitorGapPct > 0) {
+        return pick([
+          {
+            messageTh: `ราคาทุกห้องเหมาะสม แต่คู่แข่งสูงกว่า ${gap}% — ทดลองขยับราคาขึ้นเล็กน้อย`,
+            messageEn: `All rates healthy, but competitors price ${gap}% higher — test a small increase`,
+          },
+          {
+            messageTh: `ราคาทุกห้องพอดีอยู่แล้ว คู่แข่งสูงกว่า ${gap}% — ลองขึ้นราคาเล็กน้อยดูยอด`,
+            messageEn: `Rates are healthy; competitors are ${gap}% higher — try a small increase and watch demand`,
+          },
+        ])
+      }
+      if (isWeekend) {
+        return pick([
+          {
+            messageTh: `ราคาทุกห้องเหมาะสม${occTh} — ดันยอดสุดสัปดาห์ผ่าน OTA และรีวิว`,
+            messageEn: `All rates appropriate${occEn} — drive weekend volume via OTA and reviews`,
+          },
+          {
+            messageTh: `ราคาทุกห้องพอดี${occTh} — เพิ่มยอดวันหยุดผ่าน OTA และเก็บรีวิว`,
+            messageEn: `All rates are in good shape${occEn} — grow weekend volume via OTA and reviews`,
+          },
+        ])
+      }
+      const trendVariants: Record<'improving' | 'worsening' | 'steady', DailyAction[]> = {
+        improving: [
+          {
+            messageTh: `ราคาทุกห้องเหมาะสม${occTh} — โมเมนตัมดีขึ้น เก็บรีวิวเพิ่มเพื่อรักษาราคา`,
+            messageEn: `All rates appropriate${occEn} — momentum improving, gather reviews to hold rates`,
+          },
+          {
+            messageTh: `ราคาทุกห้องพอดี${occTh} — ยอดดีขึ้นต่อเนื่อง เก็บรีวิวไว้หนุนราคา`,
+            messageEn: `All rates are in good shape${occEn} — demand is picking up, keep gathering reviews to support the rate`,
+          },
+        ],
+        worsening: [
+          {
+            messageTh: `ราคาทุกห้องเหมาะสม${occTh} — ยอดเริ่มอ่อน เพิ่มช่องทางขายก่อนต้องลดราคา`,
+            messageEn: `All rates appropriate${occEn} — demand softening, add channels before cutting price`,
+          },
+          {
+            messageTh: `ราคาทุกห้องพอดี${occTh} — ยอดเริ่มชะลอ เพิ่มช่องทางขายไว้ก่อนตัดสินใจลดราคา`,
+            messageEn: `All rates are in good shape${occEn} — demand is slowing, add sales channels before considering a cut`,
+          },
+        ],
+        steady: [
+          {
+            messageTh: `ราคาทุกห้องเหมาะสม${occTh} — เน้นเพิ่มช่องทางขายและรีวิวเพื่อขับยอด`,
+            messageEn: `All rates appropriate${occEn} — focus on expanding channels and reviews`,
+          },
+          {
+            messageTh: `ราคาทุกห้องพอดี${occTh} — คงราคาไว้ เน้นช่องทางขายและรีวิวเพื่อดันยอด`,
+            messageEn: `All rates are in good shape${occEn} — hold rates, focus on channels and reviews to drive volume`,
+          },
+        ],
+      }
+      return pick(trendVariants[trend])
+    }
+
+    default:
+      return { messageTh: `บริหารราคาตามประเภทห้อง${occTh}`, messageEn: `Manage rates by room type${occEn}` }
+  }
 }
 
 /** Plain-language "what to do today" line synthesised from the per-room
@@ -939,124 +1448,26 @@ export function summarizePerRoomRates(
     }
   }
 
-  // ── MIXED / equal split — demand is polarised with both ends present
-  // in equal measure. Name both ends so the owner manages by type
-  // rather than blanket. Checked first so an even split doesn't get
-  // mis-routed into the soft/hot single-sided copy. ──
-  if (increases.length > 0 && decreases.length > 0 && increases.length === decreases.length) {
-    const topUp = increases.slice().sort((a, b) => b.impactThb - a.impactThb)[0]
-    const topDown = decreases.slice().sort((a, b) => b.impactThb - a.impactThb)[0]
-    return {
-      messageTh: `ดีมานด์แยกตามห้อง: ขึ้น ${topUp.roomType}, ดัน ${topDown.roomType}${occTh} — บริหารราคาตามประเภทห้อง`,
-      messageEn: `Demand is split: raise ${topUp.roomType}, push ${topDown.roomType}${occEn} — manage rates by room type`,
-    }
-  }
+  const { scenario, facts } = classifyDailyAction({
+    increases,
+    decreases,
+    holds,
+    pace: ctx?.pace ?? 'on',
+    competitorGapPct: ctx?.competitorGapPct ?? null,
+    isWeekend: ctx?.isWeekend ?? false,
+    trend: ctx?.trend ?? 'steady',
+    occTh,
+    occEn,
+  })
 
-  // ── SOFT DEMAND — decreases dominate (more types need a push than
-  // need a raise). Name the weakest types; tailor the action to
-  // weekend/weekday, trend, and competitor gap. ──
-  if (decreases.length > increases.length) {
-    const names = topTwoNames(decreases)
-    const nameTh = names.join(' และ ')
-    const nameEn = names.join(' and ')
-    const more = decreases.length - names.length
-    const moreTh = more > 0 ? ` (+${more} ห้องอื่น)` : ''
-    const moreEn = more > 0 ? ` (+${more} more)` : ''
+  // Seed on the latest metrics day so the same day always renders the
+  // same phrasing (reproducible/testable) while different days can pick
+  // a different, equally-valid wording within the same scenario.
+  const dateSeed = context.inputs && context.inputs.length > 0
+    ? context.inputs[context.inputs.length - 1].date
+    : 'no-context'
 
-    let tailTh: string
-    let tailEn: string
-    if (ctx?.competitorHigherPct != null) {
-      // Competitors are priced above us yet we're soft — it's a
-      // visibility/promo problem, not a price-too-high one.
-      tailTh = `คู่แข่งราคาสูงกว่า ${ctx.competitorHigherPct}% — ดึงยอดด้วยดีลและโปรบน OTA แทนการลดลึก`
-      tailEn = `competitors price ${ctx.competitorHigherPct}% higher — win bookings with an OTA deal, not a deep cut`
-    } else if (ctx?.isWeekend) {
-      tailTh =
-        ctx.trend === 'worsening'
-          ? 'สุดสัปดาห์ยังว่าง — เปิดดีล last-minute บน OTA และดันโพสต์โซเชียลคืนนี้'
-          : 'จัดโปรสุดสัปดาห์และเพิ่มการมองเห็นบน OTA'
-      tailEn =
-        ctx.trend === 'worsening'
-          ? 'weekend still open — push a last-minute OTA deal and boost social tonight'
-          : 'run a weekend promo and lift OTA visibility'
-    } else {
-      tailTh =
-        ctx?.trend === 'worsening'
-          ? 'ยอดอ่อนลง — เปิดดีลกลางสัปดาห์/ลูกค้าองค์กรและกระตุ้น OTA วันนี้'
-          : 'เพิ่มช่องทาง OTA และโปรพักกลางสัปดาห์'
-      tailEn =
-        ctx?.trend === 'worsening'
-          ? 'demand slipping — open a midweek/corporate deal and nudge OTA today'
-          : 'add an OTA channel and a midweek stay offer'
-    }
-
-    return {
-      messageTh: `${nameTh} ว่างมาก${moreTh}${occTh} — ${tailTh}`,
-      messageEn: `${nameEn} sitting soft${moreEn}${occEn} — ${tailEn}`,
-    }
-  }
-
-  // ── HOT DEMAND — increases dominate (and outnumber decreases). Name
-  // the strongest types; the risk is standing online discounts leaving
-  // money on the table. ──
-  if (increases.length > 0 && increases.length > decreases.length) {
-    const names = topTwoNames(increases)
-    const nameTh = names.join(' และ ')
-    const nameEn = names.join(' and ')
-
-    let tailTh: string
-    let tailEn: string
-    if (ctx?.competitorHigherPct != null) {
-      tailTh = `คู่แข่งสูงกว่า ${ctx.competitorHigherPct}% — ยังมีช่องขึ้นราคาได้อีก ปิดส่วนลดออนไลน์`
-      tailEn = `competitors ${ctx.competitorHigherPct}% higher — room to raise further, close online discounts`
-    } else if (ctx?.isWeekend) {
-      tailTh = 'ปิดส่วนลดออนไลน์และตั้ง weekend premium'
-      tailEn = 'close online discounts and set a weekend premium'
-    } else {
-      tailTh = 'ปิดส่วนลดและปรับราคาขึ้นตามดีมานด์'
-      tailEn = 'close discounts and raise rates with demand'
-    }
-
-    return {
-      messageTh: `${nameTh} ดีมานด์สูง${occTh} — ${tailTh}`,
-      messageEn: `${nameEn} in high demand${occEn} — ${tailEn}`,
-    }
-  }
-
-  // ── ALL HOLD — rates sit in the comfortable band. Lever is volume,
-  // not price; vary the nudge by competitor gap / weekend / trend. ──
-  if (holds.length === rates.length) {
-    if (ctx?.competitorHigherPct != null) {
-      return {
-        messageTh: `ราคาทุกห้องเหมาะสม แต่คู่แข่งสูงกว่า ${ctx.competitorHigherPct}% — ทดลองขยับราคาขึ้นเล็กน้อย`,
-        messageEn: `All rates healthy, but competitors price ${ctx.competitorHigherPct}% higher — test a small increase`,
-      }
-    }
-    if (ctx?.isWeekend) {
-      return {
-        messageTh: `ราคาทุกห้องเหมาะสม${occTh} — ดันยอดสุดสัปดาห์ผ่าน OTA และรีวิว`,
-        messageEn: `All rates appropriate${occEn} — drive weekend volume via OTA and reviews`,
-      }
-    }
-    const tail =
-      ctx?.trend === 'improving'
-        ? { th: 'โมเมนตัมดีขึ้น เก็บรีวิวเพิ่มเพื่อรักษาราคา', en: 'momentum improving — gather reviews to hold rates' }
-        : ctx?.trend === 'worsening'
-          ? { th: 'ยอดเริ่มอ่อน เพิ่มช่องทางขายก่อนต้องลดราคา', en: 'demand softening — add channels before cutting price' }
-          : { th: 'เน้นเพิ่มช่องทางขายและรีวิวเพื่อขับยอด', en: 'focus on expanding channels and reviews' }
-    return {
-      messageTh: `ราคาทุกห้องเหมาะสม${occTh} — ${tail.th}`,
-      messageEn: `All rates appropriate${occEn} — ${tail.en}`,
-    }
-  }
-
-  // Safety net — the branches above are exhaustive over the (increase,
-  // decrease, hold) count space, but TypeScript needs a terminal return
-  // and a future direction value would land here. Generic by-type copy.
-  return {
-    messageTh: `บริหารราคาตามประเภทห้อง${occTh}`,
-    messageEn: `Manage rates by room type${occEn}`,
-  }
+  return renderAction(scenario, facts, dateSeed)
 }
 
 export function forecastTomorrow(
@@ -1096,15 +1507,13 @@ function competitorComparison(days: RecommendationInput[]): null | {
   gapRatio: number // (competitorAvg - ourAdr) / ourAdr; can be negative
   daysWithCompetitor: number
 } {
-  // Filter to OTA channel (and legacy unspecified) per day BEFORE the
+  // Filter to true OTA rows only (see isOtaChannel) per day BEFORE the
   // 3-day quorum check. A day where the owner only logged walk-in
   // rates shouldn't satisfy the threshold for the OTA-aware signal.
-  const isOtaOrLegacy = (r: { channel?: string }): boolean =>
-    !r.channel || r.channel === 'ota'
   const daysWithCompetitor = days
     .map((d) => ({
       ...d,
-      competitorRates: (d.competitorRates ?? []).filter(isOtaOrLegacy),
+      competitorRates: (d.competitorRates ?? []).filter(isOtaChannel),
     }))
     .filter((d) => d.competitorRates.length > 0)
   if (daysWithCompetitor.length < 3) return null
@@ -1294,8 +1703,12 @@ export interface CompetitorRateRowForRec {
   captured_at: string
   competitor_name: string
   rate: number | string | null
-  /** Channel from migration 033; absent on rows from before the
-   *  migration ran (treated as 'ota' by the engine). */
+  /** competitor_rates.channel — NOT NULL with a CHECK constraint at the
+   *  DB layer (migration 033), so any real row the caller selects this
+   *  column for will carry one of 'ota' | 'walk_in' | 'package' | 'promo'.
+   *  Optional here only so callers that forget to select it fail closed:
+   *  isOtaChannel() excludes (and warns on) a missing value rather than
+   *  defaulting it into the OTA comparison. */
   channel?: string | null
 }
 

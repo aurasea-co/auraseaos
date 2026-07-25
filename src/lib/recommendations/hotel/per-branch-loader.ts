@@ -134,9 +134,13 @@ export async function loadPerRoomRecsForBranch(
   }
 
   // ── 2. Competitor rates over the same window ──
+  // channel is selected (and threaded through the cast below) so the
+  // engine's OTA-only comparison (isOtaChannel in engine.ts) can
+  // actually see it — a walk-in/package/promo row must never be
+  // silently folded into the "guests see this online" gap.
   const { data: compRows } = await supabase
     .from('competitor_rates')
-    .select('competitor_name, rate, captured_at')
+    .select('competitor_name, rate, captured_at, channel')
     .eq('branch_id', params.branchId)
     .gte('captured_at', params.fromIso)
 
@@ -156,7 +160,12 @@ export async function loadPerRoomRecsForBranch(
   )
   const recInputs = attachCompetitorRates(
     baseInputs,
-    (compRows || []) as Array<{ competitor_name: string; rate: number | string | null; captured_at: string }>,
+    (compRows || []) as Array<{
+      competitor_name: string
+      rate: number | string | null
+      captured_at: string
+      channel?: string | null
+    }>,
   )
 
   // ── 3b. Authoritative room-type roster ──

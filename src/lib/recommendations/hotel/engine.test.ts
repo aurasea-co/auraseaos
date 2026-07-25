@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   suggestRates,
   detectLowOccupancy,
@@ -220,9 +220,14 @@ function compDays(
       date: d.toISOString().slice(0, 10),
       occupancyRate: occPerDay[i] ?? 0.5,
       adrThb: adr,
+      // These tests exercise the undercut/overpricing thresholds against
+      // OTA data (their own dedicated describe block below covers
+      // channel-filtering itself) — channel must be explicit now that a
+      // missing channel is excluded rather than defaulted to OTA.
       competitorRates: compRatesPerDay[i].map((rate, j) => ({
         name: `Competitor ${j + 1}`,
         rateThb: rate,
+        channel: 'ota',
       })),
     }
   })
@@ -258,11 +263,11 @@ describe('detectCompetitorUndercutting', () => {
     // Only 2 days carry competitor rates; the third is bare.
     const a: RecommendationInput = {
       date: '2026-05-28', occupancyRate: 0.5, adrThb: 800,
-      competitorRates: [{ name: 'C', rateThb: 980 }],
+      competitorRates: [{ name: 'C', rateThb: 980, channel: 'ota' }],
     }
     const b: RecommendationInput = {
       date: '2026-05-29', occupancyRate: 0.5, adrThb: 810,
-      competitorRates: [{ name: 'C', rateThb: 970 }],
+      competitorRates: [{ name: 'C', rateThb: 970, channel: 'ota' }],
     }
     const c: RecommendationInput = {
       date: '2026-05-27', occupancyRate: 0.5, adrThb: 800,
@@ -315,8 +320,8 @@ describe('detectCompetitorUndercutting', () => {
         occupancyRate: 0.5,
         adrThb: 800,
         competitorRates: [
-          { name: 'Cheap Co', rateThb: 950 },
-          { name: 'Premium Co', rateThb: 1020 },
+          { name: 'Cheap Co', rateThb: 950, channel: 'ota' },
+          { name: 'Premium Co', rateThb: 1020, channel: 'ota' },
         ],
       }),
     )
@@ -522,14 +527,30 @@ describe('competitor signals — OTA-only filtering', () => {
     expect(recs).toHaveLength(0)
   })
 
-  it('treats legacy rates (no channel) as OTA for backward-compat', () => {
-    // Before migration 033, rows had no channel column. Engine should
-    // still emit the signal for pre-033 data so the dashboard doesn't
-    // go quiet during the migration window.
+  it('excludes rows with a missing/unrecognized channel rather than defaulting to OTA', () => {
+    // competitor_rates.channel is NOT NULL with a CHECK constraint at
+    // the DB layer (migration 033) — every real row the caller actually
+    // selects this column for carries an explicit value. A missing
+    // channel here means the caller didn't select/thread the column
+    // (the per-branch-loader bug this filter guards against), not
+    // "legacy pre-migration data" — so it's excluded and surfaced via a
+    // warning, never silently folded into the OTA bucket.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const recs = detectCompetitorUndercutting(daysWithRates([
-      { name: 'Pre-033', rateThb: 1200 },  // no channel field
+      { name: 'No-channel row', rateThb: 1200 }, // no channel field
     ]))
-    expect(recs).toHaveLength(1)
+    expect(recs).toHaveLength(0)
+    expect(warnSpy).toHaveBeenCalled()
+    warnSpy.mockRestore()
+  })
+
+  it('does not warn for legitimate non-OTA channels (walk_in/package/promo) — only for missing/unrecognized ones', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    detectCompetitorUndercutting(daysWithRates([
+      { name: 'Walk-in', rateThb: 1200, channel: 'walk_in' },
+    ]))
+    expect(warnSpy).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
   })
 })
 
