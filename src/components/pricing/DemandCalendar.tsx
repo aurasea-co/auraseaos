@@ -1,12 +1,20 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslations, useLocale } from 'next-intl'
 import type { BranchDailyMetric } from '@/hooks/useBranchMetrics'
 import { toBangkokDateStr } from '@/lib/businessDate'
+import { useUser } from '@/providers/user-context'
+import { createClient } from '@/lib/supabase/client'
+import { getDemandCalendarForBranch, demandCalendarDatesInRange } from '@/lib/demand-calendar/queries'
 
-// Thai public holidays 2026 (Bangkok-local YYYY-MM-DD). Holidays bump
-// the demand level by one step; they don't force "high".
+// Thai public holidays 2026 (Bangkok-local YYYY-MM-DD). Fallback/
+// supplement for when demand_calendar (migration 039) has no seeded
+// public_holiday rows yet — kept as a UNION with the live fetch below,
+// not replaced by it, so the calendar doesn't regress to showing zero
+// holidays before seeding lands. Once public holidays are seeded there
+// (see the seeding plan from the demand_calendar proposal), this list
+// becomes redundant and can be deleted.
 const THAI_HOLIDAYS_2026 = [
   '2026-04-13', '2026-04-14', '2026-04-15', // Songkran
   '2026-05-01', // Labour Day (Fri)
@@ -47,6 +55,33 @@ export function DemandCalendar({ data }: { data: BranchDailyMetric[] }) {
   const locale = useLocale()
   const isThai = locale === 'th'
   const monthLocale = isThai ? 'th-TH-u-ca-buddhist' : 'en-GB'
+  const { activeBranch } = useUser()
+
+  // Live demand_calendar rows (global holidays/festivals + owner-entered
+  // local events) for the same 30-day window the grid below renders.
+  // Self-fetching (branchId/organizationId come from context, not a
+  // prop) matches this component's existing self-contained shape rather
+  // than threading two new props through every call site.
+  const [demandDates, setDemandDates] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    if (!activeBranch) return
+    let cancelled = false
+    const supabase = createClient()
+    const fromDate = toBangkokDateStr(new Date().toISOString())
+    const toDateObj = new Date()
+    toDateObj.setDate(toDateObj.getDate() + 29)
+    const toDate = toBangkokDateStr(toDateObj.toISOString())
+    if (!fromDate || !toDate) return
+    getDemandCalendarForBranch(supabase, {
+      organizationId: activeBranch.organization_id,
+      branchId: activeBranch.id,
+      fromDate,
+      toDate,
+    }).then((events) => {
+      if (!cancelled) setDemandDates(demandCalendarDatesInRange(events))
+    })
+    return () => { cancelled = true }
+  }, [activeBranch])
 
   const calendar = useMemo(() => {
     // Historical averages by day-of-week (0=Sun ... 6=Sat), plus an
@@ -106,7 +141,9 @@ export function DemandCalendar({ data }: { data: BranchDailyMetric[] }) {
       // can slip a column under some browser TZs near day boundaries.
       const dAnchored = bangkokDateFromStr(dateStr)
       const dow = dAnchored.getDay()
-      const isHoliday = THAI_HOLIDAYS_2026.includes(dateStr)
+      // Union, not replacement — see the THAI_HOLIDAYS_2026 comment
+      // above for why the hardcoded list stays until seeding lands.
+      const isHoliday = THAI_HOLIDAYS_2026.includes(dateStr) || demandDates.has(dateStr)
 
       // Not enough overall history → classify everything as "low" so
       // the user isn't misled by a small sample defaulting to medium.
@@ -131,7 +168,7 @@ export function DemandCalendar({ data }: { data: BranchDailyMetric[] }) {
       })
     }
     return days
-  }, [data, monthLocale])
+  }, [data, monthLocale, demandDates])
 
   // Header: "19 Apr – 18 May 2026" / "19 เม.ย. – 18 พ.ค. 2569"
   const rangeLabel = useMemo(() => {
