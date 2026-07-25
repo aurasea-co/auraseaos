@@ -1,6 +1,6 @@
 # CLAUDE.md — Aurasea OS
 
-One app, one codebase. Shared spine (auth, orgs, branches, subscriptions, RBAC, ingestion framework, LINE scheduler, billing, morning brief) + two vertical modules that differ only in recommendation logic + dashboards: **RateDesk** (hotel) and **MenuDesk** (F&B). A branch's `type` (`hotel`|`fnb`) routes it. Never fork the verticals into separate products.
+One app, one codebase. Shared spine (auth, orgs, branches, subscriptions, RBAC, ingestion framework, LINE scheduler, billing, morning brief) + two vertical modules that differ only in recommendation logic + dashboards: **RateDesk** (hotel) and **MenuDesk** (F&B). A branch's `business_type` (`accommodation`|`fnb`) routes it. Never fork the verticals into separate products.
 
 ## Stack & infra
 Next.js 15 (App Router) · Supabase (Postgres, Auth, RLS, pg_cron) · Vercel · LINE Messaging API · Resend.
@@ -10,6 +10,7 @@ Next.js 15 (App Router) · Supabase (Postgres, Auth, RLS, pg_cron) · Vercel · 
 ## Ground-truth schema facts (assumed values have burned us — verify, don't guess)
 - Money = **integer satang**, never floats. Canonical `suggested_rate_satang` (`suggested_rate_thb` deprecated).
 - `branches.organization_id` (NOT `org_id`).
+- `branches.business_type` (NOT `type`), values `accommodation`|`fnb` (NOT `hotel`|`fnb`) — verified against ~30 call sites, client and server.
 - `notification_settings` = flat columns (`line_notify_enabled`, `morning_flash_email_enabled`, `line_notify_token`), not JSON.
 - Platform admin role = `super_admin` (underscore).
 - Per-room-type rates in `accommodation_daily_metrics`, NOT `branch_daily_metrics`.
@@ -28,6 +29,6 @@ Next.js 15 (App Router) · Supabase (Postgres, Auth, RLS, pg_cron) · Vercel · 
 
 <!-- ═══ CURRENT FOCUS — update only this block ═══ -->
 ## Current focus (July 2026)
-- **Competitor Rates** (relocated to main nav): fix `forbidden_role` for managers (role gate + RLS owner-scoping) and `wrong_business_type` 400 for Crystal Resort (enum/casing / wrong branch field). Preserve gating + tenancy.
-- **LINE brief:** enumerate full room-type roster incl. Suite on zero-sales days; make "Today's action" situational; email↔LINE per-room-type parity; make rooms/settings page mutable (add/edit/delete) for owner + manager.
+- **RateDesk hygiene:** `competitor-rates` routes (`route.ts` + `import/route.ts`) use `createServiceClient()` for the actual GET/POST/DELETE data ops instead of the RLS user client — violates the supabaseAdmin rule above. Fix without breaking manager writes: `owner_write_competitor_rates` RLS policy is currently owner-only, so widen it to branch-scoped managers before dropping the service-role client. (`forbidden_role` for managers + `wrong_business_type` 400 on this same page were already fixed same-day as the relocation — commits `4096ee5`/`c959235` — confirmed via live diagnostic; no longer open.)
+- **LINE brief:** enumerate full room-type roster incl. Suite on zero-sales days (unverified this pass — may already be covered by `recommendPerRoomTypeRates`'s roster invariant); email↔LINE per-room-type rate-sheet parity beyond the action line (the "today's action" line itself is now situational — pace-vs-weekday-norm classifier + competitor-gap freshness/channel-aware gating — and already shared verbatim across both channels, fixed); make rooms/settings page mutable (add/edit/delete) for owner + manager.
 - **MenuDesk** MD-0→MD-5 pending; Crystal Cafe test branch; Loyverse first adapter; Cloudbeds stubbed (`supportsWriteBack=false`).
