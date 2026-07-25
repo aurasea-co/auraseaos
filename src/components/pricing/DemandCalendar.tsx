@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslations, useLocale } from 'next-intl'
-import type { BranchDailyMetric } from '@/hooks/useBranchMetrics'
 import { toBangkokDateStr } from '@/lib/businessDate'
 import { useUser } from '@/providers/user-context'
 import { createClient } from '@/lib/supabase/client'
@@ -50,7 +49,18 @@ function bangkokDateFromStr(dateStr: string): Date {
   return new Date(dateStr + 'T12:00:00+07:00')
 }
 
-export function DemandCalendar({ data }: { data: BranchDailyMetric[] }) {
+// Structural subset of BranchDailyMetric — this is all the component
+// actually reads. Kept narrow (rather than requiring the full
+// BranchDailyMetric shape) so callers that already have occupancy data
+// in a different row shape (e.g. the /ratedesk dashboard's own
+// accommodation_daily_metrics projection) don't have to fabricate
+// irrelevant fields just to satisfy the prop type.
+export interface DemandCalendarMetricRow {
+  metric_date: string
+  occupancy_rate: number | null
+}
+
+export function DemandCalendar({ data }: { data: DemandCalendarMetricRow[] }) {
   const t = useTranslations('pricing')
   const locale = useLocale()
   const isThai = locale === 'th'

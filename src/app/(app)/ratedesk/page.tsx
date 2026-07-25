@@ -34,6 +34,7 @@ import { createClient } from '@/lib/supabase/client'
 import { ArrowRight, Upload, TrendingUp, TrendingDown, Minus, Edit3 } from 'lucide-react'
 import { getTodayBangkok } from '@/lib/businessDate'
 import { SparklineChart } from '@/components/sparkline-chart'
+import { DemandCalendar } from '@/components/pricing/DemandCalendar'
 import {
   generateDailyRecommendations,
   toRecommendationInputs,
@@ -262,6 +263,16 @@ export default function RateDeskPage() {
     return { date: r.metric_date, value: occ }
   })
 
+  // Same rows, reshaped to DemandCalendar's minimal prop type (fraction
+  // 0..1, not the ×100 sparkData uses) — avoids a second fetch for data
+  // this page already has.
+  const demandCalendarRows = activeRows.map((r) => ({
+    metric_date: r.metric_date,
+    occupancy_rate: r.rooms_available && r.rooms_available > 0 && r.rooms_sold != null
+      ? r.rooms_sold / r.rooms_available
+      : null,
+  }))
+
   // Room-type breakdown aggregated across every day in the window
   // that has CSV-imported data (form entries don't carry a
   // room_type_breakdown JSON, so they're naturally excluded). The
@@ -448,6 +459,11 @@ export default function RateDeskPage() {
           formatValue={(v) => `${Math.round(v)}%`}
         />
       </section>
+
+      {/* Demand calendar — Pro only, same gate as the legacy /pricing
+          page's copy of this widget. No revenue data involved, so no
+          role gating beyond the existing page-level access check. */}
+      {plan === 'pro' && <DemandCalendar data={demandCalendarRows} />}
 
       {/* Room-type breakdown */}
       <section style={card}>
