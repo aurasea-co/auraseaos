@@ -29,7 +29,17 @@ export interface ThailandPublicHoliday2026 {
   endDate: string
   nameTh: string
   nameEn: string
+  /** 0..1. Defaults to 1.0 (official, confirmed calendar) when omitted
+   *  — every 2026 row below relies on that default. A later year's
+   *  lunar/Buddhist-holiday rows (astronomically estimated, pending
+   *  official Cabinet gazette) can override this lower. */
+  confidence?: number
 }
+
+/** Shared across every Thailand-holiday-year file in this directory —
+ *  the type name says 2026 for historical reasons (this was the first
+ *  year seeded) but the shape isn't year-specific. */
+export type ThailandPublicHoliday = ThailandPublicHoliday2026
 
 export const THAILAND_PUBLIC_HOLIDAYS_2026: ThailandPublicHoliday2026[] = [
   { startDate: '2026-01-01', endDate: '2026-01-01', nameTh: 'วันขึ้นปีใหม่', nameEn: "New Year's Day" },
@@ -80,6 +90,6 @@ export function toDemandCalendarSeedRows(
     name_en: h.nameEn,
     province: null,
     source: 'public_holiday_lib' as const,
-    confidence: 1.0,
+    confidence: h.confidence ?? 1.0,
   }))
 }
