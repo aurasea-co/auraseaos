@@ -824,11 +824,6 @@ interface DerivedDayContext {
   weekdaySampleCount: number
   weekdayNameTh: string | null
   weekdayNameEn: string | null
-  /** Pace vs the same-weekday norm (todayVsWeekdayNorm, ±5pts band) —
-   *  the PRIMARY signal classifyDailyAction uses to pick a scenario.
-   *  'on' when there's no weekday baseline yet — an honest default that
-   *  never fabricates a pace the data can't support. */
-  pace: 'ahead' | 'behind' | 'on'
   /** Passthrough of context.demandCalendarEvent — see that field's
    *  comment. Null when no event overlaps tomorrow. */
   demandCalendarEventNameTh: string | null
@@ -943,9 +938,6 @@ function deriveDayContext(context: DailyActionContext): DerivedDayContext | null
     }
   }
 
-  const pace: 'ahead' | 'behind' | 'on' =
-    todayVsWeekdayNorm == null ? 'on' : todayVsWeekdayNorm >= 5 ? 'ahead' : todayVsWeekdayNorm <= -5 ? 'behind' : 'on'
-
   return {
     occPct: Math.round(occNow * 100),
     belowTargetPct,
@@ -958,7 +950,6 @@ function deriveDayContext(context: DailyActionContext): DerivedDayContext | null
     weekdaySampleCount: wb.sampleCount,
     weekdayNameTh,
     weekdayNameEn,
-    pace,
     demandCalendarEventNameTh: context.demandCalendarEvent?.nameTh ?? null,
     demandCalendarEventNameEn: context.demandCalendarEvent?.nameEn ?? null,
   }
@@ -975,29 +966,32 @@ function topTwoNames(rates: ReadonlyArray<PerRoomTypeRate>): string[] {
 
 // ── Situational classifier ──────────────────────────────────────────────
 //
-// The scenario the "today's action" line renders. PACE (vs the
-// same-weekday norm) is the primary axis — see classifyDailyAction below
-// for why. Per-room direction counts (increase/decrease) only decide the
-// lever when pace itself has nothing to say (thin weekday history).
+// The scenario the "today's action" line renders. THE RATE RECOMMENDA-
+// TIONS ARE THE SINGLE SOURCE OF TRUTH FOR DIRECTION: the scenario is
+// derived strictly from the per-room-type increase/decrease/hold counts
+// engine.ts already computed (recommendPerRoomTypeRates). Property-level
+// pace (today vs. this weekday's historical norm) is NEVER a scenario
+// input — it used to be (see git history), which let the action assert
+// "raise / close discounts" on a day the table actually cut 3 room types
+// and held 1 (real Crystal Resort case, 2026-07-25: property pacing
+// +7pts ahead of its Saturday norm, yet Deluxe6/Deluxe2/Suite were all
+// cut and Deluxe5 held). Pace still surfaces — in the occTh/occEn
+// parenthetical below — but purely as CONTEXT, never as something that
+// can override or contradict what the rate sheet says.
 export type DailyActionScenario =
   | 'MIXED_SPLIT'
-  | 'AHEAD_COMPS_HIGHER'
-  | 'AHEAD_NO_COMPS'
-  | 'HOT_TYPES_COMPS_HIGH'
-  | 'HOT_TYPES_NO_COMPS'
-  | 'SOFT_TYPES_COMPS_HIGH'
-  | 'SOFT_TYPES_NO_COMPS'
-  | 'BEHIND_COMPS_LOWER'
-  | 'BEHIND_NO_COMPS'
-  | 'ON_PACE_BALANCED'
+  | 'ALL_RAISE_COMPS_HIGH'
+  | 'ALL_RAISE_NO_COMPS'
+  | 'ALL_CUT_COMPS_LOW'
+  | 'ALL_CUT_COMPS_HIGH'
+  | 'ALL_CUT_NO_COMPS'
+  | 'ALL_HOLD_COMPS_HIGH'
+  | 'ALL_HOLD_NO_COMPS'
 
 /** Everything a scenario's phrasing needs, pre-formatted once so
  *  renderAction() never has to know how a name-list or the occupancy
  *  fragment gets built. */
 export interface DailyActionFacts {
-  /** Populated only for MIXED_SPLIT — the single top mover each way. */
-  mixedRaiseType: string | null
-  mixedCutType: string | null
   raiseNameTh: string
   raiseNameEn: string
   raiseMoreTh: string
@@ -1006,6 +1000,13 @@ export interface DailyActionFacts {
   cutNameEn: string
   cutMoreTh: string
   cutMoreEn: string
+  /** Held room types — named explicitly (not silently folded into a
+   *  generic "+N other rooms" count) so a mixed day like "3 cut, 1 hold"
+   *  states what happens to EVERY type, not just the ones being trimmed. */
+  holdNameTh: string
+  holdNameEn: string
+  holdMoreTh: string
+  holdMoreEn: string
   /** Pre-built occupancy-vs-norm parenthetical (or plain occ%). */
   occTh: string
   occEn: string
@@ -1022,12 +1023,12 @@ export interface DailyActionFacts {
 }
 
 /** Inputs classifyDailyAction needs — a thin, pure-function-friendly
- *  slice of DerivedDayContext + the per-room rate split. */
+ *  slice of DerivedDayContext + the per-room rate split. Deliberately
+ *  has NO pace field — see the module comment above. */
 export interface DailySituationSignals {
   increases: ReadonlyArray<PerRoomTypeRate>
   decreases: ReadonlyArray<PerRoomTypeRate>
   holds: ReadonlyArray<PerRoomTypeRate>
-  pace: 'ahead' | 'behind' | 'on'
   competitorGapPct: number | null
   isWeekend: boolean
   trend: 'worsening' | 'improving' | 'steady'
@@ -1037,36 +1038,34 @@ export interface DailySituationSignals {
   demandCalendarEventNameEn: string | null
 }
 
-/** Maps the day's real signals to a scenario. PACE IS PRIMARY: a
- *  property running ahead of its own weekday norm can never land on a
- *  "soft demand / cut price" scenario, no matter how the per-room-type
- *  increase/decrease counts split — that mismatch (property pacing
- *  ahead while a couple of individually-soft room types dominated the
- *  per-room count) was the root cause of the old static-feeling,
- *  self-contradictory action line. BEHIND mirrors this for the cut
- *  side. Only when pace has nothing to say (thin weekday history, 'on')
- *  does the per-room mix decide the lever.
- *
- *  MIXED_SPLIT is checked before pace and is intentionally pace-
- *  independent: naming a raise target and a cut target for two
- *  DIFFERENT room types isn't the blanket contradiction pace-precedence
- *  guards against — it's legitimate per-type management. */
+/** Maps the day's real signals to a scenario. THE RATE TABLE DECIDES:
+ *  scenario selection is a pure function of increases.length /
+ *  decreases.length — nothing else can flip it. This makes the
+ *  consistency invariant (assertScenarioAgreesWithRates below) true BY
+ *  CONSTRUCTION, not just by convention:
+ *    - both sides present  → MIXED_SPLIT (name both, never a blanket verb)
+ *    - only raises         → ALL_RAISE_* (decreases is guaranteed empty)
+ *    - only cuts           → ALL_CUT_*   (increases is guaranteed empty)
+ *    - neither             → ALL_HOLD_*
+ *  Competitor gap (when fresh) only picks which TAIL PHRASING plays
+ *  within that already-decided direction — it can add color, it can
+ *  never flip raise into cut or vice versa. */
 export function classifyDailyAction(
   signals: DailySituationSignals,
 ): { scenario: DailyActionScenario; facts: DailyActionFacts } {
   const {
-    increases, decreases, pace, competitorGapPct, isWeekend, trend, occTh, occEn,
+    increases, decreases, holds, competitorGapPct, isWeekend, trend, occTh, occEn,
     demandCalendarEventNameTh, demandCalendarEventNameEn,
   } = signals
 
   const raiseNames = topTwoNames(increases)
   const cutNames = topTwoNames(decreases)
+  const holdNames = topTwoNames(holds)
   const raiseMore = increases.length - raiseNames.length
   const cutMore = decreases.length - cutNames.length
+  const holdMore = holds.length - holdNames.length
 
   const facts: DailyActionFacts = {
-    mixedRaiseType: null,
-    mixedCutType: null,
     raiseNameTh: raiseNames.join(' และ '),
     raiseNameEn: raiseNames.join(' and '),
     raiseMoreTh: raiseMore > 0 ? ` (+${raiseMore} ห้องอื่น)` : '',
@@ -1075,6 +1074,10 @@ export function classifyDailyAction(
     cutNameEn: cutNames.join(' and '),
     cutMoreTh: cutMore > 0 ? ` (+${cutMore} ห้องอื่น)` : '',
     cutMoreEn: cutMore > 0 ? ` (+${cutMore} more)` : '',
+    holdNameTh: holdNames.join(' และ '),
+    holdNameEn: holdNames.join(' and '),
+    holdMoreTh: holdMore > 0 ? ` (+${holdMore} ห้องอื่น)` : '',
+    holdMoreEn: holdMore > 0 ? ` (+${holdMore} more)` : '',
     occTh,
     occEn,
     competitorGapPct,
@@ -1084,43 +1087,74 @@ export function classifyDailyAction(
     demandCalendarEventNameEn,
   }
 
-  if (increases.length > 0 && decreases.length > 0 && increases.length === decreases.length) {
-    const topUp = increases.slice().sort((a, b) => b.impactThb - a.impactThb)[0]
-    const topDown = decreases.slice().sort((a, b) => b.impactThb - a.impactThb)[0]
-    return {
-      scenario: 'MIXED_SPLIT',
-      facts: { ...facts, mixedRaiseType: topUp.roomType, mixedCutType: topDown.roomType },
-    }
-  }
+  const hasRaise = increases.length > 0
+  const hasCut = decreases.length > 0
 
-  if (pace === 'ahead') {
+  if (hasRaise && hasCut) {
+    return { scenario: 'MIXED_SPLIT', facts }
+  }
+  if (hasRaise) {
+    // decreases is guaranteed empty here — never a raise scenario with
+    // any cut hiding inside it.
     return {
-      scenario: competitorGapPct != null && competitorGapPct > 0 ? 'AHEAD_COMPS_HIGHER' : 'AHEAD_NO_COMPS',
+      scenario: competitorGapPct != null && competitorGapPct > 0 ? 'ALL_RAISE_COMPS_HIGH' : 'ALL_RAISE_NO_COMPS',
       facts,
     }
   }
-  if (pace === 'behind') {
-    return {
-      scenario: competitorGapPct != null && competitorGapPct < 0 ? 'BEHIND_COMPS_LOWER' : 'BEHIND_NO_COMPS',
-      facts,
-    }
+  if (hasCut) {
+    // increases is guaranteed empty here — never a cut scenario with
+    // any raise hiding inside it.
+    let scenario: DailyActionScenario
+    if (competitorGapPct != null && competitorGapPct < 0) scenario = 'ALL_CUT_COMPS_LOW'
+    else if (competitorGapPct != null && competitorGapPct > 0) scenario = 'ALL_CUT_COMPS_HIGH'
+    else scenario = 'ALL_CUT_NO_COMPS'
+    return { scenario, facts }
   }
+  // Neither increases nor decreases — every type holds.
+  return {
+    scenario: competitorGapPct != null && competitorGapPct > 0 ? 'ALL_HOLD_COMPS_HIGH' : 'ALL_HOLD_NO_COMPS',
+    facts,
+  }
+}
 
-  // pace === 'on' — no property-level pace signal strong enough to lead;
-  // fall back to which lever the per-room mix actually calls for.
-  if (decreases.length > increases.length) {
-    return {
-      scenario: competitorGapPct != null && competitorGapPct > 0 ? 'SOFT_TYPES_COMPS_HIGH' : 'SOFT_TYPES_NO_COMPS',
-      facts,
-    }
+// Scenario families used by the consistency invariant below.
+const RAISE_SCENARIOS = new Set<DailyActionScenario>(['ALL_RAISE_COMPS_HIGH', 'ALL_RAISE_NO_COMPS'])
+const CUT_SCENARIOS = new Set<DailyActionScenario>(['ALL_CUT_COMPS_LOW', 'ALL_CUT_COMPS_HIGH', 'ALL_CUT_NO_COMPS'])
+const HOLD_SCENARIOS = new Set<DailyActionScenario>(['ALL_HOLD_COMPS_HIGH', 'ALL_HOLD_NO_COMPS'])
+
+/** Consistency invariant: the scenario's IMPLIED direction must never
+ *  contradict the rate recommendations it narrates. classifyDailyAction
+ *  is built so this holds by construction, but this is exposed as a
+ *  standalone, throwing check — a deliberate hard guarantee, not just an
+ *  emergent property of how the classifier happens to be written today.
+ *  summarizePerRoomRates calls this and catches the throw (logs + omits
+ *  the line) rather than let a contradictory brief go out; a caller that
+ *  wants the failure to be loud (e.g. a test) can call this directly. */
+export function assertScenarioAgreesWithRates(
+  scenario: DailyActionScenario,
+  counts: { increases: number; decreases: number },
+): void {
+  const { increases, decreases } = counts
+  if (RAISE_SCENARIOS.has(scenario) && decreases > 0) {
+    throw new Error(
+      `Today's action contradiction: scenario ${scenario} implies a rate RAISE, but the rate table shows ${decreases} decrease(s). Refusing to emit a contradictory brief.`,
+    )
   }
-  if (increases.length > 0 && increases.length > decreases.length) {
-    return {
-      scenario: competitorGapPct != null && competitorGapPct > 0 ? 'HOT_TYPES_COMPS_HIGH' : 'HOT_TYPES_NO_COMPS',
-      facts,
-    }
+  if (CUT_SCENARIOS.has(scenario) && increases > 0) {
+    throw new Error(
+      `Today's action contradiction: scenario ${scenario} implies a rate CUT, but the rate table shows ${increases} increase(s). Refusing to emit a contradictory brief.`,
+    )
   }
-  return { scenario: 'ON_PACE_BALANCED', facts }
+  if (HOLD_SCENARIOS.has(scenario) && (increases > 0 || decreases > 0)) {
+    throw new Error(
+      `Today's action contradiction: scenario ${scenario} implies every rate holds, but the rate table shows ${increases} increase(s) and ${decreases} decrease(s). Refusing to emit a contradictory brief.`,
+    )
+  }
+  if (scenario === 'MIXED_SPLIT' && (increases === 0 || decreases === 0)) {
+    throw new Error(
+      `Today's action contradiction: scenario MIXED_SPLIT implies both a raise and a cut, but the rate table shows ${increases} increase(s) and ${decreases} decrease(s).`,
+    )
+  }
 }
 
 // Deterministic, reproducible variant picker — a stand-in for
@@ -1152,227 +1186,156 @@ function renderBaseAction(
   const {
     raiseNameTh, raiseNameEn, raiseMoreTh, raiseMoreEn,
     cutNameTh, cutNameEn, cutMoreTh, cutMoreEn,
+    holdNameTh, holdNameEn, holdMoreTh, holdMoreEn,
     occTh, occEn, competitorGapPct, isWeekend, trend,
   } = facts
   const gap = competitorGapPct ?? 0
   const gapAbs = Math.abs(gap)
+  // Appended whenever some (but not all) room types hold, so a mixed
+  // day like "3 cut, 1 hold" states what happens to EVERY type instead
+  // of silently dropping the held one from the narrative.
+  const holdClauseTh = holdNameTh ? `; ${holdNameTh}คงราคา${holdMoreTh}` : ''
+  const holdClauseEn = holdNameEn ? `; ${holdNameEn} holding steady${holdMoreEn}` : ''
 
   switch (scenario) {
+    // Both a raise and a cut are genuinely happening — name both sides,
+    // never collapse to one blanket verb. increases/decreases are both
+    // guaranteed non-empty here (see classifyDailyAction).
     case 'MIXED_SPLIT':
       return {
-        messageTh: `ดีมานด์แยกตามห้อง: ขึ้น ${facts.mixedRaiseType}, ดัน ${facts.mixedCutType}${occTh} — บริหารราคาตามประเภทห้อง`,
-        messageEn: `Demand is split: raise ${facts.mixedRaiseType}, push ${facts.mixedCutType}${occEn} — manage rates by room type`,
+        messageTh: `ขึ้น ${raiseNameTh}${raiseMoreTh}, ลด ${cutNameTh}${cutMoreTh}${occTh} — บริหารราคาตามประเภทห้อง${holdClauseTh}`,
+        messageEn: `Raise ${raiseNameEn}${raiseMoreEn}, cut ${cutNameEn}${cutMoreEn}${occEn} — manage rates by room type${holdClauseEn}`,
       }
 
-    case 'AHEAD_COMPS_HIGHER':
-      // Property can be pacing well ahead of its weekday norm even when
-      // every individual room type's own noisy 3-day trailing average
-      // still reads as a decrease (real Crystal Resort case, 2026-07-22:
-      // 82% occ vs a 33% Wednesday norm, yet all 4 types individually
-      // "decrease"). Falls back to property-wide phrasing rather than
-      // naming a raise target that doesn't exist.
-      return raiseNameEn.length === 0
-        ? pick([
-            {
-              messageTh: `ภาพรวมจองเกินจังหวะปกติ${occTh} — คู่แข่งราคาสูงกว่า ${gap}% ยังมีช่องขึ้นราคาได้อีก ปิดส่วนลดออนไลน์`,
-              messageEn: `Overall booking running ahead of pace${occEn} — competitors ${gap}% higher, room to raise further, close online discounts`,
-            },
-            {
-              messageTh: `ภาพรวมจองแน่นกว่าปกติ${occTh} — คู่แข่งสูงกว่า ${gap}% ขยับราคาขึ้นได้เลย`,
-              messageEn: `Overall demand well ahead of pace${occEn} — competitors ${gap}% higher, push the rate up now`,
-            },
-          ])
-        : pick([
-            {
-              messageTh: `${raiseNameTh} ดีมานด์เกินจังหวะปกติ${raiseMoreTh}${occTh} — คู่แข่งราคาสูงกว่า ${gap}% ยังมีช่องขึ้นราคาได้อีก ปิดส่วนลดออนไลน์`,
-              messageEn: `${raiseNameEn} running ahead of the norm${raiseMoreEn}${occEn} — competitors ${gap}% higher, room to raise further, close online discounts`,
-            },
-            {
-              messageTh: `${raiseNameTh} จองแน่นกว่าปกติ${raiseMoreTh}${occTh} — คู่แข่งสูงกว่า ${gap}% ขยับราคาขึ้นได้เลย`,
-              messageEn: `${raiseNameEn} booking well ahead of pace${raiseMoreEn}${occEn} — competitors ${gap}% higher, push the rate up now`,
-            },
-          ])
-
-    case 'AHEAD_NO_COMPS':
-      return raiseNameEn.length === 0
-        ? pick([
-            {
-              messageTh: `ภาพรวมจองเกินจังหวะปกติ${occTh} — ปิดส่วนลดออนไลน์และปรับราคาขึ้นตามดีมานด์`,
-              messageEn: `Overall booking running ahead of pace${occEn} — close online discounts and raise rates with demand`,
-            },
-            {
-              messageTh: `ภาพรวมจองแน่นกว่าปกติ${occTh} — งดโปรออนไลน์แล้วขยับราคาขึ้น`,
-              messageEn: `Overall demand ahead of pace${occEn} — pause online promos and push the rate up`,
-            },
-          ])
-        : pick([
-            {
-              messageTh: `${raiseNameTh} ดีมานด์เกินจังหวะปกติ${raiseMoreTh}${occTh} — ปิดส่วนลดออนไลน์และปรับราคาขึ้นตามดีมานด์`,
-              messageEn: `${raiseNameEn} running ahead of the norm${raiseMoreEn}${occEn} — close online discounts and raise rates with demand`,
-            },
-            {
-              messageTh: `${raiseNameTh} จองแน่นกว่าปกติ${raiseMoreTh}${occTh} — งดโปรออนไลน์แล้วขยับราคาขึ้น`,
-              messageEn: `${raiseNameEn} booking ahead of pace${raiseMoreEn}${occEn} — pause online promos and push the rate up`,
-            },
-          ])
-
-    case 'HOT_TYPES_COMPS_HIGH':
+    // decreases is guaranteed empty in both ALL_RAISE_* cases.
+    case 'ALL_RAISE_COMPS_HIGH':
       return pick([
         {
-          messageTh: `${raiseNameTh} ดีมานด์สูง${occTh} — คู่แข่งสูงกว่า ${gap}% ยังมีช่องขึ้นราคาได้อีก ปิดส่วนลดออนไลน์`,
-          messageEn: `${raiseNameEn} in high demand${occEn} — competitors ${gap}% higher, room to raise further, close online discounts`,
+          messageTh: `${raiseNameTh} ดีมานด์สูง${raiseMoreTh}${occTh} — คู่แข่งสูงกว่า ${gap}% ยังมีช่องขึ้นราคาได้อีก ปิดส่วนลดออนไลน์${holdClauseTh}`,
+          messageEn: `${raiseNameEn} in high demand${raiseMoreEn}${occEn} — competitors ${gap}% higher, room to raise further, close online discounts${holdClauseEn}`,
         },
         {
-          messageTh: `${raiseNameTh} คนจองเยอะ${occTh} — คู่แข่งราคาสูงกว่า ${gap}% ปิดดีลออนไลน์แล้วขึ้นราคา`,
-          messageEn: `${raiseNameEn} seeing strong demand${occEn} — competitors ${gap}% higher, close online deals and raise`,
+          messageTh: `${raiseNameTh} คนจองเยอะ${raiseMoreTh}${occTh} — คู่แข่งราคาสูงกว่า ${gap}% ปิดดีลออนไลน์แล้วขึ้นราคา${holdClauseTh}`,
+          messageEn: `${raiseNameEn} seeing strong demand${raiseMoreEn}${occEn} — competitors ${gap}% higher, close online deals and raise${holdClauseEn}`,
         },
       ])
 
-    case 'HOT_TYPES_NO_COMPS':
+    case 'ALL_RAISE_NO_COMPS':
       return pick(
         isWeekend
           ? [
               {
-                messageTh: `${raiseNameTh} ดีมานด์สูง${occTh} — ปิดส่วนลดออนไลน์และตั้ง weekend premium`,
-                messageEn: `${raiseNameEn} in high demand${occEn} — close online discounts and set a weekend premium`,
+                messageTh: `${raiseNameTh} ดีมานด์สูง${raiseMoreTh}${occTh} — ปิดส่วนลดออนไลน์และตั้ง weekend premium${holdClauseTh}`,
+                messageEn: `${raiseNameEn} in high demand${raiseMoreEn}${occEn} — close online discounts and set a weekend premium${holdClauseEn}`,
               },
               {
-                messageTh: `${raiseNameTh} จองดีต่อเนื่อง${occTh} — ตั้งราคาพิเศษวันหยุดและงดส่วนลด`,
-                messageEn: `${raiseNameEn} booking strongly${occEn} — set a weekend premium and pause discounts`,
+                messageTh: `${raiseNameTh} จองดีต่อเนื่อง${raiseMoreTh}${occTh} — ตั้งราคาพิเศษวันหยุดและงดส่วนลด${holdClauseTh}`,
+                messageEn: `${raiseNameEn} booking strongly${raiseMoreEn}${occEn} — set a weekend premium and pause discounts${holdClauseEn}`,
               },
             ]
           : [
               {
-                messageTh: `${raiseNameTh} ดีมานด์สูง${occTh} — ปิดส่วนลดและปรับราคาขึ้นตามดีมานด์`,
-                messageEn: `${raiseNameEn} in high demand${occEn} — close discounts and raise rates with demand`,
+                messageTh: `${raiseNameTh} ดีมานด์สูง${raiseMoreTh}${occTh} — ปิดส่วนลดและปรับราคาขึ้นตามดีมานด์${holdClauseTh}`,
+                messageEn: `${raiseNameEn} in high demand${raiseMoreEn}${occEn} — close discounts and raise rates with demand${holdClauseEn}`,
               },
               {
-                messageTh: `${raiseNameTh} จองดีต่อเนื่อง${occTh} — งดส่วนลดออนไลน์ ขยับราคาขึ้นตามยอดจอง`,
-                messageEn: `${raiseNameEn} booking strongly${occEn} — pause online discounts and raise with bookings`,
+                messageTh: `${raiseNameTh} จองดีต่อเนื่อง${raiseMoreTh}${occTh} — งดส่วนลดออนไลน์ ขยับราคาขึ้นตามยอดจอง${holdClauseTh}`,
+                messageEn: `${raiseNameEn} booking strongly${raiseMoreEn}${occEn} — pause online discounts and raise with bookings${holdClauseEn}`,
               },
             ],
       )
 
-    case 'SOFT_TYPES_COMPS_HIGH':
+    // increases is guaranteed empty in every ALL_CUT_* case.
+    case 'ALL_CUT_COMPS_LOW':
+      // We're cutting AND competitors are cheaper than us — the cut is
+      // reinforced, not just a visibility problem. Push harder + urgency.
       return pick([
         {
-          messageTh: `${cutNameTh} ว่างมาก${cutMoreTh}${occTh} — คู่แข่งราคาสูงกว่า ${gap}% ดึงยอดด้วยดีลและโปรบน OTA แทนการลดลึก`,
-          messageEn: `${cutNameEn} sitting soft${cutMoreEn}${occEn} — competitors price ${gap}% higher, win bookings with an OTA deal, not a deep cut`,
+          messageTh: `${cutNameTh} ยังว่าง${cutMoreTh}${occTh} — คู่แข่งราคาต่ำกว่า ${gapAbs}% พิจารณาลดราคาห้องที่ค้างและเปิดดีล last-minute${holdClauseTh}`,
+          messageEn: `${cutNameEn} still soft${cutMoreEn}${occEn} — competitors ${gapAbs}% cheaper, consider a targeted cut on the lagging types and a last-minute deal${holdClauseEn}`,
         },
         {
-          messageTh: `${cutNameTh} ยังว่าง${cutMoreTh}${occTh} — คู่แข่งสูงกว่า ${gap}% เน้นโปรบน OTA ไม่ต้องลดราคาลึก`,
-          messageEn: `${cutNameEn} still open${cutMoreEn}${occEn} — competitors ${gap}% higher, lean on OTA visibility rather than a deep cut`,
+          messageTh: `${cutNameTh} ยังไม่ขยับ${cutMoreTh}${occTh} — คู่แข่งถูกกว่า ${gapAbs}% ลดราคาเฉพาะจุดและเปิดดีลด่วน${holdClauseTh}`,
+          messageEn: `${cutNameEn} still not moving${cutMoreEn}${occEn} — competitors ${gapAbs}% lower, cut price on the lagging types and push a last-minute deal${holdClauseEn}`,
         },
       ])
 
-    case 'SOFT_TYPES_NO_COMPS': {
+    case 'ALL_CUT_COMPS_HIGH':
+      // We're cutting even though competitors are pricier than us — a
+      // visibility/promo problem, not a price-too-high one.
+      return pick([
+        {
+          messageTh: `${cutNameTh} ว่างมาก${cutMoreTh}${occTh} — คู่แข่งราคาสูงกว่า ${gap}% ดึงยอดด้วยดีลและโปรบน OTA แทนการลดลึก${holdClauseTh}`,
+          messageEn: `${cutNameEn} sitting soft${cutMoreEn}${occEn} — competitors price ${gap}% higher, win bookings with an OTA deal, not a deep cut${holdClauseEn}`,
+        },
+        {
+          messageTh: `${cutNameTh} ยังว่าง${cutMoreTh}${occTh} — คู่แข่งสูงกว่า ${gap}% เน้นโปรบน OTA ไม่ต้องลดราคาลึก${holdClauseTh}`,
+          messageEn: `${cutNameEn} still open${cutMoreEn}${occEn} — competitors ${gap}% higher, lean on OTA visibility rather than a deep cut${holdClauseEn}`,
+        },
+      ])
+
+    case 'ALL_CUT_NO_COMPS': {
       const variants: DailyAction[] = isWeekend
         ? trend === 'worsening'
           ? [
               {
-                messageTh: `${cutNameTh} สุดสัปดาห์ยังว่าง${cutMoreTh}${occTh} — เปิดดีล last-minute บน OTA และดันโพสต์โซเชียลคืนนี้`,
-                messageEn: `${cutNameEn} still open this weekend${cutMoreEn}${occEn} — push a last-minute OTA deal and boost social tonight`,
+                messageTh: `${cutNameTh} สุดสัปดาห์ยังว่าง${cutMoreTh}${occTh} — เปิดดีล last-minute บน OTA และดันโพสต์โซเชียลคืนนี้${holdClauseTh}`,
+                messageEn: `${cutNameEn} still open this weekend${cutMoreEn}${occEn} — push a last-minute OTA deal and boost social tonight${holdClauseEn}`,
               },
               {
-                messageTh: `${cutNameTh} ยังว่างช่วงวันหยุด${cutMoreTh}${occTh} — รีบเปิดดีล last-minute และโปรโมทโซเชียลคืนนี้`,
-                messageEn: `${cutNameEn} open heading into the weekend${cutMoreEn}${occEn} — get a last-minute OTA deal live and push social tonight`,
+                messageTh: `${cutNameTh} ยังว่างช่วงวันหยุด${cutMoreTh}${occTh} — รีบเปิดดีล last-minute และโปรโมทโซเชียลคืนนี้${holdClauseTh}`,
+                messageEn: `${cutNameEn} open heading into the weekend${cutMoreEn}${occEn} — get a last-minute OTA deal live and push social tonight${holdClauseEn}`,
               },
             ]
           : [
               {
-                messageTh: `${cutNameTh} ว่างมาก${cutMoreTh}${occTh} — จัดโปรสุดสัปดาห์และเพิ่มการมองเห็นบน OTA`,
-                messageEn: `${cutNameEn} sitting soft${cutMoreEn}${occEn} — run a weekend promo and lift OTA visibility`,
+                messageTh: `${cutNameTh} ว่างมาก${cutMoreTh}${occTh} — จัดโปรสุดสัปดาห์และเพิ่มการมองเห็นบน OTA${holdClauseTh}`,
+                messageEn: `${cutNameEn} sitting soft${cutMoreEn}${occEn} — run a weekend promo and lift OTA visibility${holdClauseEn}`,
               },
               {
-                messageTh: `${cutNameTh} ยังว่าง${cutMoreTh}${occTh} — เปิดโปรวันหยุดและดันการมองเห็นบน OTA`,
-                messageEn: `${cutNameEn} still soft${cutMoreEn}${occEn} — launch a weekend offer and boost OTA visibility`,
+                messageTh: `${cutNameTh} ยังว่าง${cutMoreTh}${occTh} — เปิดโปรวันหยุดและดันการมองเห็นบน OTA${holdClauseTh}`,
+                messageEn: `${cutNameEn} still soft${cutMoreEn}${occEn} — launch a weekend offer and boost OTA visibility${holdClauseEn}`,
               },
             ]
         : trend === 'worsening'
           ? [
               {
-                messageTh: `${cutNameTh} ยอดอ่อนลง${cutMoreTh}${occTh} — เปิดดีลกลางสัปดาห์/ลูกค้าองค์กรและกระตุ้น OTA วันนี้`,
-                messageEn: `${cutNameEn} sitting soft, demand slipping${cutMoreEn}${occEn} — open a midweek/corporate deal and nudge OTA today`,
+                messageTh: `${cutNameTh} ยอดอ่อนลง${cutMoreTh}${occTh} — เปิดดีลกลางสัปดาห์/ลูกค้าองค์กรและกระตุ้น OTA วันนี้${holdClauseTh}`,
+                messageEn: `${cutNameEn} sitting soft, demand slipping${cutMoreEn}${occEn} — open a midweek/corporate deal and nudge OTA today${holdClauseEn}`,
               },
               {
-                messageTh: `${cutNameTh} ว่างมากและยอดกำลังลด${cutMoreTh}${occTh} — เปิดดีลลูกค้าองค์กรและดัน OTA วันนี้`,
-                messageEn: `${cutNameEn} soft and slipping${cutMoreEn}${occEn} — open a corporate/midweek deal and push OTA today`,
+                messageTh: `${cutNameTh} ว่างมากและยอดกำลังลด${cutMoreTh}${occTh} — เปิดดีลลูกค้าองค์กรและดัน OTA วันนี้${holdClauseTh}`,
+                messageEn: `${cutNameEn} soft and slipping${cutMoreEn}${occEn} — open a corporate/midweek deal and push OTA today${holdClauseEn}`,
               },
             ]
           : [
               {
-                messageTh: `${cutNameTh} ว่างมาก${cutMoreTh}${occTh} — เพิ่มช่องทาง OTA และโปรพักกลางสัปดาห์`,
-                messageEn: `${cutNameEn} sitting soft${cutMoreEn}${occEn} — add an OTA channel and a midweek stay offer`,
+                messageTh: `${cutNameTh} ว่างมาก${cutMoreTh}${occTh} — เพิ่มช่องทาง OTA และโปรพักกลางสัปดาห์${holdClauseTh}`,
+                messageEn: `${cutNameEn} sitting soft${cutMoreEn}${occEn} — add an OTA channel and a midweek stay offer${holdClauseEn}`,
               },
               {
-                messageTh: `${cutNameTh} ยังว่าง${cutMoreTh}${occTh} — เปิดโปรกลางสัปดาห์และเพิ่มช่องทาง OTA`,
-                messageEn: `${cutNameEn} still soft${cutMoreEn}${occEn} — launch a midweek offer and add an OTA channel`,
+                messageTh: `${cutNameTh} ยังว่าง${cutMoreTh}${occTh} — เปิดโปรกลางสัปดาห์และเพิ่มช่องทาง OTA${holdClauseTh}`,
+                messageEn: `${cutNameEn} still soft${cutMoreEn}${occEn} — launch a midweek offer and add an OTA channel${holdClauseEn}`,
               },
             ]
       return pick(variants)
     }
 
-    case 'BEHIND_COMPS_LOWER':
-      // Mirrors AHEAD_*: pace can be 'behind' even when no individual
-      // room type's own 3-day average happens to read as a decrease.
-      return cutNameEn.length === 0
-        ? pick([
-            {
-              messageTh: `ภาพรวมต่ำกว่าจังหวะปกติ${occTh} — คู่แข่งราคาต่ำกว่า ${gapAbs}% พิจารณาลดราคาและเปิดดีล last-minute`,
-              messageEn: `Overall pace lagging the norm${occEn} — competitors ${gapAbs}% cheaper, consider a rate cut and a last-minute deal`,
-            },
-            {
-              messageTh: `ภาพรวมตามหลังจังหวะปกติ${occTh} — คู่แข่งถูกกว่า ${gapAbs}% ลดราคาและเปิดดีลด่วน`,
-              messageEn: `Overall booking behind pace${occEn} — competitors ${gapAbs}% lower, cut price and push a last-minute deal`,
-            },
-          ])
-        : pick([
-            {
-              messageTh: `${cutNameTh} ต่ำกว่าจังหวะปกติ${cutMoreTh}${occTh} — คู่แข่งราคาต่ำกว่า ${gapAbs}% พิจารณาลดราคาห้องที่ค้างและเปิดดีล last-minute`,
-              messageEn: `${cutNameEn} lagging the norm${cutMoreEn}${occEn} — competitors ${gapAbs}% cheaper, consider a targeted cut on the lagging types and a last-minute deal`,
-            },
-            {
-              messageTh: `${cutNameTh} ตามหลังจังหวะปกติ${cutMoreTh}${occTh} — คู่แข่งถูกกว่า ${gapAbs}% ลดราคาเฉพาะจุดและเปิดดีลด่วน`,
-              messageEn: `${cutNameEn} behind pace${cutMoreEn}${occEn} — competitors ${gapAbs}% lower, cut price on the lagging types and push a last-minute deal`,
-            },
-          ])
+    // Neither increases nor decreases — every type holds (both are
+    // guaranteed empty here).
+    case 'ALL_HOLD_COMPS_HIGH':
+      return pick([
+        {
+          messageTh: `ราคาทุกห้องเหมาะสม แต่คู่แข่งสูงกว่า ${gap}% — ทดลองขยับราคาขึ้นเล็กน้อย`,
+          messageEn: `All rates healthy, but competitors price ${gap}% higher — test a small increase`,
+        },
+        {
+          messageTh: `ราคาทุกห้องพอดีอยู่แล้ว คู่แข่งสูงกว่า ${gap}% — ลองขึ้นราคาเล็กน้อยดูยอด`,
+          messageEn: `Rates are healthy; competitors are ${gap}% higher — try a small increase and watch demand`,
+        },
+      ])
 
-    case 'BEHIND_NO_COMPS':
-      return cutNameEn.length === 0
-        ? pick([
-            {
-              messageTh: `ภาพรวมต่ำกว่าจังหวะปกติ${occTh} — พิจารณาลดราคาและเพิ่มช่องทางขาย`,
-              messageEn: `Overall pace lagging the norm${occEn} — consider a rate cut and add sales channels`,
-            },
-            {
-              messageTh: `ภาพรวมตามหลังจังหวะปกติ${occTh} — ลดราคาและกระตุ้น OTA วันนี้`,
-              messageEn: `Overall booking behind pace${occEn} — cut price and nudge OTA today`,
-            },
-          ])
-        : pick([
-            {
-              messageTh: `${cutNameTh} ต่ำกว่าจังหวะปกติ${cutMoreTh}${occTh} — พิจารณาลดราคาห้องที่ค้างและเพิ่มช่องทางขาย`,
-              messageEn: `${cutNameEn} lagging the norm${cutMoreEn}${occEn} — consider a targeted cut on the lagging types and add sales channels`,
-            },
-            {
-              messageTh: `${cutNameTh} ตามหลังจังหวะปกติ${cutMoreTh}${occTh} — ลดราคาเฉพาะจุดและกระตุ้น OTA วันนี้`,
-              messageEn: `${cutNameEn} behind pace${cutMoreEn}${occEn} — cut price on the lagging types and nudge OTA today`,
-            },
-          ])
-
-    case 'ON_PACE_BALANCED': {
-      if (competitorGapPct != null && competitorGapPct > 0) {
-        return pick([
-          {
-            messageTh: `ราคาทุกห้องเหมาะสม แต่คู่แข่งสูงกว่า ${gap}% — ทดลองขยับราคาขึ้นเล็กน้อย`,
-            messageEn: `All rates healthy, but competitors price ${gap}% higher — test a small increase`,
-          },
-          {
-            messageTh: `ราคาทุกห้องพอดีอยู่แล้ว คู่แข่งสูงกว่า ${gap}% — ลองขึ้นราคาเล็กน้อยดูยอด`,
-            messageEn: `Rates are healthy; competitors are ${gap}% higher — try a small increase and watch demand`,
-          },
-        ])
-      }
+    case 'ALL_HOLD_NO_COMPS': {
       if (isWeekend) {
         return pick([
           {
@@ -1505,7 +1468,6 @@ export function summarizePerRoomRates(
     increases,
     decreases,
     holds,
-    pace: ctx?.pace ?? 'on',
     competitorGapPct: ctx?.competitorGapPct ?? null,
     isWeekend: ctx?.isWeekend ?? false,
     trend: ctx?.trend ?? 'steady',
@@ -1514,6 +1476,18 @@ export function summarizePerRoomRates(
     demandCalendarEventNameTh: ctx?.demandCalendarEventNameTh ?? null,
     demandCalendarEventNameEn: ctx?.demandCalendarEventNameEn ?? null,
   })
+
+  // Hard guarantee: the action can never contradict the rate table.
+  // classifyDailyAction is built so this holds by construction, but this
+  // is the enforced safety net — a caught throw means "log it and omit
+  // the line" rather than let one branch's edge case crash the whole
+  // cron batch or send a contradictory brief.
+  try {
+    assertScenarioAgreesWithRates(scenario, { increases: increases.length, decreases: decreases.length })
+  } catch (err) {
+    console.error('[summarizePerRoomRates] refusing to emit a contradictory action line:', err)
+    return null
+  }
 
   // Seed on the latest metrics day so the same day always renders the
   // same phrasing (reproducible/testable) while different days can pick

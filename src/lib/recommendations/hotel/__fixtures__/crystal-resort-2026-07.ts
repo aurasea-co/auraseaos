@@ -1,8 +1,10 @@
 // Real Crystal Resort data (branch ef77c100-e27b-4f69-a930-053750b79f22),
 // pulled from accommodation_daily_metrics + competitor_rates for the
-// 2026-05-01..2026-07-24 window. Used to replay the "today's action" line
-// exactly as it would have rendered on 2026-07-22/23/24 — the three days
-// the owner reported near-identical, contradictory guidance on. See
+// 2026-05-01..2026-07-25 window. Used to replay the "today's action" line
+// exactly as it would have rendered on 2026-07-22/23/24 (the three days
+// the owner first reported near-identical, contradictory guidance on)
+// and 2026-07-25 (the day the action said "raise / close discounts"
+// while the rate table cut Deluxe6/Deluxe2/Suite and held Deluxe5). See
 // daily-action.test.ts's "real Crystal Resort replay" block.
 //
 // Note the data itself is messy in a realistic way: on 07-22 and 07-24
@@ -98,6 +100,7 @@ export const CRYSTAL_RESORT_ACCOM_ROWS: AccommodationRowForRec[] = [
   { metric_date: '2026-07-22', rooms_available: 84, rooms_sold: 69, revenue: 55469, room_type_breakdown: [{ rateThb: 698, roomType: 'Deluxe5', totalRooms: 33, occupiedRooms: 7 }, { rateThb: 848, roomType: 'Deluxe6', totalRooms: 21, occupiedRooms: 1 }, { rateThb: 808, roomType: 'Deluxe2', totalRooms: 19, occupiedRooms: 0 }, { rateThb: 1020, roomType: 'Suite', totalRooms: 11, occupiedRooms: 0 }] },
   { metric_date: '2026-07-23', rooms_available: 84, rooms_sold: 70, revenue: 55504, room_type_breakdown: [{ rateThb: 697, roomType: 'Deluxe5', totalRooms: 33, occupiedRooms: 33 }, { rateThb: 850, roomType: 'Deluxe6', totalRooms: 21, occupiedRooms: 16 }, { rateThb: 808, roomType: 'Deluxe2', totalRooms: 19, occupiedRooms: 14 }, { rateThb: 1020, roomType: 'Suite', totalRooms: 11, occupiedRooms: 7 }] },
   { metric_date: '2026-07-24', rooms_available: 84, rooms_sold: 69, revenue: 58395, room_type_breakdown: [{ rateThb: 697, roomType: 'Deluxe5', totalRooms: 33, occupiedRooms: 3 }, { rateThb: 1063, roomType: 'Deluxe6', totalRooms: 21, occupiedRooms: 2 }, { rateThb: 808, roomType: 'Deluxe2', totalRooms: 19, occupiedRooms: 0 }, { rateThb: 1020, roomType: 'Suite', totalRooms: 11, occupiedRooms: 0 }] },
+  { metric_date: '2026-07-25', rooms_available: 84, rooms_sold: 65, revenue: 51726.99, room_type_breakdown: [{ rateThb: 734, roomType: 'Deluxe5', totalRooms: 33, occupiedRooms: 20 }, { rateThb: 777, roomType: 'Deluxe6', totalRooms: 21, occupiedRooms: 4 }, { rateThb: 808, roomType: 'Deluxe2', totalRooms: 19, occupiedRooms: 0 }, { rateThb: 1020, roomType: 'Suite', totalRooms: 11, occupiedRooms: 0 }] },
 ]
 
 // Latest captured_at across every competitor row is 2026-07-04 — 18-20
