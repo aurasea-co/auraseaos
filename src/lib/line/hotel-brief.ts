@@ -192,10 +192,18 @@ function statTile(label: string, value: string, color: string): Record<string, u
   return {
     type: 'box',
     layout: 'vertical',
-    flex: 1,
+    // flex: 0 — size to content rather than forcing an equal 1/3 share
+    // of the row (see the row's justifyContent: 'space-between' below).
+    // An earlier equal-thirds version made "OCCUPANCY" wrap mid-word
+    // ("OCCUPANC" / "Y") because the fixed-width tile was a hair
+    // narrower than the word even with wrap:true — verified against the
+    // actual LINE Flex Message Simulator. Content-sizing removes the
+    // forced width entirely rather than guessing a flex ratio that
+    // happens to fit this one word.
+    flex: 0,
     contents: [
-      { type: 'text', text: value, size: 'xl', weight: 'bold', color },
-      { type: 'text', text: label.toUpperCase(), size: 'xxs', color: COLORS.muted, margin: 'xs' },
+      { type: 'text', text: value, size: 'xl', weight: 'bold', color, wrap: true },
+      { type: 'text', text: label.toUpperCase(), size: 'xxs', color: COLORS.muted, margin: 'xs', wrap: true },
     ],
   }
 }
@@ -234,12 +242,19 @@ function rateChip(text: string, bg: string, fg: string): Record<string, unknown>
   return {
     type: 'box',
     layout: 'vertical',
+    // flex: 0 — LINE Flex defaults a component to flex:1 (share space
+    // evenly with siblings) whenever flex isn't set on ANY sibling at
+    // that level. Without this the chip and the previous-rate text
+    // next to it split the row's width instead of sizing to their own
+    // content, and the chip's own text gets truncated ("฿1,045" →
+    // "฿1,…"). Verified against the actual LINE Flex Message Simulator.
+    flex: 0,
     backgroundColor: bg,
     cornerRadius: '999px',
     paddingAll: '4px',
     paddingStart: '8px',
     paddingEnd: '8px',
-    contents: [{ type: 'text', text, size: 'xs', weight: 'bold', color: fg, align: 'center' }],
+    contents: [{ type: 'text', text, size: 'xs', weight: 'bold', color: fg, align: 'center', flex: 0 }],
   }
 }
 
@@ -272,7 +287,7 @@ function perRoomRateRow(row: PerRoomTypeRate): Record<string, unknown> {
             spacing: 'xs',
             justifyContent: 'flex-end',
             contents: [
-              { type: 'text', text: currentStr, size: 'xs', color: COLORS.muted, gravity: 'center' },
+              { type: 'text', text: currentStr, size: 'xs', color: COLORS.muted, gravity: 'center', flex: 0 },
               row.direction === 'increase'
                 ? rateChip(suggestedStr, COLORS.mint, COLORS.navy)
                 : rateChip(suggestedStr, COLORS.attention, COLORS.white),
@@ -316,7 +331,11 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
       {
         type: 'box',
         layout: 'horizontal',
-        spacing: 'sm',
+        // space-between (not a fixed spacing gap) — each tile is
+        // flex:0/content-sized, so this distributes the row's full
+        // width around them instead of forcing an equal-thirds column
+        // that made the longest label wrap mid-word.
+        justifyContent: 'space-between',
         margin: 'sm',
         contents: [
           statTile('Occupancy', `${occPct}%`, occColor(occPct)),

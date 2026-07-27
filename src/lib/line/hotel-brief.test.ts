@@ -81,6 +81,27 @@ function findColorFor(node: unknown, value: string): string | undefined {
   return undefined
 }
 
+// Finds the full text-node object whose text exactly matches `value` —
+// same traversal as findColorFor but returns the whole node so a test
+// can inspect properties other than color (e.g. flex, wrap).
+function findNodeFor(node: unknown, value: string): Record<string, unknown> | undefined {
+  if (!node || typeof node !== 'object') return undefined
+  const n = node as Record<string, unknown>
+  if (n.text === value) return n
+  for (const v of Object.values(n)) {
+    if (Array.isArray(v)) {
+      for (const c of v) {
+        const found = findNodeFor(c, value)
+        if (found) return found
+      }
+    } else if (typeof v === 'object') {
+      const found = findNodeFor(v, value)
+      if (found) return found
+    }
+  }
+  return undefined
+}
+
 function makeRec(
   partial: Partial<HotelRecommendation> = {},
 ): HotelRecommendation {
@@ -331,6 +352,49 @@ describe('buildHotelBriefFlexMessage', () => {
     expect(findColorFor(env.contents, '฿1,045')).toBe('#042C53') // navy text on mint
     expect(findChipBg(env.contents, '฿799')).toBe('#C4453D') // attention
     expect(findColorFor(env.contents, '฿799')).toBe('#FFFFFF') // white text on attention
+  })
+
+  // Regression — caught by pasting the actual output into LINE's own
+  // Flex Message Simulator (a local CSS-flexbox proxy renderer did NOT
+  // reproduce this). Two siblings with no `flex` set both silently
+  // default to flex:1 in LINE Flex, splitting the row's width evenly
+  // instead of sizing to their own content — the chip's rate text then
+  // gets truncated ("฿1,045" rendered as "฿1,…").
+  it('previous-rate text and the chip both pin flex:0 so LINE cannot truncate the chip text by splitting space evenly', () => {
+    const env = buildHotelBriefFlexMessage({
+      ...BASE,
+      perRoomRates: [
+        makePerRoomRate({ roomType: 'Deluxe2', currentRateThb: 950, suggestedRateThb: 1045, direction: 'increase' }),
+      ],
+    })
+    const previousRateNode = findNodeFor(env.contents, '฿950')
+    const chipTextNode = findNodeFor(env.contents, '฿1,045')
+    expect(previousRateNode?.flex).toBe(0)
+    expect(chipTextNode?.flex).toBe(0)
+  })
+
+  // Regression — same simulator finding: the OCCUPANCY tile label
+  // truncated to "OCCUPAN…" because it lacked wrap:true. ADR/REVPAR
+  // happened to fit on one line so the bug only showed on the longest
+  // label — asserting on the longest one specifically.
+  it('the occupancy stat tile label wraps instead of truncating, and the tile is content-sized (not forced-equal-thirds)', () => {
+    // wrap:true is still a safety net; the actual fix for the observed
+    // "OCCUPANC" / "Y" mid-word break (from a fixed 1/3-width tile) is
+    // content-sizing (flex:0) + the stat row's space-between — pin
+    // both so the underlying cause can't silently come back.
+    const env = buildHotelBriefFlexMessage(BASE)
+    const labelNode = findNodeFor(env.contents, 'OCCUPANCY')
+    expect(labelNode?.wrap).toBe(true)
+    const valueNode = findNodeFor(env.contents, '42%')
+    // The tile is the parent box one level up from the value text.
+    const statRow = (
+      (env.contents as { body: { contents: Array<Record<string, unknown>> } }).body.contents[0] as {
+        contents: Array<Record<string, unknown>>
+      }
+    ).contents[2] as { justifyContent?: unknown; contents: Array<{ flex?: unknown }> }
+    expect(statRow.justifyContent).toBe('space-between')
+    expect(statRow.contents[0].flex).toBe(0)
+    expect(valueNode).toBeDefined()
   })
 
   it('shows "คงเดิม" marker for hold rows with no rate transition arrow', () => {
