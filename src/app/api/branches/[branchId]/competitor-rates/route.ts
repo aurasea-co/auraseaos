@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
+import { upsertCompetitorRate, MAX_COMPETITORS } from '@/lib/ratedesk/competitor-rate-write'
 
 // /api/branches/[branchId]/competitor-rates
 //
@@ -11,8 +12,6 @@ import { createServiceClient } from '@/lib/supabase/service'
 //          (query param ?competitor=...)
 //
 // Owner + manager. The page at /ratedesk/competitors is the only caller.
-
-const MAX_COMPETITORS = 5
 
 interface CompetitorRow {
   competitor_name: string
@@ -151,12 +150,21 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ branchId: 
   const todayBkk = bkkToday()
   const competitors = Array.from(byName.values()).map((c) => {
     const todayRates: Record<string, number> = {}
+    // Most-recent rate EVER recorded per (room_type, channel) cell —
+    // distinct from todayRates below. Lets the batch-entry grid
+    // prefill "what we last saw" as a suggestion even when today has
+    // no entry yet, so an unchanged competitor is one tap to confirm
+    // rather than a blank field. c.rates is already in captured_at DESC
+    // order (same order the branch-wide query returned), so the FIRST
+    // row seen for a given key is its most recent one.
+    const lastRates: Record<string, number> = {}
     for (const r of c.rates) {
-      if (r.captured_at !== todayBkk) continue
       const ch = r.channel || 'ota'
       const rateNum = Number(r.rate)
       if (!Number.isFinite(rateNum) || rateNum <= 0) continue
-      todayRates[`${r.room_type}|${ch}`] = rateNum
+      const key = `${r.room_type}|${ch}`
+      if (!(key in lastRates)) lastRates[key] = rateNum
+      if (r.captured_at === todayBkk) todayRates[key] = rateNum
     }
     return {
       competitorName: c.competitorName,
@@ -165,6 +173,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ branchId: 
       lastRateCapturedAt: c.latestRateRow?.captured_at ?? null,
       lastUpdatedAt: c.lastCreatedAt,
       todayRates,
+      lastRates,
     }
   })
 
@@ -202,101 +211,21 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ branchId: 
   } catch {
     return bail(400, 'invalid_json', 'ข้อมูลที่ส่งมาไม่ถูกต้อง', 'Invalid JSON in request body')
   }
-  const competitorName = (body.competitorName || '').trim()
-  if (!competitorName) {
-    return bail(
-      400,
-      'missing_competitor_name',
-      'กรุณากรอกชื่อคู่แข่ง',
-      'Competitor name is required',
-    )
-  }
-  if (competitorName.length > 80) {
-    return bail(
-      400,
-      'name_too_long',
-      'ชื่อคู่แข่งยาวเกินไป (สูงสุด 80 ตัวอักษร)',
-      'Competitor name is too long (max 80 chars)',
-    )
-  }
-  const roomType = (body.roomType || 'Standard').trim() || 'Standard'
-  const rateThb = body.rateThb != null ? Number(body.rateThb) : 0
-  if (Number.isNaN(rateThb) || rateThb < 0) {
-    return bail(400, 'invalid_rate', 'ราคาไม่ถูกต้อง', 'Rate must be a non-negative number')
-  }
-  const capturedAt = body.capturedAt || bkkToday()
 
-  // Channel + source. Channel defaults to 'ota' (matches the existing
-  // UX where daily checks track Agoda/Booking). Source defaults to a
-  // channel-appropriate label when the caller doesn't pass one. Both
-  // get validated lightly — channel against the migration's CHECK
-  // constraint set, source clamped to 200 chars.
-  const ALLOWED_CHANNELS: ReadonlyArray<string> = ['ota', 'walk_in', 'package', 'promo']
-  const channel = body.channel && ALLOWED_CHANNELS.includes(body.channel) ? body.channel : 'ota'
-  const defaultSourceByChannel: Record<string, string> = {
-    ota: 'Manual — Agoda/Booking check',
-    walk_in: 'Manual — phone/front desk',
-    package: 'Manual entry',
-    promo: 'Manual entry',
-  }
-  const source = (body.source && body.source.trim().slice(0, 200)) || defaultSourceByChannel[channel]
-  const notes = body.notes ? body.notes.trim().slice(0, 500) : null
-
-  const supabase = createServiceClient()
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const db = supabase as any
-
-  // Enforce MAX_COMPETITORS — count distinct names already on file
-  // for this branch. Cheap because every owner caps out at 5.
-  const { data: existingNames } = await db
-    .from('competitor_rates')
-    .select('competitor_name')
-    .eq('branch_id', branchId)
-  const distinct = new Set<string>((existingNames || []).map((r: { competitor_name: string }) => r.competitor_name))
-  if (!distinct.has(competitorName) && distinct.size >= MAX_COMPETITORS) {
-    return bail(
-      400,
-      'max_competitors',
-      `เพิ่มได้สูงสุด ${MAX_COMPETITORS} คู่แข่ง — กรุณาลบรายการเก่าก่อน`,
-      `Maximum ${MAX_COMPETITORS} competitors allowed — remove an existing one first.`,
-    )
-  }
-
-  const { error: upsertErr } = await db
-    .from('competitor_rates')
-    .upsert(
-      {
-        branch_id: branchId,
-        competitor_name: competitorName,
-        room_type: roomType,
-        rate: rateThb,
-        captured_at: capturedAt,
-        channel,
-        source,
-        notes,
-      },
-      // onConflict updated to include channel (migration 033) so
-      // re-entering the walk-in rate doesn't clobber the day's OTA rate
-      // (and vice versa).
-      { onConflict: 'branch_id,competitor_name,room_type,channel,captured_at' },
-    )
-
-  if (upsertErr) {
-    console.error('[competitor-rates] upsert failed', upsertErr)
-    // 42P10 = no_unique_or_exclusion_constraint — migration 033 hasn't
-    // been applied yet (or 030 is partially rolled back). Surface a
-    // clear hint with both possible fixes.
-    const hintTh =
-      upsertErr.code === '42P10'
-        ? 'ตารางยังไม่มี unique constraint — กรุณารัน migration 033'
-        : 'บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'
-    const hintEn =
-      upsertErr.code === '42P10'
-        ? 'Database is missing the unique constraint — apply migration 033.'
-        : 'Failed to save the rate. Please try again.'
-    return bail(500, upsertErr.code || 'upsert_failed', hintTh, hintEn)
-  }
-
+  // Validation + upsert logic lives in competitor-rate-write.ts so the
+  // screenshot-extraction batch-commit route can reuse the exact same
+  // rules instead of a second, divergent copy — see that file's header.
+  const result = await upsertCompetitorRate(createServiceClient(), {
+    branchId,
+    competitorName: body.competitorName,
+    roomType: body.roomType,
+    rateThb: body.rateThb,
+    capturedAt: body.capturedAt || bkkToday(),
+    channel: body.channel,
+    source: body.source,
+    notes: body.notes,
+  })
+  if (!result.ok) return bail(result.status, result.code, result.messageTh, result.messageEn)
   return NextResponse.json({ success: true })
 }
 

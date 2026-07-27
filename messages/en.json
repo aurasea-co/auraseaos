@@ -328,11 +328,59 @@
       "invalid_rate": "Invalid rate (must be a positive number)"
     },
     "channel": {
-      "ota": { "label": "OTA", "note": "Agoda, Booking, Expedia — what guests see online" },
-      "walk_in": { "label": "Walk-in", "note": "Front-desk / phone-call rate" },
-      "package": { "label": "Package", "note": "Room + breakfast / extras" },
-      "promo": { "label": "Promo", "note": "Flash sale / early bird" }
-    }
+      "ota": {
+        "label": "OTA",
+        "note": "Agoda, Booking, Expedia — what guests see online"
+      },
+      "walk_in": {
+        "label": "Walk-in",
+        "note": "Front-desk / phone-call rate"
+      },
+      "package": {
+        "label": "Package",
+        "note": "Room + breakfast / extras"
+      },
+      "promo": {
+        "label": "Promo",
+        "note": "Flash sale / early bird"
+      }
+    },
+    "importScreenshot": "📷 Import from screenshot",
+    "screenshotIntro": "Upload an OTA search-results screenshot — a vision model reads the competitor names and rates for you to review before saving.",
+    "screenshotStepPlatform": "Which OTA is this screenshot from?",
+    "screenshotPlatformOther": "Other / not sure",
+    "screenshotStepUpload": "Upload or paste a screenshot",
+    "screenshotUploadHint": "PNG, JPEG, or WEBP, up to 8MB",
+    "screenshotChooseFile": "Choose file",
+    "screenshotCropTitle": "Drag to crop to just the results list (optional, but improves accuracy)",
+    "screenshotCropConfirm": "Use this crop",
+    "screenshotCropSkip": "Use full image",
+    "screenshotExtracting": "Reading screenshot…",
+    "screenshotExtractFailed": "Couldn't read this screenshot",
+    "screenshotNoRowsExtracted": "No competitor listings were found in this image.",
+    "screenshotReviewTitle": "Review before saving — nothing is saved yet",
+    "screenshotReviewHint": "Edit any field, map unmatched names, and uncheck rows you don't want to save.",
+    "screenshotColInclude": "Save?",
+    "screenshotColCompetitor": "Competitor",
+    "screenshotColRoomType": "Room type",
+    "screenshotColRate": "Rate (฿)",
+    "screenshotColDate": "Stay date",
+    "screenshotUnmatched": "⚠ Not matched",
+    "screenshotMapTo": "Map to existing competitor…",
+    "screenshotAddAsNew": "+ Add \"{name}\" as new competitor",
+    "screenshotMatchedTo": "Matched: {name}",
+    "screenshotLowConfidence": "⚠ Low confidence — please double-check this row",
+    "screenshotPriceNotePrefix": "Note:",
+    "screenshotConfirmCommit": "{n, plural, one {Save # rate} other {Save # rates}}",
+    "screenshotCommitting": "Saving…",
+    "screenshotCommitSummary": "{succeeded} saved, {failed} failed",
+    "screenshotCommitRowFailed": "Row {index}: {message}",
+    "screenshotBack": "← Back",
+    "screenshotStartOver": "Start over",
+    "screenshotClose": "Close",
+    "batchDateLabel": "Date",
+    "batchSuggested": "Last ฿{rate} — tap to confirm",
+    "batchDaysLabel": "Repeat for {n, plural, one {# day} other {# days}}"
   },
   "settingsPms": {
     "title": "PMS integration",

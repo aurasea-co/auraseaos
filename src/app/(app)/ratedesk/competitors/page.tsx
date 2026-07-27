@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { Trash2, Plus, Upload, Download } from 'lucide-react'
+import { Trash2, Plus, Upload, Download, Camera } from 'lucide-react'
+import { ScreenshotImportPanel } from './ScreenshotImportPanel'
 import { useUser } from '@/providers/user-context'
 import { canAccessRateDesk, type RateDeskRole } from '@/lib/auth/ratedesk-permissions'
 import { createClient } from '@/lib/supabase/client'
@@ -27,6 +28,12 @@ interface Competitor {
    *  Populated by the GET response (Slice 1 + 2). Used by the
    *  multi-channel rate grid to pre-fill input values. */
   todayRates: Record<string, number>
+  /** Most recent rate EVER recorded per (roomType|channel), regardless
+   *  of date — a suggestion for "unchanged since last time", distinct
+   *  from todayRates (which only counts as already-confirmed-today).
+   *  The grid shows this as an editable placeholder/suggestion, not a
+   *  pre-saved value — the operator still taps to confirm it. */
+  lastRates: Record<string, number>
 }
 
 // Rate channels supported by the migration 033 CHECK constraint.
@@ -59,6 +66,7 @@ export default function CompetitorsPage() {
   const [addName, setAddName] = useState('')
   const [adding, setAdding] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showScreenshotImport, setShowScreenshotImport] = useState(false)
   const [openRateRow, setOpenRateRow] = useState<string | null>(null)
   const [savedRow, setSavedRow] = useState<string | null>(null)
   // Channel-mode toggle. OTA-only is the default because that's the
@@ -232,13 +240,7 @@ export default function CompetitorsPage() {
       setError(t('templateNoData'))
       return
     }
-    // Tomorrow's BKK date as start.
-    const tmrw = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Bangkok',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(new Date(Date.now() + 24 * 60 * 60 * 1000))
+    const tmrw = tomorrowBkk()
     const csv = buildCompetitorCsvTemplate({
       competitors: competitorNames,
       roomTypes,
@@ -420,7 +422,36 @@ export default function CompetitorsPage() {
               }}
             />
           </label>
+          <button
+            type="button"
+            onClick={() => setShowScreenshotImport(true)}
+            style={{
+              padding: '6px 10px',
+              fontSize: 12,
+              background: 'transparent',
+              border: '1px solid var(--color-border)',
+              borderRadius: 6,
+              color: 'var(--color-text-secondary)',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            <Camera size={12} /> {t('importScreenshot')}
+          </button>
         </section>
+      )}
+
+      {showScreenshotImport && activeBranch && (
+        <ScreenshotImportPanel
+          branchId={activeBranch.id}
+          knownCompetitors={competitors.map((c) => c.competitorName)}
+          defaultDate={tomorrowBkk()}
+          onClose={() => setShowScreenshotImport(false)}
+          onCommitted={reload}
+          t={t}
+        />
       )}
 
       {importResult && (
@@ -658,6 +689,7 @@ function CompetitorList({
               competitorName={c.competitorName}
               roomTypes={roomTypes.length > 0 ? roomTypes : ['Standard']}
               todayRates={c.todayRates}
+              lastRates={c.lastRates}
               myRateByType={myRateByType}
               showAllChannels={showAllChannels}
               branchId={branchId}
@@ -699,6 +731,7 @@ function MultiChannelRateGrid({
   competitorName,
   roomTypes,
   todayRates,
+  lastRates,
   myRateByType,
   showAllChannels,
   branchId,
@@ -709,6 +742,11 @@ function MultiChannelRateGrid({
   competitorName: string
   roomTypes: string[]
   todayRates: Record<string, number>
+  /** Most recent rate ever recorded per cell, regardless of date — see
+   *  the Competitor interface's doc comment. Used to prefill a cell as
+   *  a SUGGESTION (distinct from an already-confirmed todayRates value)
+   *  when the selected date has no rate on file yet. */
+  lastRates: Record<string, number>
   myRateByType: Record<string, number>
   showAllChannels: boolean
   branchId: string
@@ -718,25 +756,67 @@ function MultiChannelRateGrid({
   t: any
 }) {
   const channels: ChannelKey[] = showAllChannels ? [...CHANNEL_ORDER] : ['ota']
+  const todayIso = bkkTodayIso()
+
+  // Which calendar date this grid session is entering rates FOR — not
+  // necessarily today (item 11: "support entering for a chosen date").
+  const [selectedDate, setSelectedDate] = useState(todayIso)
+  // Optional repeat — writes the same confirmed rate to this many
+  // consecutive days starting at selectedDate (a lightweight date-
+  // range: "same rate holds for the next N nights").
+  const [daysCount, setDaysCount] = useState(1)
 
   // Per-cell local input value. Key = `${roomType}|${channel}`. Strings
-  // so empty is distinguishable from explicit 0.
-  const [values, setValues] = useState<Record<string, string>>(() => {
-    const out: Record<string, string> = {}
+  // so empty is distinguishable from explicit 0. Recomputed whenever
+  // the selected date, channel set, or room-type list changes — a
+  // plain lazy useState initializer would go stale the moment any of
+  // those change after the grid first mounts.
+  const [values, setValues] = useState<Record<string, string>>({})
+  // Cells whose current value came from lastRates (a suggestion) not
+  // todayRates (an already-confirmed value) — drives the "tap to
+  // confirm" caption and lighter visual treatment.
+  const [suggestedKeys, setSuggestedKeys] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    const nextValues: Record<string, string> = {}
+    const nextSuggested = new Set<string>()
+    const isToday = selectedDate === todayIso
     for (const rt of roomTypes) {
       for (const ch of channels) {
         const key = `${rt}|${ch}`
-        const existing = todayRates[key]
-        out[key] = existing && existing > 0 ? String(Math.round(existing)) : ''
+        const confirmedToday = isToday ? todayRates[key] : undefined
+        if (confirmedToday && confirmedToday > 0) {
+          nextValues[key] = String(Math.round(confirmedToday))
+          continue
+        }
+        const suggestion = lastRates[key]
+        if (suggestion && suggestion > 0) {
+          nextValues[key] = String(Math.round(suggestion))
+          nextSuggested.add(key)
+        } else {
+          nextValues[key] = ''
+        }
       }
     }
-    return out
-  })
+    setValues(nextValues)
+    setSuggestedKeys(nextSuggested)
+    // roomTypes/channels are derived from props each render (new array
+    // identity every time) — depend on their serialized form instead
+    // of the arrays themselves so this doesn't re-run every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDate, todayIso, roomTypes.join('|'), channels.join('|'), todayRates, lastRates])
+
   // Per-cell save state (idle / saving / saved / error).
   const [cellState, setCellState] = useState<Record<string, { status: 'idle' | 'saving' | 'saved' | 'error'; error?: string }>>({})
 
   function setCellValue(key: string, value: string) {
     setValues((prev) => ({ ...prev, [key]: value }))
+    setSuggestedKeys((prev) => {
+      if (!prev.has(key)) return prev
+      const next = new Set(prev)
+      next.delete(key)
+      return next
+    })
   }
 
   async function saveCell(roomType: string, channel: ChannelKey) {
@@ -753,25 +833,40 @@ function MultiChannelRateGrid({
       setCellState((s) => ({ ...s, [key]: { status: 'error', error: t('errorRateRequired') } }))
       return
     }
-    // Skip when unchanged from the server-side pre-fill.
-    const existing = todayRates[key]
-    if (existing && Math.round(existing) === Math.round(n)) {
-      return
+    // Skip-when-unchanged only applies when we actually KNOW the
+    // on-file value for the exact selected date (i.e. today, via
+    // todayRates) — for any other date we don't have that data, so
+    // always attempt the save; the upsert's dedupe key makes a
+    // no-op re-save harmless either way.
+    if (selectedDate === todayIso && !suggestedKeys.has(key)) {
+      const existing = todayRates[key]
+      if (existing && Math.round(existing) === Math.round(n)) {
+        return
+      }
     }
     setCellState((s) => ({ ...s, [key]: { status: 'saving' } }))
     try {
-      const res = await fetch(`/api/branches/${branchId}/competitor-rates`, {
+      const dates = Array.from({ length: Math.max(1, Math.min(daysCount, 60)) }, (_, i) => addDaysIso(selectedDate, i))
+      const rows = dates.map((d) => ({ competitorName, roomType, rateThb: n, capturedAt: d, channel }))
+      const res = await fetch(`/api/branches/${branchId}/competitor-rates/batch-commit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ competitorName, roomType, rateThb: n, channel }),
+        body: JSON.stringify({ rows }),
       })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        const msg = body?.messageTh || body?.error || res.statusText
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok || (body?.failed ?? 0) > 0) {
+        const firstError = body?.results?.find((r: { ok: boolean }) => !r.ok)
+        const msg = firstError?.messageTh || body?.error || res.statusText
         setCellState((s) => ({ ...s, [key]: { status: 'error', error: msg } }))
         return
       }
       setCellState((s) => ({ ...s, [key]: { status: 'saved' } }))
+      setSuggestedKeys((prev) => {
+        if (!prev.has(key)) return prev
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
       onSaved()
       window.setTimeout(() => {
         setCellState((s) => ({ ...s, [key]: { status: 'idle' } }))
@@ -792,6 +887,34 @@ function MultiChannelRateGrid({
         gap: 8,
       }}
     >
+      {/* Date + repeat-days controls — which calendar date(s) this
+          session's saves apply to. Defaults to today (unchanged
+          behavior); picking another date switches every cell's
+          prefill/skip-if-unchanged logic to that date instead (see the
+          useEffect above and saveCell). */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', fontSize: 12 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {t('batchDateLabel')}
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={(e) => setSelectedDate(e.target.value || todayIso)}
+            style={{ padding: '4px 6px', fontSize: 12, border: '1px solid var(--color-border)', borderRadius: 4 }}
+          />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {t('batchDaysLabel', { n: daysCount })}
+          <input
+            type="number"
+            min={1}
+            max={60}
+            value={daysCount}
+            onChange={(e) => setDaysCount(Math.max(1, Math.min(60, Number(e.target.value) || 1)))}
+            style={{ width: 56, padding: '4px 6px', fontSize: 12, border: '1px solid var(--color-border)', borderRadius: 4 }}
+          />
+        </label>
+      </div>
+
       {/* Column header row — Room type label + one column per channel. */}
       <div
         style={{
@@ -857,13 +980,16 @@ function MultiChannelRateGrid({
             const deltaThb = showDelta ? parsedCellRate - Math.round(ourRate) : 0
             const isAbove = showDelta && deltaThb > 0
             const isBelow = showDelta && deltaThb < 0
+            const isSuggested = suggestedKeys.has(key)
             const borderColor = state.status === 'error'
               ? '#FECACA'
-              : isAbove
-                ? '#BBF7D0'
-                : isBelow
-                  ? '#FECACA'
-                  : 'var(--color-border)'
+              : isSuggested
+                ? '#FCD34D'
+                : isAbove
+                  ? '#BBF7D0'
+                  : isBelow
+                    ? '#FECACA'
+                    : 'var(--color-border)'
             return (
               <div key={key}>
                 <input
@@ -883,10 +1009,19 @@ function MultiChannelRateGrid({
                     fontSize: 13,
                     border: `1px solid ${borderColor}`,
                     borderRadius: 4,
-                    background: 'var(--color-bg)',
+                    background: isSuggested ? '#FFFBEB' : 'var(--color-bg)',
                     color: 'var(--color-text-primary)',
                   }}
                 />
+                {/* Prefilled from the competitor's last-known rate, not
+                    yet confirmed for the selected date — one tap
+                    (blur/Enter) commits it as-is, or the operator edits
+                    first. */}
+                {isSuggested && state.status === 'idle' && (
+                  <p style={{ fontSize: 10, marginTop: 2, color: '#92400E' }}>
+                    {t('batchSuggested', { rate: values[key] })}
+                  </p>
+                )}
                 {/* Delta vs our rate — green when competitor priced
                     above us (opportunity), red when below (risk). */}
                 {showDelta && deltaThb !== 0 && (
@@ -926,6 +1061,39 @@ function MultiChannelRateGrid({
       </div>
     </div>
   )
+}
+
+// Tomorrow's BKK calendar date — the daily-check convention (owners
+// check tomorrow's rate). Shared by the CSV template's start date and
+// the screenshot-import panel's default stay date.
+function tomorrowBkk(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(Date.now() + 24 * 60 * 60 * 1000))
+}
+
+// Today's BKK calendar date (YYYY-MM-DD) — the batch-entry grid's
+// date-picker default, and the "is this cell already confirmed for
+// the selected date" check (only meaningful when selectedDate === this).
+function bkkTodayIso(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+}
+
+// Pure date-string arithmetic (no TZ reads) for the grid's "repeat for
+// N days" range — mirrors the same UTC-midnight-anchor pattern used
+// throughout the engine/loader code for YYYY-MM-DD arithmetic.
+function addDaysIso(dateStr: string, n: number): string {
+  const d = new Date(`${dateStr}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
 }
 
 // Returns a short string like "2 hours ago" / "3 hr ago" in the

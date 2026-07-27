@@ -328,11 +328,59 @@
       "invalid_rate": "ราคาไม่ถูกต้อง (ต้องเป็นจำนวนบวก)"
     },
     "channel": {
-      "ota": { "label": "OTA", "note": "Agoda, Booking, Expedia — ราคาที่ลูกค้าเห็นออนไลน์" },
-      "walk_in": { "label": "Walk-in", "note": "ราคาที่แจ้งทางโทรศัพท์หรือ Front desk" },
-      "package": { "label": "Package", "note": "ราคารวมอาหารเช้าหรือโปรโมชัน" },
-      "promo": { "label": "โปรโมชัน", "note": "Flash sale หรือ Early bird" }
-    }
+      "ota": {
+        "label": "OTA",
+        "note": "Agoda, Booking, Expedia — ราคาที่ลูกค้าเห็นออนไลน์"
+      },
+      "walk_in": {
+        "label": "Walk-in",
+        "note": "ราคาที่แจ้งทางโทรศัพท์หรือ Front desk"
+      },
+      "package": {
+        "label": "Package",
+        "note": "ราคารวมอาหารเช้าหรือโปรโมชัน"
+      },
+      "promo": {
+        "label": "โปรโมชัน",
+        "note": "Flash sale หรือ Early bird"
+      }
+    },
+    "importScreenshot": "📷 นำเข้าจากภาพหน้าจอ",
+    "screenshotIntro": "อัปโหลดภาพหน้าจอผลการค้นหาจาก OTA — ระบบ AI จะอ่านชื่อคู่แข่งและราคาให้คุณตรวจสอบก่อนบันทึก",
+    "screenshotStepPlatform": "ภาพหน้าจอนี้มาจาก OTA ไหน?",
+    "screenshotPlatformOther": "อื่นๆ / ไม่แน่ใจ",
+    "screenshotStepUpload": "อัปโหลดหรือวางภาพหน้าจอ",
+    "screenshotUploadHint": "PNG, JPEG หรือ WEBP ขนาดไม่เกิน 8MB",
+    "screenshotChooseFile": "เลือกไฟล์",
+    "screenshotCropTitle": "ลากเพื่อครอปเฉพาะส่วนรายการผลการค้นหา (ไม่บังคับ แต่ช่วยให้แม่นยำขึ้น)",
+    "screenshotCropConfirm": "ใช้ส่วนที่ครอปนี้",
+    "screenshotCropSkip": "ใช้ภาพเต็ม",
+    "screenshotExtracting": "กำลังอ่านภาพหน้าจอ…",
+    "screenshotExtractFailed": "ไม่สามารถอ่านภาพหน้าจอนี้ได้",
+    "screenshotNoRowsExtracted": "ไม่พบรายการคู่แข่งในภาพนี้",
+    "screenshotReviewTitle": "ตรวจสอบก่อนบันทึก — ยังไม่มีการบันทึกข้อมูล",
+    "screenshotReviewHint": "แก้ไขข้อมูลได้ทุกช่อง จับคู่ชื่อที่ยังไม่ตรงกัน และยกเลิกติ๊กรายการที่ไม่ต้องการบันทึก",
+    "screenshotColInclude": "บันทึก?",
+    "screenshotColCompetitor": "คู่แข่ง",
+    "screenshotColRoomType": "ประเภทห้อง",
+    "screenshotColRate": "ราคา (฿)",
+    "screenshotColDate": "วันที่เข้าพัก",
+    "screenshotUnmatched": "⚠ ยังไม่ตรงกับคู่แข่งที่มี",
+    "screenshotMapTo": "จับคู่กับคู่แข่งที่มีอยู่…",
+    "screenshotAddAsNew": "+ เพิ่ม \"{name}\" เป็นคู่แข่งใหม่",
+    "screenshotMatchedTo": "จับคู่กับ: {name}",
+    "screenshotLowConfidence": "⚠ ความมั่นใจต่ำ — กรุณาตรวจสอบรายการนี้อีกครั้ง",
+    "screenshotPriceNotePrefix": "หมายเหตุ:",
+    "screenshotConfirmCommit": "บันทึก {n} รายการ",
+    "screenshotCommitting": "กำลังบันทึก…",
+    "screenshotCommitSummary": "บันทึกสำเร็จ {succeeded} รายการ ล้มเหลว {failed} รายการ",
+    "screenshotCommitRowFailed": "แถวที่ {index}: {message}",
+    "screenshotBack": "← ย้อนกลับ",
+    "screenshotStartOver": "เริ่มใหม่",
+    "screenshotClose": "ปิด",
+    "batchDateLabel": "วันที่",
+    "batchSuggested": "ล่าสุด ฿{rate} — แตะเพื่อยืนยัน",
+    "batchDaysLabel": "ทำซ้ำ {n} วัน"
   },
   "settingsPms": {
     "title": "เชื่อมต่อ PMS",
