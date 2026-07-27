@@ -60,6 +60,27 @@ function allText(node: unknown): string[] {
   return out
 }
 
+// Finds the color of the text node whose text exactly matches `value`
+// — resilient to nesting depth, unlike a fixed index path into the
+// JSON tree.
+function findColorFor(node: unknown, value: string): string | undefined {
+  if (!node || typeof node !== 'object') return undefined
+  const n = node as { text?: unknown; color?: unknown }
+  if (n.text === value) return n.color as string | undefined
+  for (const v of Object.values(node as Record<string, unknown>)) {
+    if (Array.isArray(v)) {
+      for (const c of v) {
+        const found = findColorFor(c, value)
+        if (found) return found
+      }
+    } else if (typeof v === 'object') {
+      const found = findColorFor(v, value)
+      if (found) return found
+    }
+  }
+  return undefined
+}
+
 function makeRec(
   partial: Partial<HotelRecommendation> = {},
 ): HotelRecommendation {
@@ -85,14 +106,14 @@ describe('buildHotelBriefFlexMessage', () => {
     expect(env.altText).toContain('฿869')
   })
 
-  it('renders all three KPI cards with rounded values', () => {
+  it('renders all three KPI cards with rounded values (labels uppercase per the tile style)', () => {
     const env = buildHotelBriefFlexMessage(BASE)
     const texts = allText(env.contents)
-    expect(texts).toContain('Occupancy')
+    expect(texts).toContain('OCCUPANCY')
     expect(texts).toContain('42%')
     expect(texts).toContain('ADR')
     expect(texts).toContain('฿869')
-    expect(texts).toContain('RevPAR')
+    expect(texts).toContain('REVPAR')
     expect(texts).toContain('฿365')
   })
 
@@ -137,7 +158,7 @@ describe('buildHotelBriefFlexMessage', () => {
     })
     const texts = allText(env.contents).join(' ')
     expect(texts).not.toContain('คืนนี้คาด')
-    expect(texts).toContain('แนะนำราคาวันนี้')
+    expect(texts).toContain('ราคาห้องพัก')
     expect(texts).toContain('Suite')
   })
 
@@ -166,33 +187,25 @@ describe('buildHotelBriefFlexMessage', () => {
     expect(texts).not.toContain('EN-COPY')
   })
 
-  it('colors the occupancy KPI by threshold', () => {
-    // pct >= 80 → green
+  it('colors the occupancy KPI by threshold (same >=80/<40 tiers, new palette values)', () => {
+    // pct >= 80 → mint
     const high = buildHotelBriefFlexMessage({
       ...BASE,
       yesterday: { ...BASE.yesterday, occupancyRate: 0.9 },
     })
-    // pct < 40 → red
+    // pct < 40 → attention (red)
     const low = buildHotelBriefFlexMessage({
       ...BASE,
       yesterday: { ...BASE.yesterday, occupancyRate: 0.2 },
     })
-    // mid → purple
+    // mid → navy
     const mid = buildHotelBriefFlexMessage({
       ...BASE,
       yesterday: { ...BASE.yesterday, occupancyRate: 0.5 },
     })
-    const findOccColor = (env: ReturnType<typeof buildHotelBriefFlexMessage>): string => {
-      const body = (env.contents as { body: { contents: Array<{ contents: Array<{ contents: Array<{ text: string; color?: string }> }> }> } }).body
-      const kpiRow = body.contents[0]
-      const occCard = kpiRow.contents[0]
-      // Second child of the KPI card is the value Text with the
-      // threshold-driven color attribute.
-      return (occCard.contents[1] as { text: string; color: string }).color
-    }
-    expect(findOccColor(high)).toBe('#1D9E75')
-    expect(findOccColor(low)).toBe('#DC2626')
-    expect(findOccColor(mid)).toBe('#534AB7')
+    expect(findColorFor(high.contents, '90%')).toBe('#5DCAA5')
+    expect(findColorFor(low.contents, '20%')).toBe('#C4453D')
+    expect(findColorFor(mid.contents, '50%')).toBe('#042C53')
   })
 
   it('returns a top-level shape ready for sendLineFlexMessage()', () => {
@@ -216,9 +229,8 @@ describe('buildHotelBriefFlexMessage', () => {
       ],
     })
     const texts = allText(env.contents).join(' ')
-    expect(texts).toContain('แนะนำราคาวันนี้')
-    expect(texts).toContain('Today')  // "Today's recommended rates"
-    expect(texts).toContain('recommended rates')
+    expect(texts).toContain('ราคาห้องพัก')
+    expect(texts).toContain('Room rates')
   })
 
   it('renders all 4 Crystal Resort room types each with their own current → suggested rate', () => {
@@ -261,14 +273,64 @@ describe('buildHotelBriefFlexMessage', () => {
     expect(texts).toContain('Deluxe5')
     expect(texts).toContain('Deluxe6')
     expect(texts).toContain('Suite')
-    // Each carries its own rate transition (increase + decrease cases).
-    expect(texts).toContain('฿950 → ฿1,045')
-    expect(texts).toContain('฿850 → ฿799')
-    expect(texts).toContain('฿1,200 → ฿1,320')
-    // Hold case shows "คงเดิม" instead of an arrow.
+    // Each carries its own rate transition — previous rate and the new
+    // rate now render as SEPARATE text nodes (previous muted, new rate
+    // in its own direction-colored chip) rather than one joined arrow
+    // string, per the restyle. Check both values are present as
+    // distinct texts rather than one joined string.
+    expect(texts).toContain('฿950')
+    expect(texts).toContain('฿1,045')
+    expect(texts).toContain('฿850')
+    expect(texts).toContain('฿799')
+    expect(texts).toContain('฿1,200')
+    expect(texts).toContain('฿1,320')
+    // Hold case shows "คงเดิม" instead of a chip.
     expect(texts).toContain('฿790 · คงเดิม')
     // No single blended ฿X anywhere.
     expect(texts).not.toContain('คืนนี้คาด')
+  })
+
+  it('the increase chip is mint-filled with navy text; the decrease chip is attention-filled with white text', () => {
+    const env = buildHotelBriefFlexMessage({
+      ...BASE,
+      perRoomRates: [
+        makePerRoomRate({ roomType: 'Deluxe2', currentRateThb: 950, suggestedRateThb: 1045, direction: 'increase' }),
+        makePerRoomRate({ roomType: 'Deluxe6', currentRateThb: 850, suggestedRateThb: 799, direction: 'decrease' }),
+      ],
+    })
+    // Chip fill is the box's backgroundColor; chip text color is on
+    // the nested text node carrying the suggested-rate string. Post-
+    // order (children checked before self) so the innermost box with
+    // a matching direct text child wins — not an outer ancestor (e.g.
+    // the sand page background) whose *descendants* happen to contain
+    // the text somewhere deeper.
+    const findChipBg = (node: unknown, chipText: string): string | undefined => {
+      if (!node || typeof node !== 'object') return undefined
+      for (const v of Object.values(node as Record<string, unknown>)) {
+        if (Array.isArray(v)) {
+          for (const c of v) {
+            const found = findChipBg(c, chipText)
+            if (found) return found
+          }
+        } else if (typeof v === 'object') {
+          const found = findChipBg(v, chipText)
+          if (found) return found
+        }
+      }
+      const n = node as { backgroundColor?: unknown; contents?: unknown }
+      if (
+        n.backgroundColor &&
+        Array.isArray(n.contents) &&
+        n.contents.some((c) => c && typeof c === 'object' && (c as { text?: unknown }).text === chipText)
+      ) {
+        return n.backgroundColor as string
+      }
+      return undefined
+    }
+    expect(findChipBg(env.contents, '฿1,045')).toBe('#5DCAA5') // mint
+    expect(findColorFor(env.contents, '฿1,045')).toBe('#042C53') // navy text on mint
+    expect(findChipBg(env.contents, '฿799')).toBe('#C4453D') // attention
+    expect(findColorFor(env.contents, '฿799')).toBe('#FFFFFF') // white text on attention
   })
 
   it('shows "คงเดิม" marker for hold rows with no rate transition arrow', () => {
@@ -375,7 +437,7 @@ describe('buildHotelBriefFlexMessage', () => {
     expect(texts).toContain('Deluxe6')
     expect(texts).toContain('Suite')
     // Block title.
-    expect(texts).toContain('แนะนำราคาวันนี้')
+    expect(texts).toContain('ราคาห้องพัก')
     // Footer: review-only path.
     const footer = (env.contents as { footer: { contents: Array<Record<string, unknown>> } }).footer
     const buttonActions = footer.contents
@@ -450,5 +512,44 @@ describe('buildHotelBriefFlexMessage', () => {
     // verified by the other test above.
     expect(texts).toContain('ทุกห้องมีโอกาสจองต่ำ')
     expect(texts).toContain('last-minute')
+  })
+
+  // ── Role gating (canSeeRevenue) — discovery finding ────────────────────
+  //
+  // buildHotelBriefFlexMessage() takes no role parameter and never reads
+  // HotelBriefData.yesterday.revenueThb — this bubble has never shown a
+  // Total Revenue figure. canSeeRevenue() gates a DIFFERENT artifact
+  // entirely (buildMorningFlashLine, the legacy text-message fallback,
+  // and the F&B email) — see morning-flash/route.tsx. So "preserve
+  // canSeeRevenue gating exactly" for THIS builder means: an owner
+  // variant and a manager variant of the same underlying data are
+  // byte-for-byte identical, because there is nothing revenue-class
+  // here to hide in the first place. This test proves that invariant
+  // rather than inventing a gate that doesn't exist in this file.
+  it('owner and manager variants are identical — this bubble has no role param and never renders revenueThb', () => {
+    const richData: HotelBriefData = {
+      ...BASE,
+      perRoomRates: [
+        makePerRoomRate({ roomType: 'Deluxe2', currentRateThb: 950, suggestedRateThb: 1045, direction: 'increase', impactThb: 95 }),
+        makePerRoomRate({ roomType: 'Suite', currentRateThb: 1200, suggestedRateThb: 1080, direction: 'decrease', impactThb: 120 }),
+      ],
+      dailyAction: {
+        messageTh: 'ดีมานด์สูง — แนะนำขึ้นราคา',
+        messageEn: 'High demand — suggest raising rates',
+      },
+      dashboardUrl: 'https://example.test/ratedesk',
+    }
+    // No role is threaded into the builder at all — calling it twice
+    // with the same data (as an "owner" call and a "manager" call
+    // would, since the route never differentiates) yields identical
+    // output.
+    const ownerVariant = buildHotelBriefFlexMessage(richData)
+    const managerVariant = buildHotelBriefFlexMessage(richData)
+    expect(managerVariant).toEqual(ownerVariant)
+
+    // And neither variant contains a revenue figure anywhere — the raw
+    // ฿30,410 revenueThb value passed in BASE.yesterday never appears.
+    const texts = allText(ownerVariant.contents)
+    expect(texts.join(' ')).not.toContain('30,410')
   })
 })
