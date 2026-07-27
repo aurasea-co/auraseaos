@@ -85,6 +85,29 @@ describe('computeWeekdayBaseline', () => {
     expect(b.sampleCount).toBe(3)
   })
 
+  it('excludes flagged dates (holiday/bridge/long-weekend) from the same-weekday baseline (Tier 1 calendar & context)', () => {
+    // Four Sundays: three ordinary (~0.30-0.35), one a holiday Sunday
+    // running at 0.95 (the kind of day that pollutes "what a normal
+    // Sunday looks like" if left in). BEFORE exclusion the median is
+    // dragged up to the holiday figure; AFTER excluding it, the
+    // baseline reflects only the three ordinary Sundays.
+    const days = [
+      day('2026-06-14', 0.30),
+      day('2026-06-21', 0.35),
+      day('2026-06-28', 0.32),
+      day('2026-07-05', 0.95), // flagged as a holiday Sunday below
+    ]
+    const before = computeWeekdayBaseline(days, '2026-07-12')
+    expect(before.source).toBe('weekday')
+    expect(before.sampleCount).toBe(4)
+    expect(before.occupancyMedian).toBeCloseTo((0.32 + 0.35) / 2, 5) // median of .30 .32 .35 .95
+
+    const after = computeWeekdayBaseline(days, '2026-07-12', undefined, new Set(['2026-07-05']))
+    expect(after.source).toBe('weekday')
+    expect(after.sampleCount).toBe(3)
+    expect(after.occupancyMedian).toBeCloseTo(0.32, 5) // median of .30 .32 .35 — the corrected norm
+  })
+
   it('scopes per-room-type samples to that type and medians its rate for display', () => {
     const bd = (occupied: number, rate: number) => [
       { roomType: 'Deluxe', totalRooms: 10, occupiedRooms: occupied, rateThb: rate },

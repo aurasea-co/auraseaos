@@ -16,10 +16,20 @@
 //   6. Read back from the table → perRoomRates. The DB is the source
 //      of truth so an owner's dashboard override is what reaches the
 //      brief/email.
-//   7. Look up demand_calendar (migration 039) for TOMORROW — global
-//      holidays/festivals plus this org/branch's own entries. Purely
-//      informational context for the action line, never feeds the
-//      rate math.
+//   7. Look up demand_calendar (migration 039) once for the WHOLE
+//      window (history start .. tomorrow, +/- a few days' margin for
+//      bridge/long-weekend lookups near the edges): global holidays/
+//      festivals plus this org/branch's own entries. Feeds TWO things
+//      now (Tier 1 "Calendar & Context" — see classify.ts):
+//        (a) a per-date exclusion set so computeWeekdayBaseline doesn't
+//            let a holiday Sunday pollute "what a normal Sunday looks
+//            like",
+//        (b) a bounded, conservative forward demand signal for
+//            TOMORROW (the night the rec applies to), fed into
+//            recommendPerRoomTypeRates so an imminent holiday/long
+//            weekend/bridge day biases toward hold/raise instead of a
+//            cut. The tomorrow-only event used for the action line's
+//            informational note is unchanged.
 //   8. Run summarizePerRoomRates → dailyAction.
 //   9. Read branch_pms_config + org plan → computed gating flags
 //      (canShowApprove, showAwaitingPmsNote).
@@ -47,6 +57,7 @@ import {
   shouldShowAwaitingPmsNote,
 } from '@/lib/ratedesk/auto-push-gating'
 import { getDemandCalendarForBranch, pickPrimaryEvent } from '@/lib/demand-calendar/queries'
+import { classifyCalendarContext, datesToExcludeFromBaseline } from '@/lib/demand-calendar/classify'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SupabaseLike = any
@@ -80,6 +91,11 @@ interface LoaderParams {
    *  (see getDemandCalendarForBranch) — branches.organization_id, not
    *  a separate lookup. */
   organizationId: string
+  /** branches.province — matches provincial demand_calendar rows (see
+   *  classify.ts's geography match). Null/omitted when the branch
+   *  hasn't set a province; only nationwide (province-null) calendar
+   *  rows apply then. */
+  branchProvince?: string | null
   /** Bangkok-day metric_date for the morning brief — the upsert keys
    *  onto this so re-running same-day is idempotent. */
   today: string
@@ -201,8 +217,42 @@ export async function loadPerRoomRecsForBranch(
     rackRateThb: t.latestRateThb,
   }))
 
+  // ── 3c. Demand calendar (Tier 1 "Calendar & Context") ──
+  // One fetch covers the WHOLE window: the trailing history (fromIso..
+  // today, for baseline exclusion) plus tomorrow (for the forward
+  // signal) plus a few days' margin either side so bridge-day/long-
+  // weekend/return-day lookups near the window edges see their
+  // neighbouring holidays. Never fails the load — getDemandCalendarForBranch
+  // already degrades to [] on error, which just means no exclusion and
+  // no forward signal, not a crash.
+  const tomorrow = addOneDay(params.today)
+  const calendarFromDate = addDays(params.fromIso, -3)
+  const calendarToDate = addDays(tomorrow, 3)
+  const calendarEvents = await getDemandCalendarForBranch(supabase, {
+    organizationId: params.organizationId,
+    branchId: params.branchId,
+    fromDate: calendarFromDate,
+    toDate: calendarToDate,
+  })
+  const branchLocation = { province: params.branchProvince ?? null }
+
+  // (a) Baseline exclusion — every historical date actually in the
+  // engine's window, so computeWeekdayBaseline doesn't let a holiday
+  // Sunday count toward "what a normal Sunday looks like".
+  const excludeDatesFromBaseline = datesToExcludeFromBaseline(
+    recInputs.map((d) => d.date),
+    calendarEvents,
+    branchLocation,
+  )
+
+  // (b) Forward demand signal for TOMORROW — the night the rec applies
+  // to. Conservative + bounded (see classify.ts); feeds the engine
+  // below so an imminent holiday/long weekend/bridge day biases toward
+  // hold/raise instead of a cut.
+  const demandContext = classifyCalendarContext(tomorrow, calendarEvents, branchLocation).demandSignal
+
   // ── 4. Run engine + upsert + read-back ──
-  const engineRecs = recommendPerRoomTypeRates(recInputs, { roster })
+  const engineRecs = recommendPerRoomTypeRates(recInputs, { roster, excludeDatesFromBaseline, demandContext })
   if (engineRecs.length > 0) {
     const upsertResult = await upsertBranchRateRecommendations(supabase, {
       branchId: params.branchId,
@@ -240,19 +290,12 @@ export async function loadPerRoomRecsForBranch(
   // gap-to-target) rather than a static template keyed only on "low
   // occupancy". Same dailyAction feeds both LINE and email → parity.
   //
-  // demand_calendar lookup is for TOMORROW — the night the rec applies
-  // to — global holidays/festivals plus this org/branch's own entries.
-  // Purely informational (see DailyActionContext.demandCalendarEvent);
-  // never fails the whole load if the query errors (getDemandCalendarForBranch
-  // already degrades to [] on error).
-  const tomorrow = addOneDay(params.today)
-  const demandEvents = await getDemandCalendarForBranch(supabase, {
-    organizationId: params.organizationId,
-    branchId: params.branchId,
-    fromDate: tomorrow,
-    toDate: tomorrow,
-  })
-  const primaryDemandEvent = pickPrimaryEvent(demandEvents)
+  // demandCalendarEvent stays TOMORROW-only and purely informational
+  // (see DailyActionContext.demandCalendarEvent) — reuses the
+  // already-fetched calendarEvents rather than a second query.
+  const primaryDemandEvent = pickPrimaryEvent(
+    calendarEvents.filter((e) => e.startDate <= tomorrow && tomorrow <= e.endDate),
+  )
 
   const dailyAction = summarizePerRoomRates(perRoomRates, {
     inputs: recInputs,
@@ -260,6 +303,7 @@ export async function loadPerRoomRecsForBranch(
     demandCalendarEvent: primaryDemandEvent
       ? { nameTh: primaryDemandEvent.nameTh, nameEn: primaryDemandEvent.nameEn }
       : null,
+    excludeDatesFromBaseline,
   })
 
   // ── 6. PMS adapter gating ──
@@ -291,7 +335,11 @@ function numOrNull(v: unknown): number | null {
 }
 
 function addOneDay(dateStr: string): string {
+  return addDays(dateStr, 1)
+}
+
+function addDays(dateStr: string, n: number): string {
   const d = new Date(`${dateStr}T00:00:00Z`)
-  d.setUTCDate(d.getUTCDate() + 1)
+  d.setUTCDate(d.getUTCDate() + n)
   return d.toISOString().slice(0, 10)
 }

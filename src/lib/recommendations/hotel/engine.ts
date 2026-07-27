@@ -6,6 +6,9 @@
 // when the input has fewer days than a signal requires, they return
 // [] instead of throwing — see requiresMinDays on each output.
 
+// Type-only — no runtime dependency, so the engine stays pure/I-O-free.
+import type { CalendarDemandSignal } from '@/lib/demand-calendar/classify'
+
 export type HotelRecommendationType =
   | 'rate_increase'
   | 'rate_decrease'
@@ -362,6 +365,12 @@ export interface PerRoomTypeRate {
   /** |suggestedRateThb − currentRateThb|; used by the brief builder to
    *  cap to top N by impact when many room types are present. */
   impactThb: number
+  /** Present only when a demandContext was supplied AND it actually
+   *  fired (modifier != 0) — the forward calendar signal that nudged
+   *  this row's band decision. Explainability channel only: reasonTh/
+   *  reasonEn above are NOT rewritten by this; a future pass can have
+   *  the brief cite this field directly instead of re-deriving it. */
+  calendarContext?: { level: CalendarDemandSignal['level']; modifier: number; reasonEn: string | null; reasonTh: string | null }
 }
 
 /** One entry of the authoritative room-type roster — typically derived
@@ -389,6 +398,19 @@ export interface RecommendPerRoomTypeOptions {
    *  data but missing from config still gets a row. When omitted, the
    *  roster is the union of types across `days`. */
   roster?: ReadonlyArray<RoomTypeRosterEntry>
+  /** Dates to exclude when computing each type's matched-weekday
+   *  baseline (see computeWeekdayBaseline) — holidays/bridge days/long-
+   *  weekend members/school-break days/other calendar events, so a
+   *  holiday Sunday doesn't pollute "what a normal Sunday looks like". */
+  excludeDatesFromBaseline?: ReadonlySet<string>
+  /** Calendar & Context Tier 1 forward demand signal for the night this
+   *  recommendation applies to (tomorrow — see per-branch-loader.ts).
+   *  CONSERVATIVE and BOUNDED: only nudges which occupancy BAND a room
+   *  type lands in (see effectiveOcc below), never the lift/drop
+   *  magnitude, and classifyCalendarContext already clamps the modifier
+   *  itself. Omit when no calendar context is available (e.g. tests) —
+   *  behaviour is then identical to before this option existed. */
+  demandContext?: CalendarDemandSignal
 }
 
 // The invariant this function guarantees: the rate sheet ALWAYS lists
@@ -475,6 +497,7 @@ export function recommendPerRoomTypeRates(
   // 3-day math above, unchanged.
   const latestDay = days.length > 0 ? days[days.length - 1] : null
   const latestDow = latestDay ? dowOf(latestDay.date) : null
+  const demandSignal = options.demandContext ?? null
 
   for (const roomType of order) {
     const m = meta.get(roomType)!
@@ -530,6 +553,16 @@ export function recommendPerRoomTypeRates(
       reasonTh,
       reasonEn,
       impactThb: Math.abs(suggestedThb - currentThb),
+      ...(demandSignal && demandSignal.modifier !== 0
+        ? {
+            calendarContext: {
+              level: demandSignal.level,
+              modifier: demandSignal.modifier,
+              reasonEn: demandSignal.reasonEn,
+              reasonTh: demandSignal.reasonTh,
+            },
+          }
+        : {}),
     })
 
     if (occs.length === 0) {
@@ -565,7 +598,7 @@ export function recommendPerRoomTypeRates(
           ? 0
           : null
       if (latestOcc != null) {
-        const wb = computeWeekdayBaseline(days, latestDay.date, roomType)
+        const wb = computeWeekdayBaseline(days, latestDay.date, roomType, options.excludeDatesFromBaseline)
         if (!wb.insufficient && wb.source === 'weekday' && wb.occupancyMedian != null) {
           const basePct = Math.round(wb.occupancyMedian * 100)
           const todayPct = Math.round(latestOcc * 100)
@@ -590,7 +623,27 @@ export function recommendPerRoomTypeRates(
       }
     }
 
-    if (avgOcc > 0.85) {
+    // Forward calendar modifier nudges which BAND this type lands in —
+    // never the lift/drop magnitude below, which stays keyed off
+    // currentRate. Bounded: classifyCalendarContext already clamps
+    // demandSignal.modifier to [-0.05, 0.15] (see classify.ts), so this
+    // can push a 'decrease' at most into 'hold' (0.35 - 0 + 0.15 = 0.50,
+    // still short of the 0.85 'increase' floor) — it can never turn a
+    // cut straight into a raise on its own. occPct above stays the true
+    // trailing occupancy; only the band comparison below is adjusted.
+    const demandModifier = demandSignal?.modifier ?? 0
+    const effectiveOcc = Math.max(0, Math.min(1, avgOcc + demandModifier))
+    if (demandModifier !== 0) {
+      const naiveBand = avgOcc > 0.85 ? 'increase' : avgOcc < 0.35 ? 'decrease' : 'hold'
+      const effectiveBand = effectiveOcc > 0.85 ? 'increase' : effectiveOcc < 0.35 ? 'decrease' : 'hold'
+      if (naiveBand !== effectiveBand) {
+        console.info(
+          `[recommendPerRoomTypeRates] ${roomType}: calendar signal (${demandSignal?.reasonEn ?? 'unknown'}, modifier=${demandModifier}) shifted band ${naiveBand} -> ${effectiveBand} (occ=${occPct}%)`,
+        )
+      }
+    }
+
+    if (effectiveOcc > 0.85) {
       // High-demand band — same 10% lift the property-level engine
       // uses, applied to this type's own rack rate.
       const lift = Math.round(currentRate * 0.10)
@@ -610,7 +663,7 @@ export function recommendPerRoomTypeRates(
           ? `High demand — suggest raise · ${matched.en}`
           : `${occPct}% occupancy — suggest raise`,
       ))
-    } else if (avgOcc < 0.35) {
+    } else if (effectiveOcc < 0.35) {
       // Low-demand band. Slightly tighter than the 40% threshold the
       // blended path uses — a single bad night in a sparse type can
       // drag a 3-day avg under 40% even when demand is healthy on the
@@ -699,6 +752,13 @@ export function computeWeekdayBaseline(
   days: ReadonlyArray<RecommendationInput>,
   targetDate: string,
   roomType?: string,
+  /** Dates to skip when accumulating the baseline — holidays, bridge
+   *  days, long-weekend members, school-break days, or any other
+   *  demand_calendar event (see classify.ts's datesToExcludeFromBaseline).
+   *  Without this, a holiday Sunday counts toward "what a normal Sunday
+   *  looks like", pulling the baseline up/down with the event instead of
+   *  reflecting a genuinely ordinary day. */
+  excludeDates?: ReadonlySet<string>,
 ): WeekdayBaseline {
   const targetDow = dowOf(targetDate)
 
@@ -708,6 +768,7 @@ export function computeWeekdayBaseline(
   const rateDow: number[] = []
   for (const d of days) {
     if (d.date === targetDate) continue
+    if (excludeDates?.has(d.date)) continue
     let occ: number | null = null
     let rate: number | null = null
     if (roomType == null) {
@@ -790,6 +851,12 @@ export interface DailyActionContext {
    *  more than one overlaps (see pickPrimaryEvent in
    *  lib/demand-calendar/queries.ts). */
   demandCalendarEvent?: { nameTh: string; nameEn: string } | null
+  /** Dates to exclude from the weekdayOccupancyBaseline computation
+   *  below — see computeWeekdayBaseline's excludeDates param and
+   *  classify.ts's datesToExcludeFromBaseline. Same exclusion set
+   *  recommendPerRoomTypeRates uses, so the property-level "normal for
+   *  this weekday" figure and the per-room-type one agree. */
+  excludeDatesFromBaseline?: ReadonlySet<string>
 }
 
 // Derived, presentation-ready view of the day's situation. Null when no
@@ -919,7 +986,7 @@ function deriveDayContext(context: DailyActionContext): DerivedDayContext | null
   // Weekday-pattern context: what the latest data day's own weekday
   // normally does, where today sits against that norm, and whether last
   // week's same weekday was already ahead/behind it (pattern drift).
-  const wb = computeWeekdayBaseline(inputs, latest.date)
+  const wb = computeWeekdayBaseline(inputs, latest.date, undefined, context.excludeDatesFromBaseline)
   let weekdayOccupancyBaseline: number | null = null
   let todayVsWeekdayNorm: number | null = null
   let wowDirection: 'ahead' | 'on' | 'behind' | null = null

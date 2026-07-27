@@ -176,7 +176,7 @@ async function handleMorningFlash(req: NextRequest) {
     // managers see only the branches they're assigned to in branch_members,
     // so a manager attached to Crystal Resort doesn't get Crystal Cafe
     // data lumped into their summary.
-    let branches: { id: string; name: string; business_type: string; monthly_fixed_cost: number; total_rooms: number | null }[] = []
+    let branches: { id: string; name: string; business_type: string; monthly_fixed_cost: number; total_rooms: number | null; province: string | null }[] = []
 
     if (isOwner) {
       const { data: allBranches } = await supabase
@@ -366,6 +366,7 @@ async function handleMorningFlash(req: NextRequest) {
         hotelRecs = await loadPerRoomRecsForBranch(supabase, {
           branchId: branch.id,
           organizationId: setting.organization_id,
+          branchProvince: branch.province,
           today,
           fromIso,
           metrics: (metrics || []) as Record<string, unknown>[],
