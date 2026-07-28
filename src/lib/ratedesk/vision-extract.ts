@@ -66,7 +66,15 @@ const EXTRACTION_TOOL = {
         items: {
           type: 'object',
           properties: {
-            hotelName: { type: 'string', description: 'The hotel/property name exactly as shown, Thai or English.' },
+            hotelName: {
+              type: 'string',
+              description:
+                'The HOTEL/PROPERTY name only, exactly as shown, Thai or English (e.g. "Sima Thani Hotel"). ' +
+                'NEVER a room type, rate-plan, or meal-plan label (NOT "Deluxe Twin", NOT "Breakfast included", ' +
+                'NOT "ไม่รวมอาหารเช้า"). If the property name is not visible anywhere in this image (e.g. the ' +
+                'screenshot is cropped to just a room-rate panel with no visible property name), DO NOT invent ' +
+                'one or substitute nearby text — omit that row from the rows array entirely instead.',
+            },
             roomType: { type: ['string', 'null'], description: 'Room type name if visible, else null.' },
             rateThb: {
               type: 'number',
@@ -106,6 +114,10 @@ function systemPromptFor(channel: RateChannel, otaHint?: OtaHint): string {
     '- Handle ฿ formatting: strip currency symbols, thousands separators, and "THB"/"per night" ' +
     'suffixes; rateThb must be a plain number.\n' +
     '- Hotel names may be in Thai, English, or both — extract the name as displayed.\n' +
+    '- hotelName must be the actual PROPERTY name — never a room type, rate-plan, or meal-plan ' +
+    'label. If a screenshot is cropped to just a room/rate panel with no property name visible ' +
+    'anywhere in it, do NOT substitute the room type or meal-plan text as the hotel name — omit ' +
+    'that row entirely rather than mislabeling it.\n' +
     '- If a search-dates header is visible (e.g. "Jul 27 - Jul 28"), use the CHECK-IN date as ' +
     'stayDate in YYYY-MM-DD form. If no date is visible anywhere, use null — never guess a date.\n' +
     `- These are ${channel} listings.\n` +

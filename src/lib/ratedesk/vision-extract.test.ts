@@ -42,6 +42,19 @@ describe('buildExtractionRequest', () => {
     expect(req.system.toLowerCase()).toContain('member')
   })
 
+  // Regression — caught by running the real API against three actual
+  // OTA screenshots cropped to just the room-rate panel (no property
+  // name in frame): the model confidently substituted the room type
+  // ("Deluxe Twin - 2 Single Beds") or a meal-plan label ("no
+  // breakfast") as hotelName instead of recognizing the name wasn't
+  // there. Both the tool schema and the system prompt now say not to.
+  it('instructs the model never to substitute a room type or meal-plan label for a missing hotel name', () => {
+    const req = buildExtractionRequest({ imageBase64: 'AAAA', mediaType: 'image/png', channel: 'ota' })
+    expect(req.system.toLowerCase()).toContain('never a room type')
+    expect(req.tools[0].input_schema.properties.rows.items.properties.hotelName.description.toLowerCase())
+      .toContain('never a room type')
+  })
+
   it('mentions the specific OTA platform when a hint is given', () => {
     const req = buildExtractionRequest({ imageBase64: 'AAAA', mediaType: 'image/png', channel: 'ota', otaHint: 'Agoda' })
     expect(req.system).toContain('specifically from Agoda')
