@@ -20,6 +20,15 @@ import type {
 
 export interface HotelBriefData {
   branchName: string
+  /** RECIPIENT's first name (not the branch/org name) — this brief
+   *  fans out to multiple people per branch (owner + any assigned
+   *  managers each get their own push), so this varies per send, not
+   *  per branch. Caller extracts it from whatever name data it has
+   *  (e.g. profiles.display_name, the only name-like column that
+   *  exists today — there's no dedicated first_name field). Null/
+   *  omitted when the recipient has none on file — see greetingText()
+   *  for the fallback. */
+  recipientFirstName?: string | null
   /** Yesterday's KPIs in THB. */
   yesterday: {
     /** YYYY-MM-DD in Bangkok wall time. */
@@ -135,6 +144,44 @@ function fmtThb(n: number): string {
   return Math.round(n).toLocaleString('th-TH')
 }
 
+// Single, easily-editable greeting template. ครับ is a MALE politeness
+// particle — kept as the default per spec, but isolated here (rather
+// than inlined at the call site) specifically so a neutral/female
+// variant (e.g. ค่ะ, or dropping the particle) is a one-line swap
+// later, not a hunt through the builder.
+function greetingText(firstName: string | null | undefined): string {
+  const name = firstName && firstName.trim() ? firstName.trim() : null
+  // No empty "คุณ" / literal "undefined" when the recipient has no
+  // name on file — drop the "คุณ{name}" clause entirely rather than
+  // rendering a half-filled greeting.
+  return name ? `สวัสดีตอนเช้าครับคุณ${name} ☀️` : `สวัสดีตอนเช้าครับ ☀️`
+}
+
+// Greeting card — first card in the body. `highlightCount` is null
+// when there's no reliable basis to count (see the caller: legacy
+// single-room branches with no per-room-type breakdown have nothing
+// to count non-hold rows from) — line 2 is omitted rather than
+// guessing or showing a stale/wrong number. Also omitted when the
+// count is exactly 0: "today there are 0 important things" reads as a
+// glitch, not information, so nothing-to-highlight renders as no
+// subline at all rather than a literal zero.
+function greetingCard(firstName: string | null | undefined, highlightCount: number | null): Record<string, unknown> {
+  const contents: Array<Record<string, unknown>> = [
+    { type: 'text', text: greetingText(firstName), size: 'lg', weight: 'bold', color: COLORS.navy, wrap: true },
+  ]
+  if (highlightCount != null && highlightCount > 0) {
+    contents.push({
+      type: 'text',
+      text: `วันนี้มี ${highlightCount} เรื่องสำคัญ`,
+      size: 'xs',
+      color: COLORS.muted,
+      wrap: true,
+      margin: 'xs',
+    })
+  }
+  return whiteCardShell(contents)
+}
+
 // Same 3-tier thresholds as before the restyle (>=80 / <40 / else) —
 // only the color VALUES changed to the new palette. "Ahead of pace" /
 // "behind pace" from the mockup maps onto this existing tier, not a
@@ -149,18 +196,31 @@ function occColor(pct: number): string {
   return COLORS.navy
 }
 
-// ── Section card shell ──────────────────────────────────────────────
-// White rounded card on the sand page background, led by one icon +
-// a navy label row, thin separator beneath the label, then whatever
-// content the section supplies. Every body section uses this same
-// shell so the bubble reads as one consistent system.
-function sectionCard(icon: string, labelTh: string, labelEn: string, contents: Array<Record<string, unknown>>): Record<string, unknown> {
+// ── White card shell ─────────────────────────────────────────────────
+// The bare white-rounded-card chrome (background/cornerRadius/padding)
+// shared by every card in the body — the icon-led sectionCard() below
+// and the plain greeting card both wrap this so "a new card styled
+// like the existing cards" means literally the same three properties,
+// not a look-alike copy.
+function whiteCardShell(contents: Array<Record<string, unknown>>): Record<string, unknown> {
   return {
     type: 'box',
     layout: 'vertical',
     backgroundColor: COLORS.white,
     cornerRadius: '12px',
     paddingAll: '12px',
+    contents,
+  }
+}
+
+// ── Section card shell ──────────────────────────────────────────────
+// White rounded card on the sand page background, led by one icon +
+// a navy label row, thin separator beneath the label, then whatever
+// content the section supplies. Every icon-led body section uses this
+// same shell so the bubble reads as one consistent system.
+function sectionCard(icon: string, labelTh: string, labelEn: string, contents: Array<Record<string, unknown>>): Record<string, unknown> {
+  return {
+    ...whiteCardShell([]),
     contents: [
       {
         type: 'box',
@@ -442,6 +502,20 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
     bodyContents.push(recRow(rec))
   }
 
+  // Personalized greeting card — inserted as the FIRST body card, once
+  // everything else above has run so the highlight count reflects the
+  // same rate-mix/recs actually rendered below it. "Highlights" =
+  // non-hold rate rows (things that actually changed) + the property-
+  // level rec rows shown — both already computed above, no new data.
+  // perRoomRates empty → the legacy forecast-only fallback has no per-
+  // room-type breakdown to count from at all, so there's no reliable
+  // basis for a number — null, not a guess.
+  const highlightCount =
+    perRoomRates.length > 0
+      ? perRoomRates.filter((r) => r.direction !== 'hold').length + Math.min(propertyRecs.length, 2)
+      : null
+  bodyContents.unshift(greetingCard(data.recipientFirstName, highlightCount))
+
   return {
     altText,
     contents: {
@@ -454,51 +528,30 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
         footer: { separator: true, separatorColor: COLORS.separator },
       },
       header: {
+        // Single-column header — no avatar. An earlier version had a
+        // mint circle + compass emoji standing in for the brand mark;
+        // removed per request. layout stays 'vertical' since there's
+        // only one child now (the text column) — no horizontal split
+        // to align against.
         type: 'box',
-        layout: 'horizontal',
+        layout: 'vertical',
         backgroundColor: COLORS.navy,
         paddingAll: '16px',
-        spacing: 'sm',
         contents: [
-          // Circular avatar: a mint-filled circle with a centered
-          // compass emoji standing in for the brand mark — LINE Flex
-          // can't render the real inline-SVG/gradient compass-mark
-          // component, so this is the closest LINE-safe equivalent
-          // (no new hosted image asset required).
           {
-            type: 'box',
-            layout: 'vertical',
-            width: '40px',
-            height: '40px',
-            cornerRadius: '20px',
-            backgroundColor: COLORS.mint,
-            flex: 0,
-            justifyContent: 'center',
-            alignItems: 'center',
-            contents: [{ type: 'text', text: '🧭', size: 'md', align: 'center' }],
+            type: 'text',
+            text: data.branchName,
+            color: COLORS.white,
+            size: 'md',
+            weight: 'bold',
+            wrap: true,
           },
           {
-            type: 'box',
-            layout: 'vertical',
-            flex: 1,
-            justifyContent: 'center',
-            contents: [
-              {
-                type: 'text',
-                text: data.branchName,
-                color: COLORS.white,
-                size: 'md',
-                weight: 'bold',
-                wrap: true,
-              },
-              {
-                type: 'text',
-                text: `รายงานเช้า · ${thaiShortDate(data.yesterday.date)} · 07:00`,
-                color: COLORS.subtitleOnNavy,
-                size: 'xs',
-                margin: 'xs',
-              },
-            ],
+            type: 'text',
+            text: `รายงานเช้า · ${thaiShortDate(data.yesterday.date)} · 07:00`,
+            color: COLORS.subtitleOnNavy,
+            size: 'xs',
+            margin: 'xs',
           },
         ],
       },
@@ -543,13 +596,20 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
           // provides a URL. Sits below the approve button when both
           // render, replaces it when the live button is gated off
           // (e.g. plan paid for Auto Push but no live PMS adapter).
-          // Secondary style keeps it visually subordinate to the
-          // approve button when both render.
+          //
+          // style: 'primary' (not 'secondary') — a 'secondary' button's
+          // own background chrome rendered dark in testing, making its
+          // navy label text unreadable regardless of which text color
+          // was set. 'primary' + color: navy fills the button with the
+          // exact same navy as the header and forces white label text
+          // automatically — same proven pattern as the approve button
+          // above, guaranteed >=4.5:1 (white on navy is ~14:1) rather
+          // than depending on an unpredictable secondary-style chrome.
           ...(data.dashboardUrl
             ? [
                 {
                   type: 'button',
-                  style: 'secondary',
+                  style: 'primary',
                   color: COLORS.navy,
                   height: 'sm',
                   action: {

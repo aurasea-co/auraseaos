@@ -240,6 +240,153 @@ describe('buildHotelBriefFlexMessage', () => {
     expect(c.footer).toBeDefined()
   })
 
+  // ── Header avatar removed ───────────────────────────────────────────────
+
+  it('renders no avatar/compass icon in the header — just the title and subtitle', () => {
+    const env = buildHotelBriefFlexMessage(BASE)
+    const texts = allText(env.contents)
+    expect(texts).not.toContain('🧭')
+    const header = (env.contents as { header: { contents: Array<Record<string, unknown>> } }).header
+    // Single-column header: exactly the branch-name text and the
+    // subtitle text, no nested avatar box.
+    expect(header.contents).toHaveLength(2)
+    expect(header.contents.every((c) => c.type === 'text')).toBe(true)
+  })
+
+  // ── Footer "ดูใน RateDesk" button legible on navy ───────────────────────
+
+  it('renders the dashboard button navy-filled (primary style) with the header\'s exact navy, guaranteeing LINE\'s forced-white label text', () => {
+    // 'secondary' style previously left the label color to fight an
+    // unpredictable button-chrome background (confirmed dark/unreadable
+    // in real testing regardless of label color). 'primary' + navy
+    // fill is the same proven pattern as the approve button — LINE
+    // forces white label text automatically, no chrome guesswork.
+    const env = buildHotelBriefFlexMessage({ ...BASE, dashboardUrl: 'https://example.test/ratedesk' })
+    const footer = (env.contents as { footer: { contents: Array<Record<string, unknown>> } }).footer
+    const dashboardButton = footer.contents.find(
+      (c) => c.type === 'button' && (c.action as { label?: string })?.label === 'ดูใน RateDesk',
+    ) as { style?: string; color?: string } | undefined
+    expect(dashboardButton?.style).toBe('primary')
+    expect(dashboardButton?.color).toBe('#042C53')
+  })
+
+  // ── Personalized greeting card ───────────────────────────────────────────
+
+  // body.contents[0] is the greeting card (a white box) with 1-2 text
+  // children: [0] the greeting line, [1] the optional "N เรื่องสำคัญ"
+  // subline. Helper reaches into that shape once for every test below.
+  function greetingCardLines(env: ReturnType<typeof buildHotelBriefFlexMessage>): string[] {
+    const body = (env.contents as { body: { contents: Array<Record<string, unknown>> } }).body
+    const card = body.contents[0] as { type: string; contents: Array<{ text: string }> }
+    expect(card.type).toBe('box') // sanity — this must be the card, not a stray text node
+    return card.contents.map((c) => c.text)
+  }
+
+  describe('personalized greeting card — name line', () => {
+    it('is the first body card, greeting the recipient by first name', () => {
+      const env = buildHotelBriefFlexMessage({ ...BASE, recipientFirstName: 'สมชาย' })
+      expect(greetingCardLines(env)[0]).toBe('สวัสดีตอนเช้าครับคุณสมชาย ☀️')
+    })
+
+    it('falls back to a nameless greeting — no empty "คุณ" or literal "undefined" — when recipientFirstName is omitted', () => {
+      const env = buildHotelBriefFlexMessage(BASE) // no recipientFirstName at all
+      const greeting = greetingCardLines(env)[0]
+      expect(greeting).toBe('สวัสดีตอนเช้าครับ ☀️')
+      expect(greeting).not.toContain('คุณ')
+      expect(greeting).not.toContain('undefined')
+      expect(greeting).not.toContain('null')
+    })
+
+    it('falls back cleanly when recipientFirstName is explicitly null', () => {
+      const env = buildHotelBriefFlexMessage({ ...BASE, recipientFirstName: null })
+      expect(greetingCardLines(env)[0]).toBe('สวัสดีตอนเช้าครับ ☀️')
+    })
+
+    it('falls back cleanly when recipientFirstName is an empty/whitespace-only string', () => {
+      const env = buildHotelBriefFlexMessage({ ...BASE, recipientFirstName: '   ' })
+      expect(greetingCardLines(env)[0]).toBe('สวัสดีตอนเช้าครับ ☀️')
+    })
+
+    it('trims incidental whitespace around a real first name', () => {
+      const env = buildHotelBriefFlexMessage({ ...BASE, recipientFirstName: '  Nok  ' })
+      expect(greetingCardLines(env)[0]).toBe('สวัสดีตอนเช้าครับคุณNok ☀️')
+    })
+  })
+
+  describe('personalized greeting card — dynamic highlight count subline', () => {
+    it('counts non-hold rate rows + property recs shown, never a hardcoded number', () => {
+      const env = buildHotelBriefFlexMessage({
+        ...BASE,
+        recipientFirstName: 'Nok',
+        perRoomRates: [
+          makePerRoomRate({ roomType: 'Deluxe2', direction: 'increase' }),
+          makePerRoomRate({ roomType: 'Deluxe5', direction: 'hold' }), // not counted
+          makePerRoomRate({ roomType: 'Deluxe6', direction: 'decrease' }),
+        ],
+        topRecs: [makeRec({ messageTh: 'REC ONE' })],
+      })
+      // 2 non-hold rates + 1 property rec = 3 — but derived, not literal.
+      expect(greetingCardLines(env)[1]).toBe('วันนี้มี 3 เรื่องสำคัญ')
+    })
+
+    it('caps the property-rec contribution at 2 (matching the rec rows actually rendered)', () => {
+      const env = buildHotelBriefFlexMessage({
+        ...BASE,
+        perRoomRates: [makePerRoomRate({ direction: 'hold' })], // 0 non-hold
+        topRecs: [
+          makeRec({ messageTh: 'ONE' }),
+          makeRec({ messageTh: 'TWO' }),
+          makeRec({ messageTh: 'THREE — not rendered, not counted' }),
+        ],
+      })
+      expect(greetingCardLines(env)[1]).toBe('วันนี้มี 2 เรื่องสำคัญ')
+    })
+
+    it('omits the subline entirely when the count is zero — never "วันนี้มี 0 เรื่องสำคัญ"', () => {
+      const env = buildHotelBriefFlexMessage({
+        ...BASE,
+        perRoomRates: [makePerRoomRate({ direction: 'hold' })],
+        topRecs: [],
+      })
+      expect(greetingCardLines(env)).toHaveLength(1) // greeting only, no subline
+    })
+
+    it('omits the subline when perRoomRates is empty — no reliable basis to count (legacy forecast-only branch)', () => {
+      const env = buildHotelBriefFlexMessage({
+        ...BASE,
+        perRoomRates: undefined,
+        forecast: { expectedOccupancy: 0.6, suggestedRateThb: 900 },
+        topRecs: [makeRec({ messageTh: 'ONE' })], // even with a real rec, no per-room data to combine with
+      })
+      expect(greetingCardLines(env)).toHaveLength(1)
+    })
+
+    it('is completely independent of "ผลเมื่อคืน" (yesterday\'s occupancy/ADR/RevPAR) — the stat card never contributes to the count', () => {
+      const rates = [
+        makePerRoomRate({ roomType: 'Deluxe2', direction: 'increase' }),
+        makePerRoomRate({ roomType: 'Deluxe6', direction: 'decrease' }),
+        makePerRoomRate({ roomType: 'Suite', direction: 'decrease' }),
+      ]
+      const recs = [makeRec({ messageTh: 'REC ONE' })]
+      // Same rate/rec mix (3 non-hold + 1 rec = 4), wildly different
+      // yesterday stats each time — the count must not move at all.
+      const low = buildHotelBriefFlexMessage({
+        ...BASE,
+        yesterday: { date: '2026-05-29', occupancyRate: 0.05, adrThb: 100, revparThb: 5, revenueThb: 500 },
+        perRoomRates: rates,
+        topRecs: recs,
+      })
+      const high = buildHotelBriefFlexMessage({
+        ...BASE,
+        yesterday: { date: '2026-05-29', occupancyRate: 0.99, adrThb: 9999, revparThb: 9899, revenueThb: 999999 },
+        perRoomRates: rates,
+        topRecs: recs,
+      })
+      expect(greetingCardLines(low)[1]).toBe('วันนี้มี 4 เรื่องสำคัญ')
+      expect(greetingCardLines(high)[1]).toBe('วันนี้มี 4 เรื่องสำคัญ')
+    })
+  })
+
   // ── "Today's recommended rates" block — one row per room type ─────────
 
   it('renders the bilingual block title above the rate rows', () => {
@@ -387,8 +534,10 @@ describe('buildHotelBriefFlexMessage', () => {
     expect(labelNode?.wrap).toBe(true)
     const valueNode = findNodeFor(env.contents, '42%')
     // The tile is the parent box one level up from the value text.
+    // body.contents[0] is the greeting (see the personalized-greeting
+    // tests below); the "Last night" card is [1].
     const statRow = (
-      (env.contents as { body: { contents: Array<Record<string, unknown>> } }).body.contents[0] as {
+      (env.contents as { body: { contents: Array<Record<string, unknown>> } }).body.contents[1] as {
         contents: Array<Record<string, unknown>>
       }
     ).contents[2] as { justifyContent?: unknown; contents: Array<{ flex?: unknown }> }

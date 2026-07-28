@@ -489,11 +489,19 @@ async function handleMorningFlash(req: NextRequest) {
     } else if (lineSnippets.length === 0) {
       console.log(`[morning-flash] user=${setting.user_id} produced 0 branch snippets — skipping LINE`)
     } else {
+      // display_name added to this existing single-row lookup (no new
+      // query) so the hotel Flex brief can greet the RECIPIENT by
+      // name — this fans out per person (owner + any assigned
+      // managers each get their own push), not per branch. There's no
+      // dedicated first_name column; display_name is whatever the
+      // user typed at signup (see profiles schema), so only the first
+      // whitespace-separated token is used as a best-effort first name.
       const { data: profile } = await supabase
         .from('profiles')
-        .select('line_id')
+        .select('line_id, display_name')
         .eq('user_id', setting.user_id)
         .maybeSingle()
+      const recipientFirstName = profile?.display_name?.trim().split(/\s+/)[0] || null
 
       if (!profile?.line_id) {
         console.log(`[morning-flash] user=${setting.user_id} has no profiles.line_id — cannot push LINE`)
@@ -635,6 +643,7 @@ async function handleMorningFlash(req: NextRequest) {
 
           const flex = buildHotelBriefFlexMessage({
             branchName: f.branchName,
+            recipientFirstName,
             yesterday: {
               date: String((f.latest as { metric_date: string }).metric_date),
               occupancyRate: yOccupancy,
