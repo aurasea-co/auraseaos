@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
+import { TRIAL_OPTIONS } from '@/lib/superadmin/invite-trial-options'
 
 interface RecentInvite {
   id: string
@@ -26,7 +27,6 @@ interface RecentInvite {
   expires_at: string
 }
 
-const TRIAL_OPTIONS = [14, 30, 60, 90]
 const PLAN_OPTIONS: Array<'starter' | 'growth' | 'pro'> = ['starter', 'growth', 'pro']
 const DISCOUNT_OPTIONS = [0, 20, 30, 50]
 const BUSINESS_OPTIONS: Array<{ value: 'accommodation' | 'fnb' | 'mixed'; label: string }> = [
@@ -43,7 +43,10 @@ type Tier = 'founding' | 'early_adopter' | 'standard' | 'custom'
 type PlanKey = 'starter' | 'growth' | 'pro'
 
 const TIER_PRESETS: Record<Exclude<Tier, 'custom'>, { trialDays: number; discountPct: number; plan: PlanKey; promoPrefix: string; label: string }> = {
-  founding: { trialDays: 90, discountPct: 50, plan: 'growth', promoPrefix: 'FOUNDING-', label: 'Founding Partner · 90d · 50% off · Growth' },
+  // 60d cap (not 90) — matches the public trial-length policy on
+  // ratedesk.ai; see invite-trial-options.ts's header for why this and
+  // the API route's validation both import from one shared constant now.
+  founding: { trialDays: 60, discountPct: 50, plan: 'growth', promoPrefix: 'FOUNDING-', label: 'Founding Partner · 60d · 50% off · Growth' },
   early_adopter: { trialDays: 60, discountPct: 30, plan: 'growth', promoPrefix: 'EARLY-', label: 'Early Adopter · 60d · 30% off · Growth' },
   standard: { trialDays: 30, discountPct: 0, plan: 'starter', promoPrefix: '', label: 'Standard Trial · 30d · no discount · Starter' },
 }

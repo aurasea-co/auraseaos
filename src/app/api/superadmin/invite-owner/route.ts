@@ -4,6 +4,7 @@ import { sendEmail, EMAIL_SENDERS } from '@/lib/email/resend'
 import OwnerInvitationEmail, { type OwnerInvitationTier } from '@/lib/email/templates/ownerInvitationEmail'
 import { PRICING } from '@/lib/config/pricing'
 import { authenticateSuperAdmin } from '../_lib'
+import { TRIAL_OPTIONS } from '@/lib/superadmin/invite-trial-options'
 
 // POST /api/superadmin/invite-owner
 //   { email, organizationName, businessType, trialDays, plan,
@@ -25,7 +26,12 @@ interface Body {
 
 const VALID_BUSINESS = new Set(['accommodation', 'fnb', 'mixed'])
 const VALID_PLANS = new Set(['starter', 'growth', 'pro'])
-const VALID_TRIAL = new Set([14, 30, 60, 90])
+// Same list the invite-owner page's dropdown offers — imported from
+// one shared constant so the UI can never offer (and this route can
+// never accept) a trial length the other side doesn't also allow. See
+// invite-trial-options.ts's header for why this used to be two
+// independently hardcoded lists that had already drifted.
+const VALID_TRIAL = new Set<number>(TRIAL_OPTIONS)
 
 export async function POST(req: NextRequest) {
   const auth = await authenticateSuperAdmin()

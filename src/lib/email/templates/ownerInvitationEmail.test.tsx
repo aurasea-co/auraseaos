@@ -102,16 +102,19 @@ describe('OwnerInvitationEmail', () => {
       expect(html).not.toContain('60 วัน')
     })
 
-    it('correctly renders 90-day Founding trials', () => {
+    it('correctly renders 60-day Founding trials', () => {
+      // 60, not 90 — the Founding tier's trial length is capped at 60
+      // days to match the public policy (ratedesk.ai's marketing copy
+      // promises a 60-day trial); see invite-trial-options.ts.
       const html = renderToStaticMarkup(
         OwnerInvitationEmail({
           ...BASE_PROPS,
-          trialDays: 90,
+          trialDays: 60,
           promoCode: 'FOUNDING-1',
           discountPct: 50,
         }),
       )
-      expect(html).toContain('90 วัน')
+      expect(html).toContain('60 วัน')
     })
   })
 
