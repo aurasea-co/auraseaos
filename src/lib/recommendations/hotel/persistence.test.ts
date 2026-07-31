@@ -108,6 +108,43 @@ describe('upsertBranchRateRecommendations', () => {
     expect(res.error).toBe('constraint violation')
   })
 
+  it('writes calendar_modifier/reason columns from calendarContext when present', async () => {
+    const { client, captured } = makeFakeUpsertClient()
+    await upsertBranchRateRecommendations(client, {
+      branchId: 'branch-1',
+      metricDate: '2026-07-26',
+      recs: [
+        makeRec({
+          roomType: 'Deluxe6',
+          direction: 'hold',
+          calendarContext: {
+            level: 'elevated',
+            modifier: 0.15,
+            reasonEn: 'eve of a public holiday',
+            reasonTh: 'ก่อนวันหยุดนักขัตฤกษ์',
+          },
+        }),
+      ],
+    })
+    const row = captured[0].rows[0]
+    expect(row.calendar_modifier).toBe(0.15)
+    expect(row.calendar_reason_en).toBe('eve of a public holiday')
+    expect(row.calendar_reason_th).toBe('ก่อนวันหยุดนักขัตฤกษ์')
+  })
+
+  it('writes null calendar columns when calendarContext is absent', async () => {
+    const { client, captured } = makeFakeUpsertClient()
+    await upsertBranchRateRecommendations(client, {
+      branchId: 'branch-1',
+      metricDate: '2026-06-01',
+      recs: [makeRec()],
+    })
+    const row = captured[0].rows[0]
+    expect(row.calendar_modifier).toBeNull()
+    expect(row.calendar_reason_th).toBeNull()
+    expect(row.calendar_reason_en).toBeNull()
+  })
+
   it('passes direction + reason fields through unchanged', async () => {
     const { client, captured } = makeFakeUpsertClient()
     await upsertBranchRateRecommendations(client, {
@@ -164,5 +201,44 @@ describe('toPerRoomTypeRate — DB row → engine shape', () => {
     expect(r.suggestedRateThb).toBe(790)
     expect(r.reasonTh).toBe('')
     expect(r.reasonEn).toBe('')
+  })
+
+  it('rehydrates calendarContext from calendar_modifier/reason columns, re-deriving level', () => {
+    const row: BranchRateRecommendationRow = {
+      branch_id: 'b1',
+      metric_date: '2026-07-26',
+      room_type: 'Deluxe6',
+      current_rate_satang: 85000,
+      suggested_rate_satang: 85000,
+      direction: 'hold',
+      reason_th: null,
+      reason_en: null,
+      calendar_modifier: 0.15,
+      calendar_reason_th: 'ก่อนวันหยุดนักขัตฤกษ์',
+      calendar_reason_en: 'eve of a public holiday',
+    }
+    const r = toPerRoomTypeRate(row)
+    expect(r.calendarContext).toEqual({
+      level: 'elevated',
+      modifier: 0.15,
+      reasonEn: 'eve of a public holiday',
+      reasonTh: 'ก่อนวันหยุดนักขัตฤกษ์',
+    })
+  })
+
+  it('omits calendarContext when calendar_modifier is null (older row / no signal fired)', () => {
+    const row: BranchRateRecommendationRow = {
+      branch_id: 'b1',
+      metric_date: '2026-06-01',
+      room_type: 'Deluxe5',
+      current_rate_satang: 79000,
+      suggested_rate_satang: 79000,
+      direction: 'hold',
+      reason_th: null,
+      reason_en: null,
+      calendar_modifier: null,
+    }
+    const r = toPerRoomTypeRate(row)
+    expect(r.calendarContext).toBeUndefined()
   })
 })

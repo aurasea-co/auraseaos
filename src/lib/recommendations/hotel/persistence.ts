@@ -71,6 +71,9 @@ export async function upsertBranchRateRecommendations(
     direction: r.direction,
     reason_th: r.reasonTh,
     reason_en: r.reasonEn,
+    calendar_modifier: r.calendarContext?.modifier ?? null,
+    calendar_reason_th: r.calendarContext?.reasonTh ?? null,
+    calendar_reason_en: r.calendarContext?.reasonEn ?? null,
   }))
   const { error } = await supabase
     .from('branch_rate_recommendations')
@@ -99,12 +102,20 @@ export interface BranchRateRecommendationRow {
   direction: 'increase' | 'hold' | 'decrease'
   reason_th: string | null
   reason_en: string | null
+  /** Tier 1 "Calendar & Context" forward signal that nudged this row's
+   *  band decision (migration 040) — see PerRoomTypeRate.calendarContext
+   *  in engine.ts. Null when the modifier didn't fire for this date, or
+   *  on a row written before migration 040 (older rows never had it). */
+  calendar_modifier?: number | null
+  calendar_reason_th?: string | null
+  calendar_reason_en?: string | null
 }
 
 /** Project a stored row back into PerRoomTypeRate so the brief
  *  renderer (which already knows that shape) doesn't need a parallel
  *  code path. Display values (THB) are derived via satangToThb. */
 import { satangToThb } from '@/lib/money/satang'
+import { deriveCalendarDemandLevel } from '@/lib/demand-calendar/classify'
 
 export function toPerRoomTypeRate(row: BranchRateRecommendationRow): PerRoomTypeRate {
   const currentThb = satangToThb(row.current_rate_satang)
@@ -119,5 +130,15 @@ export function toPerRoomTypeRate(row: BranchRateRecommendationRow): PerRoomType
     reasonTh: row.reason_th ?? '',
     reasonEn: row.reason_en ?? '',
     impactThb: Math.abs(suggestedThb - currentThb),
+    ...(row.calendar_modifier != null
+      ? {
+          calendarContext: {
+            level: deriveCalendarDemandLevel(row.calendar_modifier),
+            modifier: row.calendar_modifier,
+            reasonEn: row.calendar_reason_en ?? null,
+            reasonTh: row.calendar_reason_th ?? null,
+          },
+        }
+      : {}),
   }
 }

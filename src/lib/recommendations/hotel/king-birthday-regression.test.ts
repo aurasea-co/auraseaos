@@ -16,6 +16,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { recommendPerRoomTypeRates, type RecommendationInput } from './engine'
+import { upsertBranchRateRecommendations, toPerRoomTypeRate, type BranchRateRecommendationRow } from './persistence'
 import { classifyCalendarContext } from '@/lib/demand-calendar/classify'
 import { THAILAND_PUBLIC_HOLIDAYS_2026, toDemandCalendarSeedRows } from '@/lib/demand-calendar/thailand-public-holidays-2026'
 import type { DemandCalendarEvent } from '@/lib/demand-calendar/queries'
@@ -78,6 +79,42 @@ describe('King\'s Birthday eve regression — 2026-07-26 pricing the night of 20
     const rates = recommendPerRoomTypeRates(SOFT_TRAILING_DAYS, { demandContext })
     for (const r of rates) {
       expect(r.calendarContext).toBeDefined()
+      expect(r.calendarContext?.reasonEn).toBe('eve of a public holiday')
+    }
+  })
+
+  it('the calendar reason survives a persistence round-trip (migration 040)', async () => {
+    const demandContext = classifyCalendarContext('2026-07-27', HOLIDAYS_2026).demandSignal
+    const rates = recommendPerRoomTypeRates(SOFT_TRAILING_DAYS, { demandContext })
+
+    const captured: Array<Record<string, unknown>> = []
+    const fakeClient = {
+      from(_table: 'branch_rate_recommendations') {
+        return {
+          upsert(rows: Array<Record<string, unknown>>) {
+            captured.push(...rows)
+            return Promise.resolve({ data: null, error: null })
+          },
+        }
+      },
+    }
+    await upsertBranchRateRecommendations(fakeClient, {
+      branchId: 'ef77c100-e27b-4f69-a930-053750b79f22',
+      metricDate: '2026-07-26',
+      recs: rates,
+    })
+
+    for (const row of captured) {
+      expect(row.calendar_modifier).toBeCloseTo(0.15, 5)
+      expect(row.calendar_reason_en).toBe('eve of a public holiday')
+    }
+
+    // Read-back path: DB row -> rehydrated PerRoomTypeRate carries the
+    // same calendarContext the engine originally produced.
+    const rehydrated = captured.map((r) => toPerRoomTypeRate(r as unknown as BranchRateRecommendationRow))
+    for (const r of rehydrated) {
+      expect(r.calendarContext?.level).toBe('elevated')
+      expect(r.calendarContext?.modifier).toBeCloseTo(0.15, 5)
       expect(r.calendarContext?.reasonEn).toBe('eve of a public holiday')
     }
   })

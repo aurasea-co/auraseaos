@@ -195,6 +195,15 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
 
+/** The modifier→level thresholds, extracted so any caller that only has
+ *  a persisted modifier (e.g. persistence.ts's read-back path, which
+ *  doesn't store `level` separately — see migration 040's design note)
+ *  can re-derive the same level classifyCalendarContext would have
+ *  produced, without duplicating the literal thresholds. */
+export function deriveCalendarDemandLevel(modifier: number): CalendarDemandLevel {
+  return modifier > 0.02 ? 'elevated' : modifier < -0.01 ? 'soft' : 'normal'
+}
+
 /** Pure — classifies one calendar date for one branch. `calendar` is
  *  whatever getDemandCalendarForBranch() returned for a window covering
  *  `date` (plus a few days either side so bridge/long-weekend/return-day
@@ -238,7 +247,7 @@ export function classifyCalendarContext(
   if (returnDay) apply(CALENDAR_DEMAND_MODIFIERS.returnDay, 'day after a holiday break', 'วันหลังวันหยุดยาว')
 
   modifier = clamp(modifier, CALENDAR_DEMAND_MODIFIER_CLAMP.min, CALENDAR_DEMAND_MODIFIER_CLAMP.max)
-  const level: CalendarDemandLevel = modifier > 0.02 ? 'elevated' : modifier < -0.01 ? 'soft' : 'normal'
+  const level = deriveCalendarDemandLevel(modifier)
 
   return {
     date,

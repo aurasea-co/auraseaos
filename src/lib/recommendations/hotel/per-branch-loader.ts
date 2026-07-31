@@ -271,7 +271,7 @@ export async function loadPerRoomRecsForBranch(
   const { data: persistedRows, error: persistedErr } = await supabase
     .from('branch_rate_recommendations')
     .select(
-      'branch_id, metric_date, room_type, current_rate_satang, suggested_rate_satang, direction, reason_th, reason_en',
+      'branch_id, metric_date, room_type, current_rate_satang, suggested_rate_satang, direction, reason_th, reason_en, calendar_modifier, calendar_reason_th, calendar_reason_en',
     )
     .eq('branch_id', params.branchId)
     .eq('metric_date', params.today)
