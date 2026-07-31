@@ -89,7 +89,7 @@ describe('King\'s Birthday eve regression — 2026-07-26 pricing the night of 20
 
     const captured: Array<Record<string, unknown>> = []
     const fakeClient = {
-      from(_table: 'branch_rate_recommendations') {
+      from() {
         return {
           upsert(rows: Array<Record<string, unknown>>) {
             captured.push(...rows)
