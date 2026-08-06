@@ -861,7 +861,10 @@ export interface DailyActionContext {
 
 // Derived, presentation-ready view of the day's situation. Null when no
 // inputs are supplied (the builder degrades to type-name-only copy).
-interface DerivedDayContext {
+// Exported so callers that need the raw numbers for their own layout
+// (e.g. the LINE brief's occupancy-vs-weekday-norm verdict line) can
+// read them directly instead of re-parsing dailyAction.messageTh.
+export interface DerivedDayContext {
   occPct: number
   /** Positive points below target; null when at/above target or no target. */
   belowTargetPct: number | null
@@ -951,7 +954,7 @@ function latestCompetitorDataDate(inputs: ReadonlyArray<RecommendationInput>): s
   return latest
 }
 
-function deriveDayContext(context: DailyActionContext): DerivedDayContext | null {
+export function deriveDayContext(context: DailyActionContext): DerivedDayContext | null {
   const inputs = context.inputs ?? []
   if (inputs.length === 0) return null
   const latest = inputs[inputs.length - 1]
@@ -1505,7 +1508,7 @@ export function summarizePerRoomRates(
   // which is the honest comparison for pattern-driven properties; with
   // thin history it falls back to the plain occ% wording unchanged.
   const targetTh = ctx?.belowTargetPct != null ? `, ต่ำกว่าเป้า ${ctx.belowTargetPct}%` : ''
-  const targetEn = ctx?.belowTargetPct != null ? `, ${ctx.belowTargetPct}pts below target` : ''
+  const targetEn = ctx?.belowTargetPct != null ? `, ${ctx.belowTargetPct}% below target` : ''
   let occTh = ''
   let occEn = ''
   if (ctx) {
@@ -1515,14 +1518,14 @@ export function summarizePerRoomRates(
         Math.abs(diff) < 5
           ? 'ใกล้เคียงปกติ'
           : diff > 0
-            ? `สูงกว่าปกติ ${diff}pts`
-            : `ต่ำกว่าปกติ ${Math.abs(diff)}pts`
+            ? `สูงกว่าปกติ ${diff}%`
+            : `ต่ำกว่าปกติ ${Math.abs(diff)}%`
       const posEn =
         Math.abs(diff) < 5
           ? 'near norm'
           : diff > 0
-            ? `${diff}pts above norm`
-            : `${Math.abs(diff)}pts below norm`
+            ? `${diff}% above norm`
+            : `${Math.abs(diff)}% below norm`
       occTh = ` (${ctx.weekdayNameTh}ปกติ ${ctx.weekdayOccupancyBaseline}% วันนี้ ${ctx.occPct}% ${posTh}${targetTh})`
       occEn = ` (${ctx.weekdayNameEn} norm ${ctx.weekdayOccupancyBaseline}%, today ${ctx.occPct}% — ${posEn}${targetEn})`
     } else {
@@ -1704,6 +1707,11 @@ export function detectOverpricing(
       ourAvgAdrThb: currentRate,
       competitorAvgThb: Math.round(cmp.competitorAvgThb),
       recentOccupancy: recentAvgOcc,
+      // Mirrors detectCompetitorUndercutting's supportingData shape so
+      // callers (the LINE brief's competitor callout) can read the same
+      // two fields regardless of which direction fired.
+      topCompetitor: cmp.topCompetitor.name,
+      gapThb,
     },
     requiresMinDays: 3,
   }]

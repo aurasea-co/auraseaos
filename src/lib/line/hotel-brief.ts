@@ -4,18 +4,25 @@
 // Money is THB integers throughout (matches every other consumer in
 // this codebase; satang doesn't apply).
 //
-// VISUAL SYSTEM (restyle — see the reference mockup): navy header with
-// a circular avatar, sand page background, white rounded section cards
-// each led by one icon + navy label, direction-colored delta chips on
-// the rate rows, mint footer brand strip. This is a presentation-only
-// pass — every data value, threshold, cap, and gating decision below
-// is unchanged from before the restyle; only the JSON shape/colors
-// changed. LINE Flex has no custom fonts — size/weight/color only.
+// VISUAL SYSTEM (SME-clarity restyle, six blocks top to bottom):
+//   A. Header — pretitle / branch name / date, navy background.
+//   B. Greeting card.
+//   C. Results — context pill (if a real calendar event exists),
+//      occupancy vs weekday-norm verdict, ADR/RevPAR gloss line,
+//      per-room-type rate rows.
+//   D. Competitor callout (if a signal fired) — single most relevant
+//      competitor gap, positioned right before Today's action.
+//   E. Today's action — soft mint callout.
+//   F. Footer — "ดูใน RateDesk" button, Auto Push note, brand strip.
+// Every data value, threshold, and gating decision is driven by
+// fields already computed upstream (engine.ts / per-branch-loader.ts)
+// — this file only lays them out. LINE Flex has no custom fonts —
+// size/weight/color only.
 
 import type {
-  HotelRecommendation,
   PerRoomTypeRate,
   DailyAction,
+  DerivedDayContext,
 } from '@/lib/recommendations/hotel/engine'
 
 export interface HotelBriefData {
@@ -38,24 +45,26 @@ export interface HotelBriefData {
     revparThb: number
     revenueThb: number
   }
-  /** Filtered to high/medium urgency. Builder slices the property-level
-   *  entries (no roomType) to max 2 and renders them under the per-
-   *  room rate block (weekend signal, undercut, etc). Per-room rate
-   *  entries from this array are NOT rendered separately — they're
-   *  subsumed by perRoomRates which carries the full sheet. */
-  topRecs: HotelRecommendation[]
+  /** "What does this weekday normally do" — same computation that
+   *  feeds dailyAction's prose (see engine.ts's deriveDayContext),
+   *  exposed as raw fields so this builder can render its own
+   *  occupancy-vs-norm verdict line and calendar-event pill instead of
+   *  parsing dailyAction.messageTh. Null/omitted when there's
+   *  insufficient history — the verdict line and pill are then
+   *  omitted rather than fabricated. Managers see this exactly like
+   *  owners do — it's a rate-pacing signal, not a revenue figure. */
+  weekdayContext?: DerivedDayContext | null
   /** Output of recommendPerRoomTypeRates() — one row per active room
-   *  type, including holds. Used to render the "แนะนำราคาวันนี้ /
-   *  Today's recommended rates" block. Builder caps to the top 6 by
-   *  impact and tags the rest as "+M more in RateDesk" so the bubble
-   *  height stays bounded on properties with many room types. Pass an
-   *  empty array (or omit) for legacy single-room properties that
-   *  have no breakdown — the brief then falls back to the blended
-   *  forecast strip. */
+   *  type, including holds. Used to render the per-room-type rate
+   *  rows. Builder caps to the top 6 by impact and tags the rest as
+   *  "+M more in RateDesk" so the bubble height stays bounded on
+   *  properties with many room types. Pass an empty array (or omit)
+   *  for legacy single-room properties that have no breakdown — the
+   *  brief then falls back to the blended forecast strip. */
   perRoomRates?: PerRoomTypeRate[]
   /** Output of summarizePerRoomRates() — one bilingual action line
-   *  derived from the rate-mix in perRoomRates. The brief renders this
-   *  as a callout right under the rate sheet so the owner gets a
+   *  derived from the rate-mix in perRoomRates. Rendered in the
+   *  "Today's action" callout (block E) so the owner gets a
    *  one-glance "what to do today" prompt even when low-occupancy /
    *  weekend / competitor signals don't fire (typical for branches
    *  with <3 days of data). Omitted → no callout. */
@@ -64,45 +73,27 @@ export interface HotelBriefData {
    *  empty/absent (legacy single-room properties with no breakdown
    *  jsonb). Pass null when not enough data. */
   forecast: { expectedOccupancy: number; suggestedRateThb: number } | null
-  /** Auto Push approval button. Caller is responsible for the gating
-   *  decision — the builder just renders whatever it gets. Pass this ONLY
-   *  when BOTH gates pass: the branch is on a plan with auto_push AND a
-   *  connected PMS adapter advertises supports_write_back=true. Crystal
-   *  Resort today (Pro plan, no live PMS) gets no approveButton — only
-   *  the dashboardUrl link. See lib/ratedesk/auto-push-gating.ts.
-   *
-   *  For multi-room hotels the button represents "approve the WHOLE set
-   *  of per-room-type recommendations for today" — the underlying
-   *  rate_approvals row carries room_rates jsonb and the approve-rate
-   *  endpoint applies them all. The label text should reflect that
-   *  (e.g. "✓ อนุมัติทั้งหมด" not a single ฿X). */
-  approveButton?: {
-    /** Full URL the LINE in-app browser will GET (token already in qs). */
-    url: string
-    /** Locale-aware label. LINE caps at 20 chars — caller is responsible
-     *  for picking a short form like "✓ อนุมัติทั้งหมด" when a single
-     *  rate string would overflow or be meaningless. */
-    label: string
-  }
+  /** Single most relevant competitor signal (from
+   *  detectCompetitorUndercutting / detectOverpricing), picked by the
+   *  caller — this builder just renders it. 'higher' = competitor is
+   *  pricing above us (opportunity to raise); 'lower' = competitor is
+   *  pricing below us (may need to reconsider). Null/omitted → block D
+   *  is skipped entirely, never a list of signals. */
+  competitorCallout?: {
+    name: string
+    gapThb: number
+    direction: 'higher' | 'lower'
+  } | null
   /** Deep-link URL to /ratedesk on the dashboard. ALWAYS render the
-   *  "Review in RateDesk" button when this is provided — it's the
-   *  always-available secondary action and the only on-bubble action
-   *  when the live approve button is gated off. */
+   *  "ดูใน RateDesk" button when this is provided — it's the only
+   *  on-bubble action; there is no live Auto Push approve button in
+   *  this brief for now. */
   dashboardUrl?: string
-  /** Optional subtle note in the footer when the plan includes Auto Push
-   *  but no write-back-capable PMS is connected yet. Shows up as a small
-   *  muted line under the buttons telling the owner that the live
-   *  approve button will activate once a supported PMS is wired in.
-   *  Caller decides when this should appear — see
+  /** Optional subtle note in the footer when the plan includes Auto
+   *  Push but no write-back-capable PMS is connected yet. Caller
+   *  decides when this should appear — see
    *  lib/ratedesk/auto-push-gating.ts shouldShowAwaitingPmsNote(). */
   awaitingPmsNote?: string
-  /** True when yesterday's row carried 2+ distinct room types in its
-   *  breakdown jsonb. No longer read by the brief renderer — the per-
-   *  room-rates block is driven entirely by perRoomRates.length. Kept
-   *  on the interface for backward compatibility with the morning-flash
-   *  route, which still uses it as the source of truth for the approval
-   *  row's room_type ('multi' vs 'all') and approve button label. */
-  hasMultipleRoomTypes?: boolean
 }
 
 export interface FlexMessageEnvelope {
@@ -127,17 +118,32 @@ const COLORS = {
   /** White at ~65% opacity (8-digit alpha hex — LINE Flex supports this
    *  on text/box color properties) for the header subtitle. */
   subtitleOnNavy: '#FFFFFFA6',
+  /** "Below normal" occupancy verdict text — darker than the mint/
+   *  attention pair above so it reads distinctly as its own third
+   *  state rather than a re-used red. Checked for >=4.5:1 on white. */
+  amber: '#B45309',
+  /** "Above normal" occupancy verdict text. Raw mint (#5DCAA5) fails
+   *  text contrast on white (it's a fill/chip color, per the note
+   *  above) — this is a darker green reserved for verdict text only. */
+  verdictAbove: '#0F7A5C',
+  /** Light red-tinted background for the competitor callout card
+   *  (block D). Navy text on top clears contrast easily. */
+  attentionTint: '#FBEAEA',
 } as const
 
-function thaiShortDate(yyyymmdd: string): string {
-  // Render "29 พ.ค." style on the timezone-safe path. We anchor the
-  // date string against a fixed UTC midnight so the host TZ doesn't
-  // shift the displayed day.
-  return new Date(`${yyyymmdd}T00:00:00Z`).toLocaleDateString('th-TH', {
+const WEEKDAY_TH_SHORT = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสฯ', 'ศุกร์', 'เสาร์'] as const
+
+// Header date line — "เสาร์ 15 ส.ค." style. Anchored at UTC midnight
+// for the given calendar date (not the host TZ) so both the weekday
+// and the day/month stay correct regardless of where this runs.
+function thaiHeaderDate(yyyymmdd: string): string {
+  const d = new Date(`${yyyymmdd}T00:00:00Z`)
+  const dayMonth = d.toLocaleDateString('th-TH', {
     day: 'numeric',
     month: 'short',
     timeZone: 'Asia/Bangkok',
   })
+  return `${WEEKDAY_TH_SHORT[d.getUTCDay()]} ${dayMonth}`
 }
 
 function fmtThb(n: number): string {
@@ -183,30 +189,32 @@ function greetingCard(firstName: string | null | undefined, highlightCount: numb
 }
 
 // Same 3-tier thresholds as before the restyle (>=80 / <40 / else) —
-// only the color VALUES changed to the new palette. "Ahead of pace" /
-// "behind pace" from the mockup maps onto this existing tier, not a
-// new computation. The mockup calls the low tier "amber" but the
-// approved palette (COLORS above) has no amber — attention (the same
-// red already used for rate cuts) is reused for "behind" so the
-// palette stays exactly as specified rather than introducing an
-// unlisted color.
+// only the color VALUES changed to the new palette.
 function occColor(pct: number): string {
   if (pct >= 80) return COLORS.mint
   if (pct < 40) return COLORS.attention
   return COLORS.navy
 }
 
+// Occupancy-vs-weekday-norm verdict — three states so the owner never
+// has to do the subtraction themselves. ±4pt band = "near normal";
+// outside that, direction decides amber (quieter than usual) vs mint
+// (busier than usual).
+function verdictFor(gap: number): { emoji: string; text: string; color: string } {
+  if (gap < -4) return { emoji: '🔻', text: 'เงียบกว่าปกติ', color: COLORS.amber }
+  if (gap > 4) return { emoji: '🔺', text: 'ดีกว่าปกติ', color: COLORS.verdictAbove }
+  return { emoji: '⚪', text: 'ใกล้เคียงปกติ', color: COLORS.muted }
+}
+
 // ── White card shell ─────────────────────────────────────────────────
-// The bare white-rounded-card chrome (background/cornerRadius/padding)
-// shared by every card in the body — the icon-led sectionCard() below
-// and the plain greeting card both wrap this so "a new card styled
-// like the existing cards" means literally the same three properties,
-// not a look-alike copy.
-function whiteCardShell(contents: Array<Record<string, unknown>>): Record<string, unknown> {
+// The bare card chrome (background/cornerRadius/padding) shared by
+// every card in the body. bg defaults to white; the "Today's action"
+// card (block E) passes the mint tint instead.
+function whiteCardShell(contents: Array<Record<string, unknown>>, bg: string = COLORS.white): Record<string, unknown> {
   return {
     type: 'box',
     layout: 'vertical',
-    backgroundColor: COLORS.white,
+    backgroundColor: bg,
     cornerRadius: '12px',
     paddingAll: '12px',
     contents,
@@ -214,13 +222,19 @@ function whiteCardShell(contents: Array<Record<string, unknown>>): Record<string
 }
 
 // ── Section card shell ──────────────────────────────────────────────
-// White rounded card on the sand page background, led by one icon +
-// a navy label row, thin separator beneath the label, then whatever
-// content the section supplies. Every icon-led body section uses this
-// same shell so the bubble reads as one consistent system.
-function sectionCard(icon: string, labelTh: string, labelEn: string, contents: Array<Record<string, unknown>>): Record<string, unknown> {
+// Card on the sand page background, led by one icon + a navy label
+// row, thin separator beneath the label, then whatever content the
+// section supplies. Every icon-led body section uses this same shell
+// so the bubble reads as one consistent system.
+function sectionCard(
+  icon: string,
+  labelTh: string,
+  labelEn: string,
+  contents: Array<Record<string, unknown>>,
+  bg: string = COLORS.white,
+): Record<string, unknown> {
   return {
-    ...whiteCardShell([]),
+    ...whiteCardShell([], bg),
     contents: [
       {
         type: 'box',
@@ -245,115 +259,64 @@ function sectionCard(icon: string, labelTh: string, labelEn: string, contents: A
   }
 }
 
-// Compact stat tile — large bold value, xs uppercase label. Occupancy
-// passes a state color (see occColor); ADR/RevPAR are neutral navy
-// (no pass/fail state — they're reference numbers, not a target).
-function statTile(label: string, value: string, color: string): Record<string, unknown> {
-  return {
-    type: 'box',
-    layout: 'vertical',
-    // flex: 0 — size to content rather than forcing an equal 1/3 share
-    // of the row (see the row's justifyContent: 'space-between' below).
-    // An earlier equal-thirds version made "OCCUPANCY" wrap mid-word
-    // ("OCCUPANC" / "Y") because the fixed-width tile was a hair
-    // narrower than the word even with wrap:true — verified against the
-    // actual LINE Flex Message Simulator. Content-sizing removes the
-    // forced width entirely rather than guessing a flex ratio that
-    // happens to fit this one word.
-    flex: 0,
-    contents: [
-      { type: 'text', text: value, size: 'xl', weight: 'bold', color, wrap: true },
-      { type: 'text', text: label.toUpperCase(), size: 'xxs', color: COLORS.muted, margin: 'xs', wrap: true },
-    ],
-  }
-}
-
-function urgencyEmoji(u: HotelRecommendation['urgency']): string {
-  if (u === 'high') return '🔴'
-  if (u === 'medium') return '🟡'
-  return '⚪️'
-}
-
-function recRow(rec: HotelRecommendation): Record<string, unknown> {
+// Mint pill floated above the results cards — renders only when the
+// caller supplies real demand-calendar text (never hardcoded/guessed).
+// Wrapped in a horizontal box so the pill hugs its own content width
+// instead of stretching to the vertical body's full width.
+function contextPill(text: string): Record<string, unknown> {
   return {
     type: 'box',
     layout: 'horizontal',
-    spacing: 'sm',
     contents: [
-      { type: 'text', text: urgencyEmoji(rec.urgency), size: 'sm', flex: 0 },
       {
-        type: 'text',
-        text: rec.messageTh,
-        size: 'xs',
-        color: COLORS.muted,
-        wrap: true,
-        flex: 1,
+        type: 'box',
+        layout: 'vertical',
+        flex: 0,
+        backgroundColor: COLORS.mint,
+        cornerRadius: '999px',
+        paddingAll: '4px',
+        paddingStart: '10px',
+        paddingEnd: '10px',
+        contents: [{ type: 'text', text, size: 'xxs', weight: 'bold', color: COLORS.navy, align: 'center', flex: 0 }],
       },
     ],
   }
 }
 
-// Small filled pill used for the rate delta — mint/navy-text for an
-// increase, attention/white-text for a decrease. Both combinations
-// were checked for >=4.5:1 contrast (mint bg needs dark text; attention
-// bg needs light text — the two are NOT symmetric, hence the explicit
-// per-direction text color rather than a single "contrasting" rule).
-function rateChip(text: string, bg: string, fg: string): Record<string, unknown> {
-  return {
-    type: 'box',
-    layout: 'vertical',
-    // flex: 0 — LINE Flex defaults a component to flex:1 (share space
-    // evenly with siblings) whenever flex isn't set on ANY sibling at
-    // that level. Without this the chip and the previous-rate text
-    // next to it split the row's width instead of sizing to their own
-    // content, and the chip's own text gets truncated ("฿1,045" →
-    // "฿1,…"). Verified against the actual LINE Flex Message Simulator.
-    flex: 0,
-    backgroundColor: bg,
-    cornerRadius: '999px',
-    paddingAll: '4px',
-    paddingStart: '8px',
-    paddingEnd: '8px',
-    contents: [{ type: 'text', text, size: 'xs', weight: 'bold', color: fg, align: 'center', flex: 0 }],
-  }
-}
-
-// Per-room-type rate row for the "Today's recommended rates" block.
-//
-// Layout — room type (navy, flex1) | previous rate (muted) + chip
-// (bold, direction-colored), right-aligned as a unit:
-//   Deluxe2                                    ฿950   [ ฿1,045 ]  (mint)
-//   Deluxe6                                     ฿850   [ ฿799  ]  (attention)
-//   Suite                                              ฿1,200 · คงเดิม
-//
-// Direction encoding:
-//   - increase: previous rate muted + mint chip (navy text) with the
-//     suggested rate
-//   - decrease: previous rate muted + attention chip (white text) with
-//     the suggested rate
-//   - hold: single muted rate + "คงเดิม" — no chip (unfilled, matches
-//     "the considered, no change" signal being the marker itself)
+// Per-room-type rate row — room type (navy, bold, left) vs the
+// suggested rate (big bold navy, right) with a small muted subline
+// beneath: "เมื่อวาน ฿{prev}" for a real change, "คงเดิม" for a hold
+// (restating the identical previous rate there would be noise, not
+// information — the hold marker carries the "considered, no change"
+// signal instead).
 function perRoomRateRow(row: PerRoomTypeRate): Record<string, unknown> {
-  const currentStr = `฿${fmtThb(row.currentRateThb)}`
   const suggestedStr = `฿${fmtThb(row.suggestedRateThb)}`
+  const currentStr = `฿${fmtThb(row.currentRateThb)}`
 
-  const rightContents: Array<Record<string, unknown>> =
+  // Direction accent — a small colored ▲/▼ ahead of the "เมื่อวาน ฿X"
+  // subline. The hero rate itself stays flat navy (per spec); this is
+  // just enough of a signal to scan the sheet for what moved without
+  // reading every number. Reuses already contrast-checked text colors
+  // (verdictAbove / attention) rather than raw mint, which fails text
+  // contrast on white — see the COLORS block's note on that.
+  const sublineNode: Record<string, unknown> =
     row.direction === 'hold'
-      ? [{ type: 'text', text: `${currentStr} · คงเดิม`, size: 'xs', color: COLORS.muted, align: 'end' }]
-      : [
-          {
-            type: 'box',
-            layout: 'horizontal',
-            spacing: 'xs',
-            justifyContent: 'flex-end',
-            contents: [
-              { type: 'text', text: currentStr, size: 'xs', color: COLORS.muted, gravity: 'center', flex: 0 },
-              row.direction === 'increase'
-                ? rateChip(suggestedStr, COLORS.mint, COLORS.navy)
-                : rateChip(suggestedStr, COLORS.attention, COLORS.white),
-            ],
-          },
-        ]
+      ? { type: 'text', text: 'คงเดิม', size: 'xxs', color: COLORS.muted, align: 'end', margin: 'xs' }
+      : {
+          type: 'text',
+          contents: [
+            {
+              type: 'span',
+              text: row.direction === 'increase' ? '▲ ' : '▼ ',
+              color: row.direction === 'increase' ? COLORS.verdictAbove : COLORS.attention,
+              weight: 'bold',
+            },
+            { type: 'span', text: `เมื่อวาน ${currentStr}`, color: COLORS.muted },
+          ],
+          size: 'xxs',
+          align: 'end',
+          margin: 'xs',
+        }
 
   return {
     type: 'box',
@@ -373,9 +336,31 @@ function perRoomRateRow(row: PerRoomTypeRate): Record<string, unknown> {
         type: 'box',
         layout: 'vertical',
         flex: 0,
-        contents: rightContents,
+        contents: [
+          { type: 'text', text: suggestedStr, size: 'md', weight: 'bold', color: COLORS.navy, align: 'end' },
+          sublineNode,
+        ],
       },
     ],
+  }
+}
+
+// Competitor callout (block D) — the single most relevant signal, not
+// a list. Both directions name the real competitor and a real ฿ gap;
+// never a blended "คู่แข่งเฉลี่ย" figure.
+function competitorCalloutBox(c: NonNullable<HotelBriefData['competitorCallout']>): Record<string, unknown> {
+  const gapStr = `฿${fmtThb(c.gapThb)}`
+  const text =
+    c.direction === 'higher'
+      ? `🔴 ${c.name} ตั้งราคาสูงกว่าคุณ ${gapStr} — มีโอกาสปรับราคาขึ้นได้`
+      : `🔴 ${c.name} ตั้งราคาต่ำกว่าคุณ ${gapStr} — อาจต้องทบทวนราคาลง`
+  return {
+    type: 'box',
+    layout: 'vertical',
+    backgroundColor: COLORS.attentionTint,
+    cornerRadius: '12px',
+    paddingAll: '12px',
+    contents: [{ type: 'text', text, size: 'xs', color: COLORS.navy, wrap: true }],
   }
 }
 
@@ -386,33 +371,60 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
 
   const altText = `☀️ ${data.branchName} — เมื่อคืน Occupancy ${occPct}% ADR ${adrStr}`
 
-  const bodyContents: Array<Record<string, unknown>> = [
-    sectionCard('📊', 'ผลเมื่อคืน', 'Last night', [
-      {
-        type: 'box',
-        layout: 'horizontal',
-        // space-between (not a fixed spacing gap) — each tile is
-        // flex:0/content-sized, so this distributes the row's full
-        // width around them instead of forcing an equal-thirds column
-        // that made the longest label wrap mid-word.
-        justifyContent: 'space-between',
-        margin: 'sm',
-        contents: [
-          statTile('Occupancy', `${occPct}%`, occColor(occPct)),
-          statTile('ADR', adrStr, COLORS.navy),
-          statTile('RevPAR', revparStr, COLORS.navy),
-        ],
-      },
-    ]),
-  ]
+  const bodyContents: Array<Record<string, unknown>> = []
 
-  // "แนะนำราคาวันนี้ / Today's recommended rates" block — replaces
-  // the old single-blended-rate forecast strip. Renders one row per
-  // active room type (currentRate → suggestedRate, or "คงเดิม" for
-  // holds). Caps to MAX_PER_ROOM_ROWS in the bubble; sorting picks the
-  // top N by impact so the owner sees the most actionable moves first,
-  // then we restore the engine's natural (input) order for display so
-  // the room list reads consistently with /settings.
+  // Context pill — only when a real demand-calendar event overlaps,
+  // never a generic "expect a crowd" guess.
+  const eventNameTh = data.weekdayContext?.demandCalendarEventNameTh
+  if (eventNameTh) {
+    bodyContents.push(contextPill(eventNameTh))
+  }
+
+  // ── Results: occupancy verdict + ADR/RevPAR gloss ──
+  const resultsCardContents: Array<Record<string, unknown>> = [
+    {
+      type: 'text',
+      contents: [
+        { type: 'span', text: 'เมื่อวานนี้เข้าพัก ' },
+        { type: 'span', text: `${occPct}%`, color: occColor(occPct) },
+      ],
+      size: 'xl',
+      weight: 'bold',
+      color: COLORS.navy,
+      wrap: true,
+    },
+  ]
+  const wc = data.weekdayContext
+  if (wc && wc.weekdayNameTh != null && wc.weekdayOccupancyBaseline != null && wc.todayVsWeekdayNorm != null) {
+    const v = verdictFor(wc.todayVsWeekdayNorm)
+    resultsCardContents.push({
+      type: 'text',
+      contents: [
+        { type: 'span', text: `ปกติ${wc.weekdayNameTh} ~${wc.weekdayOccupancyBaseline}% · ` },
+        { type: 'span', text: `${v.emoji} ${v.text}`, color: v.color, weight: 'bold' },
+      ],
+      size: 'xs',
+      color: COLORS.muted,
+      wrap: true,
+      margin: 'xs',
+    })
+  }
+  resultsCardContents.push({
+    type: 'text',
+    text: `ราคาเฉลี่ย/คืน (ADR) ${adrStr} · รายได้ต่อห้อง (RevPAR) ${revparStr}`,
+    size: 'xs',
+    color: COLORS.muted,
+    wrap: true,
+    margin: 'sm',
+  })
+  bodyContents.push(sectionCard('📊', 'ผลเมื่อคืน', 'Last night', resultsCardContents))
+
+  // ── Per-room-type rate rows — replaces the old single-blended-rate
+  // forecast strip. Renders one row per active room type (currentRate
+  // → suggestedRate, or "คงเดิม" for holds). Caps to MAX_PER_ROOM_ROWS
+  // in the bubble; sorting picks the top N by impact so the owner sees
+  // the most actionable moves first, then we restore the engine's
+  // natural (input) order for display.
   //
   // The blended forecast strip stays as a fallback for properties
   // whose breakdown jsonb is empty (legacy single-room imports that
@@ -422,8 +434,6 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
   let renderedRates: PerRoomTypeRate[] = perRoomRates
   let overflowCount = 0
   if (perRoomRates.length > MAX_PER_ROOM_ROWS) {
-    // Pick the highest-impact rows; preserve their original order in
-    // the breakdown when rendering so the columns stack predictably.
     const byImpact = perRoomRates
       .map((r, i) => ({ r, i }))
       .sort((a, b) => {
@@ -450,9 +460,7 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
     }
     bodyContents.push(sectionCard('🏨', 'ราคาห้องพัก', 'Room rates', rateRowsContents))
   } else if (data.forecast) {
-    // Legacy single-room fallback — no breakdown jsonb at all. The
-    // blended forecast strip is the right shape here because there's
-    // only one rate to suggest.
+    // Legacy single-room fallback — no breakdown jsonb at all.
     const forecastOcc = Math.round(data.forecast.expectedOccupancy * 100)
     const suggested = `฿${fmtThb(data.forecast.suggestedRateThb)}`
     bodyContents.push(
@@ -470,49 +478,46 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
     )
   }
 
-  // "What to do today" insight — bilingual action line synthesised
-  // from the rate-mix in perRoomRates. Renders right under the rate
-  // sheet so the owner gets a one-glance "next step" prompt even when
-  // the threshold-gated signals below (low_occupancy_alert, weekend
-  // opportunity, competitor undercut) don't fire — which is the
-  // typical case for branches with <3 days of data.
-  if (data.dailyAction) {
-    bodyContents.push(
-      sectionCard('💡', 'วันนี้ควรทำอะไร', "Today's action", [
-        {
-          type: 'text',
-          text: data.dailyAction.messageTh,
-          size: 'xs',
-          color: COLORS.muted,
-          wrap: true,
-          margin: 'sm',
-        },
-      ]),
-    )
+  // ── Competitor callout (block D) — single most relevant signal,
+  // positioned right before Today's action. ──
+  const hasCompetitorCallout = !!(data.competitorCallout && data.competitorCallout.name)
+  if (hasCompetitorCallout) {
+    bodyContents.push(competitorCalloutBox(data.competitorCallout as NonNullable<HotelBriefData['competitorCallout']>))
   }
 
-  // Property-level recs (weekend signal, undercut, etc.) render below
-  // the cards as compact rows directly on the sand page — kept as a
-  // lightweight styled row (not promoted to its own card) per the
-  // restyle brief. Per-room rate moves from topRecs are dropped — the
-  // perRoomRates block above already displays them, and double-
-  // rendering wastes precious bubble height.
-  const propertyRecs = data.topRecs.filter((r) => !r.roomType)
-  for (const rec of propertyRecs.slice(0, 2)) {
-    bodyContents.push(recRow(rec))
+  // ── Today's action (block E) — soft mint callout. ──
+  if (data.dailyAction) {
+    bodyContents.push(
+      sectionCard(
+        '💡',
+        'วันนี้ควรทำอะไร',
+        "Today's action",
+        [
+          {
+            type: 'text',
+            text: data.dailyAction.messageTh,
+            size: 'xs',
+            color: COLORS.muted,
+            wrap: true,
+            margin: 'sm',
+          },
+        ],
+        COLORS.footerHighlight,
+      ),
+    )
   }
 
   // Personalized greeting card — inserted as the FIRST body card, once
   // everything else above has run so the highlight count reflects the
-  // same rate-mix/recs actually rendered below it. "Highlights" =
-  // non-hold rate rows (things that actually changed) + the property-
-  // level rec rows shown — both already computed above, no new data.
+  // same rate-mix/signals actually rendered below it. "Highlights" =
+  // non-hold rate rows (things that actually changed) + the competitor
+  // callout (1, if shown) — both already computed above, no new data.
   // perRoomRates empty → the legacy forecast-only fallback has no per-
   // room-type breakdown to count from at all, so there's no reliable
   // basis for a number — null, not a guess.
   const highlightCount =
     perRoomRates.length > 0
-      ? perRoomRates.filter((r) => r.direction !== 'hold').length + Math.min(propertyRecs.length, 2)
+      ? perRoomRates.filter((r) => r.direction !== 'hold').length + (hasCompetitorCallout ? 1 : 0)
       : null
   bodyContents.unshift(greetingCard(data.recipientFirstName, highlightCount))
 
@@ -522,17 +527,9 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
       type: 'bubble',
       size: 'kilo',
       styles: {
-        // Explicit backgroundColor on every block (header/body/footer)
-        // below — required so the bubble renders correctly in LINE
-        // dark mode instead of inheriting a transparent/dark default.
         footer: { separator: true, separatorColor: COLORS.separator },
       },
       header: {
-        // Single-column header — no avatar. An earlier version had a
-        // mint circle + compass emoji standing in for the brand mark;
-        // removed per request. layout stays 'vertical' since there's
-        // only one child now (the text column) — no horizontal split
-        // to align against.
         type: 'box',
         layout: 'vertical',
         backgroundColor: COLORS.navy,
@@ -540,15 +537,22 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
         contents: [
           {
             type: 'text',
-            text: data.branchName,
-            color: COLORS.white,
-            size: 'md',
-            weight: 'bold',
-            wrap: true,
+            text: 'สรุปราคาห้องเช้านี้',
+            color: COLORS.subtitleOnNavy,
+            size: 'xs',
           },
           {
             type: 'text',
-            text: `รายงานเช้า · ${thaiShortDate(data.yesterday.date)} · 07:00`,
+            text: data.branchName,
+            color: COLORS.white,
+            size: 'lg',
+            weight: 'bold',
+            wrap: true,
+            margin: 'xs',
+          },
+          {
+            type: 'text',
+            text: thaiHeaderDate(data.yesterday.date),
             color: COLORS.subtitleOnNavy,
             size: 'xs',
             margin: 'xs',
@@ -570,41 +574,16 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
         paddingAll: '12px',
         spacing: 'sm',
         contents: [
-          // Auto Push approve button. Renders whenever the caller
-          // supplies one — the caller is the gate (plan + adapter
-          // supports_write_back). Multi-room hotels CAN show this; the
-          // underlying approval row carries the full per-room rate set
-          // (room_rates jsonb) and one tap approves the whole set.
-          // Navy fill so the LINE-forced white button text stays
-          // >=4.5:1 (mint fill would fail contrast with white text).
-          ...(data.approveButton
-            ? [
-                {
-                  type: 'button',
-                  style: 'primary',
-                  color: COLORS.navy,
-                  height: 'sm',
-                  action: {
-                    type: 'uri',
-                    label: data.approveButton.label,
-                    uri: data.approveButton.url,
-                  },
-                } as Record<string, unknown>,
-              ]
-            : []),
-          // "Review in RateDesk" deep-link — always present when caller
-          // provides a URL. Sits below the approve button when both
-          // render, replaces it when the live button is gated off
-          // (e.g. plan paid for Auto Push but no live PMS adapter).
+          // "Review in RateDesk" deep-link — the only on-bubble action
+          // for now (no live Auto Push approve button — see
+          // HotelBriefData.dashboardUrl doc comment).
           //
           // style: 'primary' (not 'secondary') — a 'secondary' button's
           // own background chrome rendered dark in testing, making its
           // navy label text unreadable regardless of which text color
           // was set. 'primary' + color: navy fills the button with the
           // exact same navy as the header and forces white label text
-          // automatically — same proven pattern as the approve button
-          // above, guaranteed >=4.5:1 (white on navy is ~14:1) rather
-          // than depending on an unpredictable secondary-style chrome.
+          // automatically, guaranteed >=4.5:1 (white on navy is ~14:1).
           ...(data.dashboardUrl
             ? [
                 {
@@ -639,8 +618,7 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
             : []),
           // Mint-tinted brand strip. Populated ONLY with content that
           // already exists today (the "RateDesk by Aurasea" tagline) —
-          // no fabricated stat (e.g. "+N% from M approved recs") is
-          // invented here; that attribution is a separate future build.
+          // no fabricated stat is invented here.
           {
             type: 'box',
             layout: 'vertical',

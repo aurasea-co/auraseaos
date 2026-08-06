@@ -184,8 +184,8 @@ describe('daily action weekday narrative', () => {
       roomTypeBreakdown: [{ roomType: 'Deluxe', totalRooms: 10, occupiedRooms: Math.round(d.occupancyRate * 10), rateThb: 1200 }],
     })))
     const action = summarizePerRoomRates(rates, { inputs })!
-    expect(action.messageEn).toContain('Sat norm 88%, today 62% — 26pts below norm')
-    expect(action.messageTh).toContain('วันเสาร์ปกติ 88% วันนี้ 62% ต่ำกว่าปกติ 26pts')
+    expect(action.messageEn).toContain('Sat norm 88%, today 62% — 26% below norm')
+    expect(action.messageTh).toContain('วันเสาร์ปกติ 88% วันนี้ 62% ต่ำกว่าปกติ 26%')
   })
 
   it('falls back to the plain occ% wording with thin history', () => {

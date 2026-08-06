@@ -17,13 +17,13 @@ import { calculateGrossMarginStrict } from '@/lib/calculations/fnb'
 import { periodAvgMargin, type MarginInputRow } from '@/lib/calculations/marginAggregates'
 import { generateHotelRecommendation, generateFnbRecommendation } from '@/lib/notifications/recommendation'
 import {
-  generateDailyRecommendations,
+  detectCompetitorUndercutting,
+  detectOverpricing,
   forecastTomorrow,
   type DailyAction,
 } from '@/lib/recommendations/hotel/engine'
 import { loadPerRoomRecsForBranch, type PerBranchHotelRecs } from '@/lib/recommendations/hotel/per-branch-loader'
 import { canSeeRevenue } from '@/lib/auth/ratedesk-permissions'
-import { randomUUID } from 'crypto'
 
 async function handleMorningFlash(req: NextRequest) {
   // Allowed callers:
@@ -526,20 +526,30 @@ async function handleMorningFlash(req: NextRequest) {
           // the per-branch loop above and stashed on f.hotelRecs. Read
           // back from there — never recompute (single source of truth
           // shared with the email path).
-          const { perRoomRates, canShowApprove, showAwaitingPmsNote, recInputs } = f.hotelRecs
+          const { perRoomRates, showAwaitingPmsNote, weekdayContext, recInputs } = f.hotelRecs
           // dailyAction is `DailyAction | null` from the loader; the
           // brief interface uses `?: DailyAction` so coerce null →
           // undefined at the boundary.
           const dailyAction: DailyAction | undefined = f.hotelRecs.dailyAction ?? undefined
 
-          // Property-level signals (weekend, undercut, low-occupancy,
-          // etc.) + forecast. These remain LINE-only — the email
-          // template doesn't render the property-level rec strip.
-          // Engine functions are pure so calling them twice is cheap;
-          // we use the engine inputs already built by the loader.
-          const recs = generateDailyRecommendations(recInputs)
-            .filter((r) => r.urgency !== 'low')
-            .slice(0, 2)
+          // Single most-relevant competitor signal for the brief's
+          // competitor callout. Engine functions are pure so calling
+          // them here is cheap; we use the engine inputs already built
+          // by the loader. The two signals fire on opposite-sign gaps
+          // (undercut = they're pricier than us, overpricing = we're
+          // pricier than them) so at most one is normally non-empty —
+          // undercut wins the tie-break if that ever changes.
+          const undercut = detectCompetitorUndercutting(recInputs)[0] ?? null
+          const overpriced = detectOverpricing(recInputs)[0] ?? null
+          const competitorSignal = undercut ?? overpriced
+          const competitorCallout = competitorSignal
+            ? {
+                name: String((competitorSignal.supportingData as { topCompetitor?: string }).topCompetitor ?? ''),
+                gapThb: Number((competitorSignal.supportingData as { gapThb?: number }).gapThb ?? 0),
+                direction: (undercut ? 'higher' : 'lower') as 'higher' | 'lower',
+              }
+            : null
+
           const forecast = forecastTomorrow(recInputs)
 
           const yRevenue = Number((f.latest as { revenue: unknown }).revenue) || 0
@@ -549,90 +559,15 @@ async function handleMorningFlash(req: NextRequest) {
           const yOccupancy = yRoomsAvailable > 0 ? yRoomsSold / yRoomsAvailable : 0
 
           const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.auraseaos.com'
-
-          // Multi-room detection — derived from the perRoomRates the
-          // loader returned (each entry has roomType set, never 'all').
-          // Used here only to label the approve button (set-size > 1 →
-          // "อนุมัติทั้งหมด (N)"); the brief's body rendering doesn't
-          // depend on it.
-          const distinctRoomTypes = new Set(perRoomRates.map((r) => r.roomType))
-          const hasMultipleRoomTypes = distinctRoomTypes.size > 1
-
-          // Per-room rate approval rows. The new model is:
-          //   - ONE rate_approvals row per recommended room type
-          //   - room_type = the actual type (never 'all' or 'multi')
-          //   - All rows in the set share ONE token so the LINE tap
-          //     looks up and approves the whole set atomically
-          //   - suggested_rate_satang is the canonical field;
-          //     suggested_rate_thb is filled as a back-compat shadow
-          //     for the cron worker (which we update separately)
-          //
-          // The token is generated client-side via crypto.randomUUID()
-          // so we can stamp the SAME value across every insert in the
-          // set (Postgres' default would generate a fresh uuid per
-          // row, defeating the shared-token design).
-          let approveButton: { url: string; label: string } | undefined
-          if (canShowApprove && perRoomRates.length > 0) {
-            const adminSb = createServiceClient()
-
-            // Clear any prior unapproved set for this branch+date so
-            // re-running the cron same-day doesn't accumulate tokens.
-            // Approved rows stay (audit trail).
-            await adminSb
-              .from('rate_approvals')
-              .delete()
-              .eq('branch_id', f.branchId)
-              .eq('date', today)
-              .is('approved_at', null)
-
-            const sharedToken = randomUUID()
-            const expiresAtIso = new Date(Date.now() + 20 * 60 * 60 * 1000).toISOString()
-            const approvalRows = perRoomRates.map((r) => ({
-              branch_id: f.branchId,
-              token: sharedToken,
-              room_type: r.roomType,
-              date: today,
-              // Both columns populated during the satang phaseout:
-              // satang is the canonical field; thb stays for legacy
-              // readers (push-approved-rates cron) until they migrate.
-              suggested_rate_satang: r.suggestedRateSatang,
-              suggested_rate_thb: r.suggestedRateThb,
-              push_status: 'pending',
-              expires_at: expiresAtIso,
-            }))
-
-            const { error: createErr } = await adminSb
-              .from('rate_approvals')
-              .insert(approvalRows)
-
-            if (createErr) {
-              console.error(
-                `[morning-flash] failed to create approval set for branch=${f.branchId}:`,
-                createErr,
-              )
-            } else {
-              // Label rules:
-              //   - Set size 1 (genuine single-room property): show
-              //     the rate inline if it fits in LINE's 20-char cap.
-              //   - Set size > 1: "✓ อนุมัติทั้งหมด (N)" — a single
-              //     ฿X label across N rates would be misleading.
-              let label: string
-              if (perRoomRates.length === 1) {
-                const onlyThb = perRoomRates[0].suggestedRateThb
-                const rateStr = onlyThb.toLocaleString('th-TH')
-                const fullLabel = `✓ อนุมัติราคา ฿${rateStr}`
-                label = fullLabel.length <= 20 ? fullLabel : '✓ อนุมัติราคาคืนนี้'
-              } else {
-                label = `✓ อนุมัติทั้งหมด (${perRoomRates.length})`
-              }
-              approveButton = {
-                url: `${baseUrl}/api/line/approve-rate?token=${sharedToken}`,
-                label,
-              }
-            }
-          }
-
           const dashboardUrl = `${baseUrl}/ratedesk`
+
+          // Auto Push approve button is off for now — recipients only
+          // get the "ดูใน RateDesk" link (see buildHotelBriefFlexMessage
+          // call below, which never passes an approveButton). Not
+          // reading f.hotelRecs.canShowApprove here on purpose; it's
+          // still logged earlier in the per-branch loop for ops
+          // visibility, and rate_approvals rows are simply not created
+          // while the button is off.
 
           // Awaiting-PMS hint string — boolean gate already on
           // f.hotelRecs.showAwaitingPmsNote; flatten to the localized
@@ -651,14 +586,13 @@ async function handleMorningFlash(req: NextRequest) {
               revparThb: yAdrThb * yOccupancy,
               revenueThb: yRevenue,
             },
-            topRecs: recs,
+            weekdayContext,
             perRoomRates,
             dailyAction,
             forecast,
-            approveButton,
+            competitorCallout,
             dashboardUrl,
             awaitingPmsNote,
-            hasMultipleRoomTypes,
           })
 
           // Mixed-vertical recipients: Flex(hotel) + text(F&B) in one

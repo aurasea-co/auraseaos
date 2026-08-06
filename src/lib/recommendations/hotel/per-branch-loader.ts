@@ -40,10 +40,13 @@
 import {
   recommendPerRoomTypeRates,
   summarizePerRoomRates,
+  deriveDayContext,
   toRecommendationInputs,
   attachCompetitorRates,
   type PerRoomTypeRate,
   type DailyAction,
+  type DailyActionContext,
+  type DerivedDayContext,
   type RecommendationInput,
 } from './engine'
 import {
@@ -71,6 +74,12 @@ export interface PerBranchHotelRecs {
   /** Plain-language "today's action" line synthesised from the rate
    *  sheet. Null only when perRoomRates is empty. */
   dailyAction: DailyAction | null
+  /** Same underlying "what does this weekday normally do" computation
+   *  that feeds dailyAction's text, exposed as raw fields so a caller
+   *  can build its own layout (e.g. the LINE brief's occupancy-vs-norm
+   *  verdict line + context pill) instead of parsing dailyAction's
+   *  prose. Null when recInputs is empty. */
+  weekdayContext: DerivedDayContext | null
   /** Engine inputs used to feed the per-room recommendation engine.
    *  Passed back so the caller can run other engine functions
    *  (forecastTomorrow, generateDailyRecommendations) without
@@ -297,14 +306,18 @@ export async function loadPerRoomRecsForBranch(
     calendarEvents.filter((e) => e.startDate <= tomorrow && tomorrow <= e.endDate),
   )
 
-  const dailyAction = summarizePerRoomRates(perRoomRates, {
+  const dailyActionContext: DailyActionContext = {
     inputs: recInputs,
     targetOccupancy: params.targetOccupancy ?? null,
     demandCalendarEvent: primaryDemandEvent
       ? { nameTh: primaryDemandEvent.nameTh, nameEn: primaryDemandEvent.nameEn }
       : null,
     excludeDatesFromBaseline,
-  })
+  }
+  const dailyAction = summarizePerRoomRates(perRoomRates, dailyActionContext)
+  // Same context object → deriveDayContext recomputes nothing new, just
+  // exposes the numbers/strings dailyAction already baked into prose.
+  const weekdayContext = deriveDayContext(dailyActionContext)
 
   // ── 6. PMS adapter gating ──
   const { data: pmsConfigRow } = await supabase
@@ -322,6 +335,7 @@ export async function loadPerRoomRecsForBranch(
   return {
     perRoomRates,
     dailyAction,
+    weekdayContext,
     recInputs,
     canShowApprove: canShowLiveApproveButton({ plan: params.plan, pmsConfig }),
     showAwaitingPmsNote: shouldShowAwaitingPmsNote({ plan: params.plan, pmsConfig }),
