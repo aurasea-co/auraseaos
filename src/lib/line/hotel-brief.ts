@@ -458,13 +458,13 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
         margin: 'sm',
       })
     }
-    bodyContents.push(sectionCard('🏨', 'ราคาห้องพัก', 'Room rates', rateRowsContents))
+    bodyContents.push(sectionCard('🏨', 'ราคาห้องพักแนะนำวันนี้', 'Suggested Today Room rates', rateRowsContents))
   } else if (data.forecast) {
     // Legacy single-room fallback — no breakdown jsonb at all.
     const forecastOcc = Math.round(data.forecast.expectedOccupancy * 100)
     const suggested = `฿${fmtThb(data.forecast.suggestedRateThb)}`
     bodyContents.push(
-      sectionCard('🏨', 'ราคาห้องพัก', 'Room rates', [
+      sectionCard('🏨', 'ราคาห้องพักแนะนำวันนี้', 'Suggested Today Room rates', [
         {
           type: 'text',
           text: `คืนนี้คาด: Occupancy ${forecastOcc}% · แนะนำ ${suggested}`,
