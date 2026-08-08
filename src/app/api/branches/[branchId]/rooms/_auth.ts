@@ -20,6 +20,11 @@ export interface RoomsAuthOk {
   userId: string
   branch: { id: string; organization_id: string }
   role: RoomsRole
+  // The RLS-scoped client already authenticated as this caller. Reuse
+  // it for any further writes in this request (e.g. the total_rooms
+  // mirror) instead of standing up a service-role client — RLS must
+  // stay the enforcement boundary for anything a manager can trigger.
+  userClient: Awaited<ReturnType<typeof createClient>>
 }
 
 export interface RoomsAuthFail {
@@ -78,10 +83,10 @@ export async function authorizeRoomsMutation(branchId: string): Promise<RoomsAut
     .maybeSingle()
 
   if (orgMembership?.role === 'owner') {
-    return { ok: true, userId: user.id, branch, role: 'owner' }
+    return { ok: true, userId: user.id, branch, role: 'owner', userClient }
   }
   if (orgMembership?.role === 'manager') {
-    return { ok: true, userId: user.id, branch, role: 'manager' }
+    return { ok: true, userId: user.id, branch, role: 'manager', userClient }
   }
 
   const { data: branchMembership } = await ub
@@ -94,7 +99,7 @@ export async function authorizeRoomsMutation(branchId: string): Promise<RoomsAut
     branchMembership?.role === 'manager' ||
     branchMembership?.role === 'branch_manager'
   ) {
-    return { ok: true, userId: user.id, branch, role: 'manager' }
+    return { ok: true, userId: user.id, branch, role: 'manager', userClient }
   }
 
   return {

@@ -151,6 +151,32 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ branchId: 
     }
   }
 
+  // Mirror branches.total_rooms from the roster sum we just computed.
+  // Reuses newRoomsAvailable — no second query. Goes through the RLS
+  // user client (not the service client above) so this is subject to
+  // the same owner/manager branch-update policy as everything else a
+  // manager does; skip when the roster would sum to 0 (e.g. a brand
+  // new, still-empty config) rather than writing a misleading 0.
+  if (newRoomsAvailable > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rlsDb = auth.userClient as any
+    const { data: mirrorRows, error: mirrorErr } = await rlsDb
+      .from('branches')
+      .update({ total_rooms: newRoomsAvailable })
+      .eq('id', branchId)
+      .select('id')
+    if (mirrorErr) {
+      console.error('[rooms POST] total_rooms mirror failed', mirrorErr)
+    } else if (!mirrorRows || mirrorRows.length === 0) {
+      console.error(
+        '[rooms POST] total_rooms mirror matched 0 rows — RLS may be blocking role',
+        auth.role,
+        'on branch',
+        branchId,
+      )
+    }
+  }
+
   await db.from('audit_log').insert({
     actor_user_id: auth.userId,
     organization_id: auth.branch.organization_id,

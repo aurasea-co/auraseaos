@@ -154,6 +154,30 @@ export async function PATCH(
     )
   }
 
+  // Mirror branches.total_rooms — same roster sum just written above,
+  // via the RLS user client (see rooms/route.ts POST for rationale).
+  // Only fires when totalRooms actually changed (updatePayload carries
+  // rooms_available in that case); skip when the sum would be 0.
+  if (updatePayload.rooms_available !== undefined && (updatePayload.rooms_available as number) > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rlsDb = auth.userClient as any
+    const { data: mirrorRows, error: mirrorErr } = await rlsDb
+      .from('branches')
+      .update({ total_rooms: updatePayload.rooms_available })
+      .eq('id', branchId)
+      .select('id')
+    if (mirrorErr) {
+      console.error('[rooms PATCH] total_rooms mirror failed', mirrorErr)
+    } else if (!mirrorRows || mirrorRows.length === 0) {
+      console.error(
+        '[rooms PATCH] total_rooms mirror matched 0 rows — RLS may be blocking role',
+        auth.role,
+        'on branch',
+        branchId,
+      )
+    }
+  }
+
   await db.from('audit_log').insert({
     actor_user_id: auth.userId,
     organization_id: auth.branch.organization_id,
@@ -239,6 +263,33 @@ export async function DELETE(
       { success: false, affectedDays: 0, deletedDays: 0, totalTouched: 0, error: updateErr.message, code: 'update_failed' },
       { status: 500 },
     )
+  }
+
+  // Mirror branches.total_rooms — same roster sum just written above,
+  // via the RLS user client (see rooms/route.ts POST for rationale).
+  // Deliberately skipped when the last room type was just removed
+  // (newRoomsAvailable === 0): total_rooms is left at its prior value
+  // rather than zeroed, since 0 would break the Entry page's max
+  // and read as "this hotel has no rooms" everywhere else that reads
+  // it, for what's normally a transient mid-edit state.
+  if (newRoomsAvailable > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rlsDb = auth.userClient as any
+    const { data: mirrorRows, error: mirrorErr } = await rlsDb
+      .from('branches')
+      .update({ total_rooms: newRoomsAvailable })
+      .eq('id', branchId)
+      .select('id')
+    if (mirrorErr) {
+      console.error('[rooms DELETE] total_rooms mirror failed', mirrorErr)
+    } else if (!mirrorRows || mirrorRows.length === 0) {
+      console.error(
+        '[rooms DELETE] total_rooms mirror matched 0 rows — RLS may be blocking role',
+        auth.role,
+        'on branch',
+        branchId,
+      )
+    }
   }
 
   await db.from('audit_log').insert({
