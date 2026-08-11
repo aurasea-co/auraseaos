@@ -36,6 +36,16 @@ export interface HotelBriefData {
    *  omitted when the recipient has none on file — see greetingText()
    *  for the fallback. */
   recipientFirstName?: string | null
+  /** Delivery date (today, Bangkok wall time, YYYY-MM-DD) — drives the
+   *  header. This brief is a this-morning summary: the header shows
+   *  "today", and the "เมื่อวานนี้" (last night) occupancy line below it
+   *  reports yesterday.date's data. Keeping these as two separate
+   *  fields (rather than deriving the header from yesterday.date) is
+   *  what keeps the header, the "last night" label, and the figures
+   *  mutually consistent — the previous header showed the reported
+   *  row's own date, which read as "today" while actually being
+   *  yesterday. */
+  sendDate: string
   /** Yesterday's KPIs in THB. */
   yesterday: {
     /** YYYY-MM-DD in Bangkok wall time. */
@@ -552,7 +562,7 @@ export function buildHotelBriefFlexMessage(data: HotelBriefData): FlexMessageEnv
           },
           {
             type: 'text',
-            text: thaiHeaderDate(data.yesterday.date),
+            text: thaiHeaderDate(data.sendDate),
             color: COLORS.subtitleOnNavy,
             size: 'xs',
             margin: 'xs',

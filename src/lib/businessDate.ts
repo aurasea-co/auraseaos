@@ -60,6 +60,17 @@ export function getTodayBangkok(): string {
 }
 
 /**
+ * Get yesterday's date in Bangkok timezone as YYYY-MM-DD. Used where a
+ * caller needs "last night" as an explicit target date (e.g. the morning
+ * brief), rather than trusting whichever row happens to be newest.
+ */
+export function getYesterdayBangkok(): string {
+  const yesterday = nowBangkok()
+  yesterday.setDate(yesterday.getDate() - 1)
+  return toDateStr(yesterday)
+}
+
+/**
  * Normalize any date/timestamp string to its Bangkok YYYY-MM-DD form.
  *
  * Handles three common shapes:

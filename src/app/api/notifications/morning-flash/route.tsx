@@ -12,7 +12,7 @@ import {
   attachItemSales,
   type FnbDailySaleRow,
 } from '@/lib/recommendations/fnb/engine'
-import { getTodayBangkok } from '@/lib/businessDate'
+import { getTodayBangkok, getYesterdayBangkok } from '@/lib/businessDate'
 import { calculateGrossMarginStrict } from '@/lib/calculations/fnb'
 import { periodAvgMargin, type MarginInputRow } from '@/lib/calculations/marginAggregates'
 import { generateHotelRecommendation, generateFnbRecommendation } from '@/lib/notifications/recommendation'
@@ -39,6 +39,11 @@ async function handleMorningFlash(req: NextRequest) {
 
   const supabase = createServiceClient()
   const today = getTodayBangkok()
+  // The brief is a this-morning summary: the header shows `today`, and
+  // "last night" always means the row for exactly today-1 — never
+  // whichever row happens to be newest. A late/skipped entry must not
+  // silently surface an older night as if it were last night's.
+  const targetNightDate = getYesterdayBangkok()
 
   // If triggered from entry form, send for specific org
   let body: { branchId?: string; organizationId?: string } = {}
@@ -261,8 +266,22 @@ async function handleMorningFlash(req: NextRequest) {
         .order('metric_date', { ascending: false })
         .limit(metricsLimit)
 
-      const latest = metrics?.[0]
-      if (!latest) continue
+      // "Last night" is an explicit target date (today-1 in Bangkok),
+      // never just "whichever row is newest" — the old behavior could
+      // silently present a stale night as last night's if an entry was
+      // filed late or skipped. metrics is already fetched newest-first
+      // over a wide window (63d hotel / 30d F&B) so the same fetch
+      // covers both this lookup and the recommendation-engine history
+      // below; no extra query needed. A miss here means the branch's
+      // entry for last night hasn't been filed yet — skip the branch
+      // entirely rather than fall back to older data. (The dedicated
+      // missed-entry cron already nudges owners about unfiled entries,
+      // so this brief doesn't need its own "no entry yet" state.)
+      const latest = (metrics ?? []).find((m) => String(m.metric_date) === targetNightDate)
+      if (!latest) {
+        console.log(`[morning-flash] no entry for branch=${branch.id} metric_date=${targetNightDate} — skipping branch`)
+        continue
+      }
 
       const avgTicket = Number(latest.avg_ticket) || 0
       const revenueNum = Number(latest.revenue) || 0
@@ -579,6 +598,7 @@ async function handleMorningFlash(req: NextRequest) {
           const flex = buildHotelBriefFlexMessage({
             branchName: f.branchName,
             recipientFirstName,
+            sendDate: today,
             yesterday: {
               date: String((f.latest as { metric_date: string }).metric_date),
               occupancyRate: yOccupancy,

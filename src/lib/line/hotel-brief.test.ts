@@ -30,6 +30,10 @@ function makePerRoomRate(partial: Partial<PerRoomTypeRate> = {}): PerRoomTypeRat
 
 const BASE: HotelBriefData = {
   branchName: 'Crystal Resort',
+  // Deliberately a different calendar day from yesterday.date below —
+  // this is the this-morning summary framing under test: the header
+  // shows the send date, "เมื่อวานนี้" reports yesterday.date's data.
+  sendDate: '2026-05-30',
   yesterday: {
     date: '2026-05-29',
     occupancyRate: 0.42,
@@ -128,9 +132,11 @@ describe('buildHotelBriefFlexMessage', () => {
     expect(header.contents[1].text).toBe('Crystal Resort')
     expect(header.contents[1].weight).toBe('bold')
     expect(header.contents[1].color).toBe('#FFFFFF')
-    // "29 พ.ค." — the Thai abbreviation for May, prefixed with the
-    // weekday. 2026-05-29 is a Friday.
-    expect(header.contents[2].text).toMatch(/^ศุกร์ 29 พ\.?ค/)
+    // Header tracks sendDate (2026-05-30, a Saturday) — the delivery
+    // date — NOT yesterday.date (2026-05-29). Proves the header no
+    // longer reads as "today" while actually showing the reported
+    // night's own date.
+    expect(header.contents[2].text).toMatch(/^เสาร์ 30 พ\.?ค/)
   })
 
   // ── Block B: greeting card ───────────────────────────────────────────
