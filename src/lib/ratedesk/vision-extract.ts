@@ -18,6 +18,7 @@
 // less irrelevant page chrome for the model to sift through.
 
 import Anthropic from '@anthropic-ai/sdk'
+import { getAnthropicClient } from '@/lib/ai/anthropic-client'
 import { RATE_CHANNELS, isRateChannel, type RateChannel } from '@/lib/types/competitor-rates'
 
 export const VISION_MODEL = 'claude-haiku-4-5-20251001'
@@ -193,19 +194,6 @@ export function parseExtractionResponse(raw: unknown): ExtractedCompetitorRow[] 
   return out
 }
 
-let anthropicClient: Anthropic | null = null
-function getClient(): Anthropic {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
-    throw new Error(
-      '[vision-extract] ANTHROPIC_API_KEY is not set — screenshot extraction cannot run. ' +
-        'Add it to .env.local (and your deployment env) to enable this feature.',
-    )
-  }
-  if (!anthropicClient) anthropicClient = new Anthropic({ apiKey })
-  return anthropicClient
-}
-
 /** The actual network call. Throws (doesn't swallow) on a missing API
  *  key or an API error — the caller's route is responsible for turning
  *  that into a clean HTTP error response, never a silently-empty
@@ -216,7 +204,7 @@ export async function extractCompetitorRatesFromImage(
   if (!isRateChannel(input.channel)) {
     throw new Error(`[vision-extract] invalid channel "${input.channel}" — must be one of ${RATE_CHANNELS.join(', ')}`)
   }
-  const client = getClient()
+  const client = getAnthropicClient()
   const request = buildExtractionRequest(input)
   const response = await client.messages.create(request)
   const toolUse = response.content.find(

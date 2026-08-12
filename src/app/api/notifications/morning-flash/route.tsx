@@ -22,7 +22,7 @@ import {
   forecastTomorrow,
   type DailyAction,
 } from '@/lib/recommendations/hotel/engine'
-import { loadPerRoomRecsForBranch, type PerBranchHotelRecs } from '@/lib/recommendations/hotel/per-branch-loader'
+import { loadPerRoomRecsForBranch, type PerBranchHotelRecs, type ActionCache } from '@/lib/recommendations/hotel/per-branch-loader'
 import { canSeeRevenue } from '@/lib/auth/ratedesk-permissions'
 
 async function handleMorningFlash(req: NextRequest) {
@@ -44,6 +44,10 @@ async function handleMorningFlash(req: NextRequest) {
   // whichever row happens to be newest. A late/skipped entry must not
   // silently surface an older night as if it were last night's.
   const targetNightDate = getYesterdayBangkok()
+  // Shared across every recipient this run so a branch with an owner +
+  // N managers resolves its LLM-or-template "Today's action" line once,
+  // not once per recipient — see ActionCache's doc comment.
+  const todaysActionCache: ActionCache = new Map()
 
   // If triggered from entry form, send for specific org
   let body: { branchId?: string; organizationId?: string } = {}
@@ -384,6 +388,7 @@ async function handleMorningFlash(req: NextRequest) {
       if (isHotel) {
         hotelRecs = await loadPerRoomRecsForBranch(supabase, {
           branchId: branch.id,
+          branchName: branch.name,
           organizationId: setting.organization_id,
           branchProvince: branch.province,
           today,
@@ -391,6 +396,7 @@ async function handleMorningFlash(req: NextRequest) {
           metrics: (metrics || []) as Record<string, unknown>[],
           plan: org.plan as string | null,
           targetOccupancy: targets?.occupancy_target != null ? Number(targets.occupancy_target) : null,
+          actionCache: todaysActionCache,
         })
         console.log(
           `[morning-flash] loaded ${hotelRecs.perRoomRates.length} per-room rec(s) for branch=${branch.id}` +

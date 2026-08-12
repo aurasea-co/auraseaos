@@ -30,7 +30,13 @@
 //            weekend/bridge day biases toward hold/raise instead of a
 //            cut. The tomorrow-only event used for the action line's
 //            informational note is unchanged.
-//   8. Run summarizePerRoomRates → dailyAction.
+//   8. Run summarizePerRoomRates → the deterministic template fallback,
+//      then resolveTodaysAction() tries to upgrade it to an LLM-
+//      generated situational line (best-effort — see llm-action.ts),
+//      reusing a cached/persisted result when this branch's action for
+//      tonight was already resolved by an earlier recipient this
+//      morning. dailyAction is always non-null when perRoomRates is
+//      non-empty — the template fallback guarantees that.
 //   9. Read branch_pms_config + org plan → computed gating flags
 //      (canShowApprove, showAwaitingPmsNote).
 //
@@ -43,6 +49,8 @@ import {
   deriveDayContext,
   toRecommendationInputs,
   attachCompetitorRates,
+  detectCompetitorUndercutting,
+  detectOverpricing,
   type PerRoomTypeRate,
   type DailyAction,
   type DailyActionContext,
@@ -54,6 +62,8 @@ import {
   toPerRoomTypeRate,
   type BranchRateRecommendationRow,
 } from './persistence'
+import { readDailyAction, writeDailyAction } from './action-persistence'
+import { generateTodaysAction, type TodaysActionFacts } from './llm-action'
 import { deriveRoomTypesFromBreakdowns } from './room-types'
 import {
   canShowLiveApproveButton,
@@ -94,8 +104,21 @@ export interface PerBranchHotelRecs {
   showAwaitingPmsNote: boolean
 }
 
+/** In-memory, single-cron-run cache so a branch with N recipients
+ *  (owner + assigned managers) resolves "today's action" ONCE, not N
+ *  times — the caller (route.tsx) creates one Map per handleMorningFlash
+ *  invocation and passes the same instance into every loadPerRoomRecsForBranch
+ *  call. Keyed by branch_id only: params.today is constant for the whole
+ *  run, and a branch's rate/occupancy facts for a given night don't
+ *  change between recipients, so there's nothing recipient-specific to
+ *  key on. */
+export type ActionCache = Map<string, DailyAction | null>
+
 interface LoaderParams {
   branchId: string
+  /** Display name fed to the LLM prompt (never persisted elsewhere on
+   *  this row) — purely for phrasing, not an identifier. */
+  branchName: string
   /** Needed to resolve org-wide demand_calendar rows for this branch
    *  (see getDemandCalendarForBranch) — branches.organization_id, not
    *  a separate lookup. */
@@ -121,6 +144,10 @@ interface LoaderParams {
    *  action-line builder normalises). Drives the "X pts below target"
    *  framing in the daily action. Optional. */
   targetOccupancy?: number | null
+  /** See ActionCache. Optional — omitting it just means every call
+   *  resolves independently (still correct, just loses the
+   *  once-per-branch-per-morning dedup across recipients). */
+  actionCache?: ActionCache
 }
 
 export async function loadPerRoomRecsForBranch(
@@ -314,10 +341,26 @@ export async function loadPerRoomRecsForBranch(
       : null,
     excludeDatesFromBaseline,
   }
-  const dailyAction = summarizePerRoomRates(perRoomRates, dailyActionContext)
+  // Deterministic fallback — computed unconditionally, before any LLM
+  // attempt. The "brief must always send" hard requirement means this
+  // has to exist and be ready BEFORE we try the LLM, not be synthesised
+  // only after a failure.
+  const templateAction = summarizePerRoomRates(perRoomRates, dailyActionContext)
   // Same context object → deriveDayContext recomputes nothing new, just
   // exposes the numbers/strings dailyAction already baked into prose.
   const weekdayContext = deriveDayContext(dailyActionContext)
+
+  const dailyAction = await resolveTodaysAction(supabase, {
+    branchId: params.branchId,
+    branchName: params.branchName,
+    metricDate: params.today,
+    templateAction,
+    weekdayContext,
+    perRoomRates,
+    recInputs,
+    demandCalendarEvent: dailyActionContext.demandCalendarEvent ?? null,
+    cache: params.actionCache,
+  })
 
   // ── 6. PMS adapter gating ──
   const { data: pmsConfigRow } = await supabase
@@ -340,6 +383,139 @@ export async function loadPerRoomRecsForBranch(
     canShowApprove: canShowLiveApproveButton({ plan: params.plan, pmsConfig }),
     showAwaitingPmsNote: shouldShowAwaitingPmsNote({ plan: params.plan, pmsConfig }),
   }
+}
+
+// Mirrors the morning-flash route's own block-D competitor callout logic
+// (single most relevant signal — undercut wins the tie-break) so the
+// fact fed to the LLM never disagrees with what the Flex message
+// actually shows next to it. Both read the same recInputs instance, so
+// there's no risk of the two computations landing on different data.
+function pickCompetitorCallout(
+  recInputs: ReadonlyArray<RecommendationInput>,
+): TodaysActionFacts['competitorCallout'] {
+  const undercut = detectCompetitorUndercutting(recInputs as RecommendationInput[])[0] ?? null
+  const overpriced = detectOverpricing(recInputs as RecommendationInput[])[0] ?? null
+  const signal = undercut ?? overpriced
+  if (!signal) return null
+  const supportingData = signal.supportingData as { topCompetitor?: string; gapThb?: number }
+  const name = supportingData.topCompetitor
+  if (!name) return null
+  return {
+    name,
+    gapThb: Math.abs(Number(supportingData.gapThb ?? 0)),
+    direction: undercut ? 'higher' : 'lower',
+  }
+}
+
+/** Resolves "today's action" for one branch/night: reuses a cached or
+ *  previously-persisted result when available, otherwise attempts the
+ *  LLM generator with the deterministic template ready as the fallback,
+ *  then caches + persists whichever line was actually used. Never
+ *  throws, never returns null when templateAction is non-null — the
+ *  worst case is "the template line, because the LLM path was skipped
+ *  or failed", never "no action line at all" or "an unvalidated one". */
+export async function resolveTodaysAction(
+  supabase: SupabaseLike,
+  params: {
+    branchId: string
+    branchName: string
+    metricDate: string
+    templateAction: DailyAction | null
+    weekdayContext: DerivedDayContext | null
+    perRoomRates: PerRoomTypeRate[]
+    recInputs: RecommendationInput[]
+    demandCalendarEvent: { nameTh: string; nameEn: string } | null
+    cache?: ActionCache
+  },
+): Promise<DailyAction | null> {
+  const cacheKey = params.branchId
+
+  if (params.cache?.has(cacheKey)) {
+    return params.cache.get(cacheKey) ?? null
+  }
+
+  // Cross-invocation reuse: this branch's action for tonight may already
+  // have been resolved and written by an earlier recipient in THIS same
+  // cron tick (the in-memory cache only covers calls within one
+  // recipient loop iteration of the SAME process — this covers the
+  // actual "N recipients" case) or a prior retry of today's run. A
+  // branch's facts for a given night are fixed, so reusing here is
+  // always correct, never stale.
+  const persisted = await readDailyAction(supabase, params.branchId, params.metricDate)
+  if (persisted) {
+    params.cache?.set(cacheKey, persisted.dailyAction)
+    return persisted.dailyAction
+  }
+
+  // Nothing to say — mirrors summarizePerRoomRates's own contract
+  // (empty rate set → null). Nothing to persist either.
+  if (!params.templateAction || params.perRoomRates.length === 0) {
+    params.cache?.set(cacheKey, null)
+    return null
+  }
+
+  let resolved: DailyAction = params.templateAction
+  let source: 'llm' | 'template' = 'template'
+  let model: string | null = null
+  let latencyMs: number | null = null
+
+  // Only attempt the LLM when there's enough history for deriveDayContext
+  // to have produced real signals (occupancy, weekday norm, trend) — with
+  // no context the facts object would be nearly empty and the model
+  // would have little more to work with than the template already
+  // encodes, so it's not worth the latency/cost.
+  if (params.weekdayContext) {
+    const wc = params.weekdayContext
+    const latestInput = params.recInputs[params.recInputs.length - 1]
+    const adrThb = Math.round(latestInput?.adrThb ?? 0)
+    const revparThb = Math.round(adrThb * (wc.occPct / 100))
+
+    const facts: TodaysActionFacts = {
+      branchName: params.branchName,
+      occupancyPct: wc.occPct,
+      weekdayNorm:
+        wc.weekdayOccupancyBaseline != null && wc.todayVsWeekdayNorm != null && wc.weekdayNameTh != null
+          ? {
+              weekdayNameTh: wc.weekdayNameTh,
+              baselinePct: wc.weekdayOccupancyBaseline,
+              todayVsNormPct: wc.todayVsWeekdayNorm,
+            }
+          : null,
+      trend: wc.trend,
+      isWeekend: wc.isWeekend,
+      belowTargetPct: wc.belowTargetPct,
+      adrThb,
+      revparThb,
+      perRoomRates: params.perRoomRates.map((r) => ({
+        roomType: r.roomType,
+        currentRateThb: r.currentRateThb,
+        suggestedRateThb: r.suggestedRateThb,
+        direction: r.direction,
+      })),
+      competitorCallout: pickCompetitorCallout(params.recInputs),
+      demandCalendarEvent: params.demandCalendarEvent,
+    }
+
+    const llmResult = await generateTodaysAction(facts)
+    if (llmResult) {
+      resolved = llmResult.action
+      source = 'llm'
+      model = llmResult.model
+      latencyMs = llmResult.latencyMs
+    }
+  }
+
+  params.cache?.set(cacheKey, resolved)
+  await writeDailyAction(supabase, {
+    branchId: params.branchId,
+    metricDate: params.metricDate,
+    action: resolved,
+    source,
+    model,
+    latencyMs,
+  })
+
+  return resolved
 }
 
 function numOrNull(v: unknown): number | null {
