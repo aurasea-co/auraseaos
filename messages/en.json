@@ -560,7 +560,8 @@
     "rejectUnreadable": "Couldn't open that photo. Try taking it again.",
     "uploadFailed": "Upload failed. Please try again.",
     "retry": "Try again",
-    "hintGoodLight": "Capture the whole page with the text in focus — low light is fine."
+    "hintGoodLight": "Capture the whole page with the text in focus — low light is fine.",
+    "serviceUnavailable": "Something's wrong on our side — not your photos. Please try again shortly."
   },
   "menudesk": {
     "title": "MenuDesk",

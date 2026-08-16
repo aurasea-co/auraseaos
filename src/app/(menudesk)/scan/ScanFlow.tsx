@@ -139,11 +139,19 @@ export function ScanFlow() {
       // The two failures worth telling apart: a project that has not switched
       // anonymous sign-in on (nothing the owner can do, and it fails for
       // everyone) versus a flaky upload (worth another tap).
-      setError(
-        cause instanceof AnonymousAuthDisabledError
-          ? cause.message
-          : t('uploadFailed'),
-      )
+      //
+      // Both get a message written for a restaurant owner. The technical text
+      // goes to the console, never to the screen — AnonymousAuthDisabledError's
+      // message is an instruction to open the Supabase dashboard, and putting
+      // that in front of someone standing in their kitchen with a menu is the
+      // single worst thing this screen could say.
+      if (cause instanceof AnonymousAuthDisabledError) {
+        console.error(cause.message)
+        setError(t('serviceUnavailable'))
+      } else {
+        console.error('[menudesk] scan upload failed', cause)
+        setError(t('uploadFailed'))
+      }
       setStage('review')
     }
   }, [accepted, router, t])
