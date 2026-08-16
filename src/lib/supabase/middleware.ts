@@ -29,22 +29,15 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  // MenuDesk's scan funnel (Bible §04) is anonymous by design — no login, no
-  // fields, because every field added there loses users. Its routes skip all
-  // the checks below: the session gate, the suspension lookup, and the
-  // superadmin guard each assume a member of an organization, which a stranger
-  // photographing their menu is not.
-  const scanPaths = ['/scan', '/r/']
-  if (scanPaths.some((path) => request.nextUrl.pathname.startsWith(path))) {
-    return supabaseResponse
-  }
-
-  // Those scans sign in via supabase.auth.signInAnonymously(), so RLS can scope
-  // rows by auth.uid() instead of reaching for a service-role client
-  // (migration 043). The cost is a real auth.users row with no memberships,
-  // which would otherwise satisfy the `!user` gate below and land an anonymous
-  // visitor in the app shell with an empty branch list. Outside the funnel, an
-  // anonymous session counts as logged out.
+  // An anonymous session counts as logged out here.
+  //
+  // MenuDesk's scan funnel moved to its own app (platform/menudesk) in Aug
+  // 2026, so this repo no longer serves /scan or /r/ and the route exemptions
+  // that used to sit here are gone with them. This line stays because it is
+  // not about those routes: anonymous sign-in creates a real auth.users row
+  // with no organization membership, and without this check such a session
+  // would satisfy the `!user` gate below and land in the app shell with an
+  // empty branch list.
   const appUser = user?.is_anonymous ? null : user
 
   // Public routes that don't require auth
