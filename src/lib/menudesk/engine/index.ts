@@ -3,14 +3,17 @@
 // Import from '@/lib/menudesk/engine' rather than reaching into a file — the
 // barrel is what lets the internals move without touching call sites.
 //
-// The two-pass pipeline itself (analyzeMenu) arrives in W2 and will be exported
-// from here; W0 ships the value types, the ports, and the traffic-light maths
-// it will be built on.
+// analyzeMenu is the whole surface most callers need: hand it pages and a set
+// of ports, get dishes, uncosted dishes, and unreadable pages back.
+
+export { analyzeMenu } from './analyze'
+export type { AnalyzeMenuOptions } from './analyze'
 
 export type {
   AnalysisBasis,
   AnalyzeMenuInput,
   AnalyzeMenuResult,
+  AnalyzeMenuStats,
   CommonDishMatch,
   Confidence,
   DishAnalysis,
@@ -24,13 +27,18 @@ export type {
   RecipeSource,
   TrafficLight,
   UncostedDish,
+  UnreadablePage,
 } from './types'
 
 export type {
   CountryDataProvider,
   EnginePorts,
+  IngredientVocabularyEntry,
+  InferredRecipe,
   MenuVisionPort,
+  ModelCallUsage,
   RecipeInferencePort,
+  RecipeInferenceRequest,
   UsageRecorder,
 } from './ports'
 

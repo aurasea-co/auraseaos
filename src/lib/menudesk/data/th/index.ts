@@ -12,6 +12,7 @@ import type {
   CommonDishMatch,
   CountryDataProvider,
   IngredientPrice,
+  IngredientVocabularyEntry,
 } from '@/lib/menudesk/engine'
 import { TH_COMMON_DISHES, TH_INGREDIENT_PRICES } from './seed'
 
@@ -110,5 +111,9 @@ export const thailandDataProvider: CountryDataProvider = {
 
   async getIngredientPrice(ingredientKey: string): Promise<IngredientPrice | null> {
     return PRICE_INDEX.get(ingredientKey) ?? null
+  },
+
+  async listIngredients(): Promise<IngredientVocabularyEntry[]> {
+    return TH_INGREDIENT_PRICES.map(({ ingredientKey, unit }) => ({ ingredientKey, unit }))
   },
 }

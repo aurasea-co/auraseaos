@@ -149,17 +149,59 @@ if (files.length === 0) {
   process.exit(1)
 }
 
+// ── Second boundary: keep the model SDK out of the browser bundle ──────────
+//
+// capture/ runs on the visitor's device, and it needs one thing from ai/ —
+// the model's maximum image edge, so the downscaler targets it. Importing the
+// ai BARREL to get it also pulls in the port implementations, hence the
+// Anthropic SDK, hence node:path, and `next build` dies with an
+// UnhandledSchemeError. Typecheck, lint, and the unit tests all pass while
+// that is broken, so only the production build catches it — which is a slow
+// and expensive place to find out. ai/models.ts is plain constants and is the
+// import that belongs here.
+
+const CAPTURE_DIR = join(REPO_ROOT, 'src/lib/menudesk/capture')
+
+const BROWSER_FORBIDDEN = [
+  {
+    test: (s) => s === '@/lib/menudesk/ai' || s === '../ai' || s === '../ai/index',
+    why: "import '@/lib/menudesk/ai/models' instead — the barrel drags the Anthropic SDK into the browser bundle",
+  },
+  {
+    test: (s) => s.startsWith('@anthropic-ai/') || s.startsWith('@/lib/ai'),
+    why: 'model calls happen server-side; capture/ only screens the photo before upload',
+  },
+]
+
+const captureFiles = walk(CAPTURE_DIR)
+
+for (const file of captureFiles) {
+  const rel = relative(REPO_ROOT, file)
+  const lines = readFileSync(file, 'utf8').split('\n')
+
+  for (const [i, line] of lines.entries()) {
+    SPECIFIER_RE.lastIndex = 0
+    let match
+    while ((match = SPECIFIER_RE.exec(line)) !== null) {
+      const rule = BROWSER_FORBIDDEN.find((r) => r.test(match[1]))
+      if (rule) violations.push(`${rel}:${i + 1}  imports '${match[1]}' — ${rule.why}`)
+    }
+  }
+}
+
 if (violations.length > 0) {
-  console.error(`✗ MenuDesk engine boundary violated (${violations.length}):\n`)
+  console.error(`✗ MenuDesk boundary violated (${violations.length}):\n`)
   for (const v of violations) console.error(`  ${v}`)
   console.error(
     '\nThe engine is country-neutral by contract. Depend on a port in\n' +
-      'src/lib/menudesk/engine/ports.ts and inject the implementation instead.\n',
+      'src/lib/menudesk/engine/ports.ts and inject the implementation instead.\n' +
+      'capture/ additionally runs in the browser and must not reach the model SDK.\n',
   )
   process.exit(1)
 }
 
 console.log(
-  `✓ MenuDesk engine boundary intact — ${files.length} file(s) checked, no framework, ` +
-    'database, model, country-data, delivery, or Thai-string dependency.',
+  `✓ MenuDesk boundaries intact — engine ${files.length} file(s): no framework, database, ` +
+    'model, country-data, delivery, or Thai-string dependency; ' +
+    `capture ${captureFiles.length} file(s): no model SDK in the browser bundle.`,
 )

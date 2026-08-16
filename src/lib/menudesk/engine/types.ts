@@ -77,8 +77,16 @@ export interface ReadDish {
   pageId: string
   /** Exactly as printed, in the menu's own language and spelling. */
   nameRaw: string
-  /** Printed selling price, major currency units. */
-  menuPrice: number
+  /**
+   * Printed selling price, major currency units. Null when the dish is legible
+   * but its price is not — a torn corner, a hand-written amendment, a price
+   * column cut off by the photograph's edge.
+   *
+   * Nullable rather than omitted so a priceless dish still reaches the caller
+   * as an UncostedDish ('unreadable_price') instead of vanishing. "We found 24
+   * dishes and could not price 3" is honest; silently reading 21 is not.
+   */
+  menuPrice: number | null
 }
 
 // ── Pass 2: costing the dish ───────────────────────────────────────────────
@@ -167,9 +175,34 @@ export interface AnalyzeMenuInput {
   pages: MenuPageImage[]
 }
 
+/**
+ * A page the vision pass could not read at all. Distinct from an UncostedDish:
+ * nothing was extracted, so we do not know what we missed. Surfaced so the
+ * caller can mark the page `unreadable` and ask for a re-shoot rather than
+ * presenting a partial menu as if it were whole.
+ */
+export interface UnreadablePage {
+  pageId: string
+  /** Diagnostic text, for logs and the retry prompt — never shown raw. */
+  reason: string
+}
+
+/** Counts that make the free tier's economics auditable (Bible §16). */
+export interface AnalyzeMenuStats {
+  pagesRead: number
+  /** Model calls the analysis caused, across both passes. */
+  modelCalls: number
+  /** Distinct dishes answered from the CommonDish cache, with no model call. */
+  cacheHits: number
+  /** Distinct dishes whose recipe the model had to invent. */
+  inferredRecipes: number
+}
+
 export interface AnalyzeMenuResult {
   dishes: DishAnalysis[]
   uncosted: UncostedDish[]
+  unreadablePages: UnreadablePage[]
   /** ISO 4217 code the numbers are denominated in, from the data provider. */
   currencyCode: string
+  stats: AnalyzeMenuStats
 }

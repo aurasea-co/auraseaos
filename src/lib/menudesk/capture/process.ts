@@ -8,7 +8,13 @@
 // Browser-only: canvas and ImageBitmap. The pure analysis it depends on lives
 // in quality.ts and crop.ts, which is where the logic worth unit-testing sits.
 
-import { DEFAULT_MODEL, maxImageEdgeFor } from '@/lib/menudesk/ai'
+// Reaches into ai/models rather than the ai barrel ON PURPOSE. The barrel also
+// exports the port implementations, which import the Anthropic SDK, which
+// imports node:path — pulling that into a browser bundle fails the Next build
+// with an UnhandledSchemeError. models.ts is plain constants and safe anywhere.
+// scripts/check-boundaries.mjs enforces this so the build cannot break on it
+// again; see the note there.
+import { DEFAULT_MODEL, maxImageEdgeFor } from '@/lib/menudesk/ai/models'
 import { contentRect, scaleRect } from './crop'
 import {
   BLUR_METRIC_EDGE_PX,

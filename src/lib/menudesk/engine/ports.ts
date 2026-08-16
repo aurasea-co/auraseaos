@@ -51,6 +51,36 @@ export interface CountryDataProvider {
    * guessing a price and reporting the result as if we knew it.
    */
   getIngredientPrice(ingredientKey: string): Promise<IngredientPrice | null>
+
+  /**
+   * Every ingredient this country can price, with the unit its price is quoted
+   * in. The engine never calls it — a recipe arrives already written.
+   *
+   * It lives on this interface because it is country data and has nowhere
+   * better to be: RecipeInferencePort implementations need the vocabulary to
+   * write recipes IN, or the model invents ingredient keys nothing can price
+   * and every inferred dish comes back uncostable.
+   */
+  listIngredients(): Promise<IngredientVocabularyEntry[]>
+}
+
+/** One ingredient a country can price — the key, and the unit to quantify it in. */
+export interface IngredientVocabularyEntry {
+  ingredientKey: string
+  unit: string
+}
+
+/**
+ * What one model call cost, in tokens. Ports report it; the engine forwards it
+ * to the UsageRecorder. Reported per CALL rather than per port invocation, so a
+ * batched or retried implementation stays auditable call by call.
+ */
+export interface ModelCallUsage {
+  model: string
+  inputTokens: number
+  outputTokens: number
+  /** Tokens served from the prompt cache, billed at the cache-read rate. */
+  cacheReadTokens?: number
 }
 
 /**
@@ -60,19 +90,45 @@ export interface CountryDataProvider {
  * difference at 20–40×, because a page of 30 dishes is one image either way.
  * An implementation that loops per dish is a correctness-neutral, cost-fatal
  * mistake, so the interface does not offer that shape at all.
+ *
+ * Throwing means the page is unreadable; the engine records it as such and
+ * carries on with the remaining pages rather than losing the whole scan.
  */
 export interface MenuVisionPort {
-  readPage(page: MenuPageImage): Promise<ReadDish[]>
+  readPage(page: MenuPageImage): Promise<{ dishes: ReadDish[]; usage: ModelCallUsage[] }>
 }
 
-/** Pass 2 — infer a standard recipe for a dish the CommonDish cache missed. */
+/** One dish the CommonDish cache could not answer. */
+export interface RecipeInferenceRequest {
+  nameRaw: string
+  /** The engine's lookup key — echo it back so results can be re-matched. */
+  nameNormalized: string
+  menuPrice: number
+}
+
+export interface InferredRecipe {
+  /** Must echo the requested `nameNormalized`; unknown keys are discarded. */
+  nameNormalized: string
+  recipe: Recipe
+  confidence: Confidence
+}
+
+/**
+ * Pass 2 — infer standard recipes for the dishes the CommonDish cache missed.
+ *
+ * Takes the whole batch, for the same reason pass 1 takes the whole page: a
+ * per-dish call multiplies the fixed prompt cost by the length of the menu.
+ * The implementation may chunk internally — that is a cost policy, and cost
+ * policy belongs beside the model, not inside the engine.
+ *
+ * A dish absent from the returned array is reported as uncostable rather than
+ * guessed at.
+ */
 export interface RecipeInferencePort {
-  inferRecipe(input: {
-    nameRaw: string
-    nameNormalized: string
-    menuPrice: number
+  inferRecipes(input: {
+    dishes: RecipeInferenceRequest[]
     countryCode: string
-  }): Promise<{ recipe: Recipe; confidence: Confidence } | null>
+  }): Promise<{ recipes: InferredRecipe[]; usage: ModelCallUsage[] }>
 }
 
 /**

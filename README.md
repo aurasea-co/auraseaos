@@ -141,6 +141,43 @@ Thresholds live at the bottom of `capture/quality.ts` with the measurements
 behind them. They are calibrated against synthetic fixtures and want re-tuning
 once real kitchen photos come back from the concierge restaurants.
 
+### The two-pass engine
+
+`analyzeMenu()` (`engine/analyze.ts`) is the whole analysis: hand it pages and a
+set of ports, get costed dishes back.
+
+1. **Read** — one vision call *per page* returns `[dish name, printed price]`.
+   The page, not the dish, is the unit: a page of 30 dishes is one image either
+   way, and a per-dish loop costs 20–40× for identical output.
+2. **Cost** — the CommonDish cache answers what it can; everything it misses
+   goes to the model in *one batched call*, and every recipe is then priced
+   against the country's ingredient table.
+
+Both passes use structured outputs (`output_config.format`) rather than forced
+tool use, and both re-validate every field afterwards: a schema guarantees the
+shape, not the truth. The model can still return a price of 0 or a dish that
+isn't on the page.
+
+Pass 2 is given the country's ingredient keys and told to write recipes only in
+those terms. A dish needing something the table can't price is **omitted** by
+the model and reported as `no_recipe` — substituting a different protein would
+produce a confident wrong cost, which is worse than admitting the gap.
+
+Failure is always local and always reported. An unreadable page doesn't lose
+the scan, a missing ingredient price doesn't lose the dish beside it, and
+nothing is silently dropped: `AnalyzeMenuResult` carries `uncosted` dishes and
+`unreadablePages` alongside the answers.
+
+To run a real menu through it from the terminal:
+
+```bash
+npm run analyze -- path/to/menu.jpg
+```
+
+It prints the ranking worst-first, then what it could not cost, then what the
+run spent. This is the W2 gate — point it at a real café menu and judge whether
+the ranking is believable before any of it reaches an owner.
+
 ### The honesty rule
 
 Free-tier costs are estimated from an inferred recipe priced against market
@@ -152,5 +189,13 @@ one. A single number on screen is a promise we cannot keep.
 ### Build order
 
 W0 scaffold ✅ → W1 anonymous scan + upload ✅ → W2 the two-pass engine and
-`analyze` CLI → **gate: run a real café menu through it and check the ranking
-is believable** → W4–W7 funnel → W8–W9 paid flow and concierge admin.
+`analyze` CLI ✅ → **W3 real reference data — the open gate** → W4–W7 funnel →
+W8–W9 paid flow and concierge admin.
+
+W2's own gate (a menu end to end, ~$0.005 for a 10-dish page) passes on
+mechanism: pages read, prices read, cache hits resolve through aliases, misses
+infer, uncostable dishes are named. It does **not** yet pass on believability —
+every seeded dish comes out red at 45–75% food cost, because `data/th/seed.ts`
+is W0 placeholder pricing with deliberately wide bands, not the real Makro-level
+catalogue. That is exactly what W3 replaces; do not judge the engine's output,
+or show it to a restaurant, until it has real numbers underneath it.
