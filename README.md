@@ -38,10 +38,13 @@ The app runs at http://localhost:3000.
 ## Checks
 
 ```bash
-npm run typecheck && npm run lint && npm run check:boundaries && npm test
+npm run typecheck && npm run lint && npm run check:boundaries && npm run seed:menudesk -- --check && npm test
 ```
 
-`check:boundaries` is not optional — see the MenuDesk section below.
+`check:boundaries` is not optional — see the MenuDesk section below. Neither is
+`npm run build`: the boundary between browser and server code is enforced by
+webpack, and typecheck, lint, and tests all pass while a broken bundle sits in
+the tree.
 
 ## Migrations
 
@@ -178,6 +181,46 @@ It prints the ranking worst-first, then what it could not cost, then what the
 run spent. This is the W2 gate — point it at a real café menu and judge whether
 the ranking is believable before any of it reaches an owner.
 
+### The Thai reference catalogue
+
+`data/th/ingredients.ts` prices ~120 ingredients; `data/th/dishes.ts` holds 100
+curated recipes. Together they are what makes most dishes a free cache lookup
+instead of a model call, and what makes two restaurants comparable — two shops
+selling ผัดกะเพรา should differ on price and portion, not on two different
+guesses the model made on two different days.
+
+Four things about this data are load-bearing:
+
+- **Quantities are as-purchased, and so are prices.** Rice is counted raw
+  (~75g a plate, not 200g cooked). Getting this backwards over-costs every
+  rice dish by about 2.5×.
+- **Every price is a band, and every band has a provenance.** `source` is
+  either `market_survey_2026_08` (read off dated Thai market listings) or
+  `wholesale_estimate` (typical pricing, wider band). Bible §06 puts free-tier
+  accuracy at ±20–40% and says so to the owner: the ranking is trustworthy,
+  the exact baht figure is an estimate.
+- **Recipes are written with `q()`**, which looks the unit up from the price
+  catalogue. Hand-written units are how a recipe ends up asking for 2 "pieces"
+  of something priced per gram, which the engine then refuses to cost.
+- **Aliases carry the match rate.** Matching is exact, against whatever is
+  literally printed, so each dish lists its ข้าว-prefixed form, its common
+  misspelling (กระเพรา for กะเพรา), its transliteration and its English name.
+  `catalogue.test.ts` fails if two dishes ever claim the same spelling — that
+  would silently file one dish's recipe under another.
+
+Re-survey the volatile lines (pork, chicken, eggs, shrimp, chilli, herbs) each
+quarter. Thai protein prices move fast, and a stale catalogue reports a
+confident wrong number.
+
+`npm run seed:menudesk` regenerates
+`supabase/migrations/044_menudesk_th_reference_data.sql` from these files, for
+migration 043's `common_dishes` / `ingredient_prices` tables. TypeScript is the
+source of truth today — it is code-reviewed, needs no round trip while a
+scanner waits, and lets `npm run analyze` work with no database credentials.
+The SQL exists so the concierge admin (W9) can correct data without a deploy;
+at that point the DB becomes authoritative and these files become its
+bootstrap.
+
 ### The honesty rule
 
 Free-tier costs are estimated from an inferred recipe priced against market
@@ -189,13 +232,15 @@ one. A single number on screen is a promise we cannot keep.
 ### Build order
 
 W0 scaffold ✅ → W1 anonymous scan + upload ✅ → W2 the two-pass engine and
-`analyze` CLI ✅ → **W3 real reference data — the open gate** → W4–W7 funnel →
-W8–W9 paid flow and concierge admin.
+`analyze` CLI ✅ → W3 Thai reference data ✅ → **W4–W7 funnel** → W8–W9 paid
+flow and concierge admin.
 
-W2's own gate (a menu end to end, ~$0.005 for a 10-dish page) passes on
-mechanism: pages read, prices read, cache hits resolve through aliases, misses
-infer, uncostable dishes are named. It does **not** yet pass on believability —
-every seeded dish comes out red at 45–75% food cost, because `data/th/seed.ts`
-is W0 placeholder pricing with deliberately wide bands, not the real Makro-level
-catalogue. That is exactly what W3 replaces; do not judge the engine's output,
-or show it to a restaurant, until it has real numbers underneath it.
+The believability gate now passes on a 10-dish café menu at ~$0.006: the
+ranking discriminates (one red, several amber, two green) instead of the
+uniform red wall the placeholder catalogue produced, and the numbers land where
+an owner would expect — a 65฿ กะเพรา at 24–37%, a 60฿ latte at 27–42%, and an
+imported-ingredient carbonara at 120฿ as the one genuine bleeder.
+
+Before this is shown to a real restaurant, someone in Thailand should verify
+the cost-dominant ingredients against actual invoices — see the catalogue
+section above for which entries are surveyed and which are estimated.

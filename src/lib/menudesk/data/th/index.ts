@@ -4,9 +4,15 @@
 // must never mean touching src/lib/menudesk/engine; if it does, the seam has
 // been broken and check-boundaries should have caught it.
 //
-// W0 answers from the in-memory seed in ./seed.ts. W3 swaps the two lookups
-// for reads against `common_dishes` / `ingredient_prices` (migration 043) —
-// both are already async so that change does not ripple outward.
+// The catalogue is TypeScript, not a database read, and that is a deliberate
+// choice rather than a shortcut. It is code-reviewed like anything else, it
+// answers with no round trip while a scanner waits, and `npm run analyze`
+// works on a laptop with no Supabase credentials. `npm run seed:menudesk`
+// generates the equivalent SQL for migration 043's `common_dishes` /
+// `ingredient_prices` tables, so the DB copy exists for the concierge admin
+// (W9) — at which point the DB becomes the source of truth and these files
+// become its bootstrap. Both lookups are already async, so that swap does not
+// ripple outward.
 
 import type {
   CommonDishMatch,
@@ -14,7 +20,8 @@ import type {
   IngredientPrice,
   IngredientVocabularyEntry,
 } from '@/lib/menudesk/engine'
-import { TH_COMMON_DISHES, TH_INGREDIENT_PRICES } from './seed'
+import { TH_COMMON_DISHES } from './dishes'
+import { TH_INGREDIENTS } from './ingredients'
 
 /** Thai script block; used to decide whether to strip Latin-only noise. */
 const THAI_CHAR = /[฀-๿]/
@@ -44,6 +51,34 @@ function stripDecorations(value: string): string {
 }
 
 /**
+ * Words that look like a bracketed aside but are actually the dish.
+ *
+ * Thai café menus price hot and iced separately — "ลาเต้ (ร้อน) 55 / ลาเต้
+ * (เย็น) 65" is two products with two prices and two recipes, since an iced
+ * drink carries a cup of ice and a different milk volume. Stripping the
+ * bracket the way we strip "(พิเศษ)" would collapse them into one dish and
+ * cost the iced one as if it were hot: a confident wrong answer on a menu
+ * section every café in the ICP has.
+ */
+const TEMPERATURE_QUALIFIERS = ['ร้อน', 'เย็น', 'ปั่น', 'hot', 'iced', 'blended', 'frappe']
+
+/**
+ * Re-attach a qualifier that survived in the raw name but was cleaned away —
+ * without duplicating one the cleaned name already carries ("ชาเย็น" must not
+ * become "ชาเย็น เย็น").
+ */
+function preserveTemperature(nameRaw: string, cleaned: string): string {
+  const rawLower = nameRaw.toLowerCase()
+  const cleanedLower = cleaned.toLowerCase()
+
+  const missing = TEMPERATURE_QUALIFIERS.filter(
+    (word) => rawLower.includes(word) && !cleanedLower.includes(word),
+  )
+
+  return missing.length > 0 ? `${cleaned} ${missing.join(' ')}`.trim() : cleaned
+}
+
+/**
  * Normalize a printed dish name to a matching key.
  *
  * Thai is written without spaces between words, so this cannot tokenise the
@@ -60,13 +95,15 @@ export function normalizeThaiDishName(nameRaw: string): string {
     .replace(/[฿]\s*\d[\d,.]*/g, ' ')
     .replace(/\b\d+\s*(?:บาท|baht|thb)\b/gi, ' ')
 
-  const cleaned = stripDecorations(withoutBrackets)
+  const stripped = stripDecorations(withoutBrackets)
     .replace(/[.,;:!?"'`~*_/\\|–—-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 
+  const cleaned = preserveTemperature(nameRaw, stripped)
+
   // Latin names fold to lowercase and join on underscores so they line up with
-  // the canonical keys in seed.ts; Thai has no case, so it is left as written.
+  // the canonical keys in dishes.ts; Thai has no case, so it is left as written.
   return THAI_CHAR.test(cleaned)
     ? cleaned
     : cleaned.toLowerCase().replace(/\s+/g, '_')
@@ -82,8 +119,13 @@ for (const dish of TH_COMMON_DISHES) {
   }
 }
 
+// The seed carries nameLocal and a provenance tag for the admin and the SQL
+// generator; the engine only ever needs the key, the unit, and the band.
 const PRICE_INDEX = new Map<string, IngredientPrice>(
-  TH_INGREDIENT_PRICES.map((p) => [p.ingredientKey, p]),
+  TH_INGREDIENTS.map(({ ingredientKey, unit, price }) => [
+    ingredientKey,
+    { ingredientKey, unit, price },
+  ]),
 )
 
 export const thailandDataProvider: CountryDataProvider = {
@@ -114,6 +156,6 @@ export const thailandDataProvider: CountryDataProvider = {
   },
 
   async listIngredients(): Promise<IngredientVocabularyEntry[]> {
-    return TH_INGREDIENT_PRICES.map(({ ingredientKey, unit }) => ({ ingredientKey, unit }))
+    return TH_INGREDIENTS.map(({ ingredientKey, unit }) => ({ ingredientKey, unit }))
   },
 }

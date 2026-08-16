@@ -10,7 +10,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "check:boundaries": "node scripts/check-boundaries.mjs",
-    "analyze": "node --env-file-if-exists=.env.local --import tsx scripts/analyze-menu.ts"
+    "analyze": "node --env-file-if-exists=.env.local --import tsx scripts/analyze-menu.ts",
+    "seed:menudesk": "node --import tsx scripts/generate-menudesk-seed.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
