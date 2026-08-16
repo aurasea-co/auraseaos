@@ -537,6 +537,31 @@
       "branch_not_found": "Branch not found."
     }
   },
+  "scan": {
+      "headline": "Which of your dishes is losing money?",
+      "subhead": "Photograph your menu. Results in 2 minutes — nothing to fill in, no sign-up.",
+      "cta": "Photograph your menu",
+      "estimateBadge": "Estimate",
+      "estimateNote": "These figures are estimated from market ingredient prices, not your restaurant's actual costs.",
+      "readingPages": "Reading {count} dishes…",
+      "resultTitle": "Menu analysis",
+      "comingSoon": "This step is still being built",
+      "addPhotos": "Add menu photos",
+      "addMore": "Add another",
+      "pagesReady": "{count} ready",
+      "analyse": "Analyse my menu",
+      "remove": "Remove",
+      "checking": "Checking photo…",
+      "uploadingPage": "Uploading {done}/{total}",
+      "rejectTooSmall": "That photo is too small to read the text. Try again a bit closer.",
+      "rejectBlank": "No menu visible in that one. Point at the page and try again.",
+      "rejectBlurred": "That one came out blurry. Hold the phone steady and retake it.",
+      "rejectDuplicate": "That's the same page you already captured.",
+      "rejectUnreadable": "Couldn't open that photo. Try taking it again.",
+      "uploadFailed": "Upload failed. Please try again.",
+      "retry": "Try again",
+      "hintGoodLight": "Capture the whole page with the text in focus — low light is fine."
+    },
   "menudesk": {
     "title": "MenuDesk",
     "demand_calendar": "30-day demand calendar",

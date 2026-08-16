@@ -58,6 +58,16 @@ const config: Config = {
             light: '#AFA9EC',
             mist: '#EEEDFE',
           },
+          // MenuDesk's public scan funnel (menudesk.ai) has its own palette,
+          // from the Bible's W0 brief. Scoped under `menudesk` rather than
+          // replacing the AuraSea tokens above, because the two surfaces run
+          // side by side: the authenticated app stays AuraSea teal, and only
+          // the anonymous funnel wears these.
+          menudesk: {
+            navy: '#0A3D52',
+            green: '#10B981',
+            purple: '#7C3AED',
+          },
         },
       },
     },

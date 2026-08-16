@@ -278,6 +278,51 @@ export type Database = {
         }
         Update: Record<string, unknown>
       }
+      // MenuDesk scan funnel — migration 043.
+      menu_scans: {
+        Row: {
+          id: string
+          owner_user_id: string
+          identity_id: string | null
+          branch_id: string | null
+          country_code: string
+          status: 'uploading' | 'reading' | 'costing' | 'complete' | 'partial' | 'failed'
+          unlocked_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          owner_user_id: string
+          country_code?: string
+          status?: 'uploading' | 'reading' | 'costing' | 'complete' | 'partial' | 'failed'
+          branch_id?: string | null
+          identity_id?: string | null
+        }
+        Update: Record<string, unknown>
+        Relationships: []
+      }
+      menu_scan_pages: {
+        Row: {
+          id: string
+          scan_id: string
+          storage_path: string
+          page_index: number
+          status: 'pending' | 'read' | 'unreadable'
+          failure_reason: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          scan_id: string
+          storage_path: string
+          page_index: number
+          status?: 'pending' | 'read' | 'unreadable'
+          failure_reason?: string | null
+        }
+        Update: Record<string, unknown>
+        Relationships: []
+      }
     }
     Views: {
       branch_status_current: { Row: Record<string, unknown> }

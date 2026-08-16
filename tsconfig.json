@@ -1,5 +1,11 @@
 {
   "compilerOptions": {
+    // Was unset, which defaults tsc to ES5 and makes BigInt literals a type
+    // error. The MenuDesk capture pipeline uses a 64-bit BigInt perceptual hash
+    // to spot duplicate menu pages. Type-checking only — `noEmit` is on and
+    // Next compiles with SWC against its own browser targets, so this changes
+    // no output. BigInt has been available in every browser since 2020.
+    "target": "ES2020",
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
     "skipLibCheck": true,

@@ -29,6 +29,24 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
+  // MenuDesk's scan funnel (Bible §04) is anonymous by design — no login, no
+  // fields, because every field added there loses users. Its routes skip all
+  // the checks below: the session gate, the suspension lookup, and the
+  // superadmin guard each assume a member of an organization, which a stranger
+  // photographing their menu is not.
+  const scanPaths = ['/scan', '/r/']
+  if (scanPaths.some((path) => request.nextUrl.pathname.startsWith(path))) {
+    return supabaseResponse
+  }
+
+  // Those scans sign in via supabase.auth.signInAnonymously(), so RLS can scope
+  // rows by auth.uid() instead of reaching for a service-role client
+  // (migration 043). The cost is a real auth.users row with no memberships,
+  // which would otherwise satisfy the `!user` gate below and land an anonymous
+  // visitor in the app shell with an empty branch list. Outside the funnel, an
+  // anonymous session counts as logged out.
+  const appUser = user?.is_anonymous ? null : user
+
   // Public routes that don't require auth
   const publicPaths = [
     '/login',
@@ -46,7 +64,7 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith(path)
   )
 
-  if (!user && !isPublicPath) {
+  if (!appUser && !isPublicPath) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
@@ -56,7 +74,7 @@ export async function updateSession(request: NextRequest) {
   // when present (used by /api/line/link and the /join wrongAccount
   // re-login path) so the deep-link completes instead of dumping the
   // user on /home.
-  if (user && request.nextUrl.pathname === '/login') {
+  if (appUser && request.nextUrl.pathname === '/login') {
     const returnTo = request.nextUrl.searchParams.get('returnTo')
     const url = request.nextUrl.clone()
     // Same-origin only — anything not starting with a single '/' is
@@ -75,7 +93,7 @@ export async function updateSession(request: NextRequest) {
   // Suspension check — if the user has memberships but ALL of them
   // have is_active = false, send them to /suspended. We allow a few
   // escape hatches so they can still see their status and log out.
-  if (user) {
+  if (appUser) {
     const allowedWhileSuspended = (path: string) =>
       path === '/suspended' ||
       path === '/login' ||
@@ -94,11 +112,11 @@ export async function updateSession(request: NextRequest) {
         serviceClient
           .from('organization_members')
           .select('is_active')
-          .eq('user_id', user.id),
+          .eq('user_id', appUser.id),
         serviceClient
           .from('branch_members')
           .select('is_active')
-          .eq('user_id', user.id),
+          .eq('user_id', appUser.id),
       ])
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -120,7 +138,7 @@ export async function updateSession(request: NextRequest) {
 
   // Superadmin route guard — silent redirect to /login if not super_admin
   if (request.nextUrl.pathname.startsWith('/superadmin')) {
-    if (!user) {
+    if (!appUser) {
       const url = request.nextUrl.clone()
       url.pathname = '/login'
       return NextResponse.redirect(url)
@@ -134,7 +152,7 @@ export async function updateSession(request: NextRequest) {
     const { data } = await serviceClient
       .from('platform_admins')
       .select('role')
-      .eq('user_id', user.id)
+      .eq('user_id', appUser.id)
       .single()
 
     if (!data || data.role !== 'super_admin') {
