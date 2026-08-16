@@ -59,8 +59,11 @@ tracks which have run — check the tables before assuming.
 - **Money is THB integers.** No satang, no floats. See `AURASEA_HOUSE_STYLE.md`.
   Columns that can genuinely be fractional (per-gram ingredient prices, per-dish
   costs) are `numeric`; whole-baht values are `integer`.
-- **`supabaseAdmin` (service role) is restricted** to `/app/superadmin/**` and
-  the LINE approve endpoint. Everywhere else, use the RLS user client.
+- **`supabaseAdmin` (service role) is restricted** to `/app/superadmin/**`, the
+  LINE approve endpoint, and `lib/menudesk/analysis/run-scan.ts`. Everywhere
+  else, use the RLS user client. The third one is forced by migration 043,
+  which denies clients any write to the analysis tables so a scanner cannot
+  forge a green menu; ownership is still proven with the user client first.
 - **Managers never see Total Revenue.** `canSeeRevenue(role)` gates every page
   and export.
 - Column names that have burned people: `branches.organization_id` (not
@@ -221,6 +224,37 @@ The SQL exists so the concierge admin (W9) can correct data without a deploy;
 at that point the DB becomes authoritative and these files become its
 bootstrap.
 
+### The blurred result, and why the blur is not a CSS filter
+
+`/r/[scanId]` shows how many dishes are bleeding and never which — Bible §04's
+curiosity gap, and the reason the phone number in W5 is worth giving.
+
+The obvious way to build that is to send the real ranking and put `blur()` over
+it. That is not a gap: it is the whole answer sitting in the DOM, one devtools
+panel away, and the first person to notice has a screenshot that ends every
+claim this product makes about honesty.
+
+So the redaction happens on the server. `BlurredScanSummary`
+(`analysis/summary.ts`) has no field that can carry a dish name, a price, or a
+percentage — `rows` is a bare array of traffic-light colours, deliberately not
+an array of objects, because an object grows a `name` field the first time
+someone is in a hurry. `GET /api/menudesk/scan/[scanId]/analyze` returns that
+and nothing else. The blur in `BlurredRanking.tsx` is a visual treatment on
+empty placeholder bars, and their widths are cycled from a constant rather than
+derived from the real names — varying a redaction bar by the length of what it
+hides is a classic leak.
+
+Two smaller decisions worth keeping:
+
+- **The analysis is claimed with a conditional status update.** Two tabs, a
+  double tap, and a retry after a slow response all race to start the same
+  scan; the update is the lock, and the loser gets `already_running` instead of
+  a second model bill on a free scan.
+- **404 means both "no such scan" and "not yours".** Indistinguishable on
+  purpose, so the endpoint cannot be used to probe for real scan ids — and the
+  poller treats it as terminal rather than retrying a scan that will never
+  appear.
+
 ### The honesty rule
 
 Free-tier costs are estimated from an inferred recipe priced against market
@@ -232,8 +266,15 @@ one. A single number on screen is a promise we cannot keep.
 ### Build order
 
 W0 scaffold ✅ → W1 anonymous scan + upload ✅ → W2 the two-pass engine and
-`analyze` CLI ✅ → W3 Thai reference data ✅ → **W4–W7 funnel** → W8–W9 paid
-flow and concierge admin.
+`analyze` CLI ✅ → W3 Thai reference data ✅ → W4 blurred result ✅ →
+**W5 phone/LINE unlock** → W6–W7 full result and paywall → W8–W9 paid flow and
+concierge admin.
+
+**Nothing in this funnel runs against the live database yet.** Migration 043
+has never been applied — none of the scan tables exist in Supabase — so W1's
+upload, W4's analysis route, and everything after it are verified by tests,
+build, and component-level checks only. Applying 043 and enabling anonymous
+sign-ins is the gate for the first real end-to-end run.
 
 The believability gate now passes on a 10-dish café menu at ~$0.006: the
 ranking discriminates (one red, several amber, two green) instead of the

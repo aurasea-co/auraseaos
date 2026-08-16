@@ -189,6 +189,55 @@ for (const file of captureFiles) {
   }
 }
 
+// ── Third boundary: server-only modules stay out of client components ─────
+//
+// A 'use client' file that imports the service-role client or anything that
+// reaches the model SDK ships server code to the browser. The Anthropic SDK
+// fails the webpack build outright (node:path), which at least is loud; the
+// service client fails quietly, with a key-shaped hole where the key was.
+// Neither belongs in a bundle, and neither is caught by typecheck or tests.
+
+const CLIENT_ROOTS = ['src/app', 'src/components'].map((dir) => join(REPO_ROOT, dir))
+
+const SERVER_ONLY_IMPORTS = [
+  {
+    test: (s) => s.startsWith('@/lib/supabase/service'),
+    why: 'the service-role client is server-only — use @/lib/supabase/client in a component',
+  },
+  {
+    test: (s) => s.startsWith('@/lib/menudesk/analysis/run-scan'),
+    why: 'the scan pipeline calls the model and the service role — reach it through its API route',
+  },
+  {
+    test: (s) => s.startsWith('@anthropic-ai/') || s.startsWith('@/lib/ai/'),
+    why: 'model calls belong on the server',
+  },
+]
+
+let clientFileCount = 0
+
+for (const root of CLIENT_ROOTS) {
+  for (const file of walk(root)) {
+    const source = readFileSync(file, 'utf8')
+    // The directive has to be the first statement, so it is always near the
+    // top; checking the whole file would match it inside a comment.
+    if (!/^\s*(['"])use client\1/m.test(source.slice(0, 400))) continue
+
+    clientFileCount++
+    const rel = relative(REPO_ROOT, file)
+    const lines = source.split('\n')
+
+    for (const [i, line] of lines.entries()) {
+      SPECIFIER_RE.lastIndex = 0
+      let match
+      while ((match = SPECIFIER_RE.exec(line)) !== null) {
+        const rule = SERVER_ONLY_IMPORTS.find((r) => r.test(match[1]))
+        if (rule) violations.push(`${rel}:${i + 1}  imports '${match[1]}' — ${rule.why}`)
+      }
+    }
+  }
+}
+
 if (violations.length > 0) {
   console.error(`✗ MenuDesk boundary violated (${violations.length}):\n`)
   for (const v of violations) console.error(`  ${v}`)
@@ -203,5 +252,6 @@ if (violations.length > 0) {
 console.log(
   `✓ MenuDesk boundaries intact — engine ${files.length} file(s): no framework, database, ` +
     'model, country-data, delivery, or Thai-string dependency; ' +
-    `capture ${captureFiles.length} file(s): no model SDK in the browser bundle.`,
+    `capture ${captureFiles.length} file(s): no model SDK in the browser bundle; ` +
+    `${clientFileCount} client component(s): no server-only imports.`,
 )
